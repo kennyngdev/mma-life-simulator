@@ -413,6 +413,7 @@ describe('拳途人生模擬核心', () => {
     expect(state.phase).toBe('round-result')
     expect(state.fight!.beatHistory).toHaveLength(4)
     expect(state.fight!.scores).toHaveLength(1)
+    expect(state.fight!.position).toBe('range')
   })
 
   it('終結機會越好，進攻小遊戲的容錯單調增加', () => {

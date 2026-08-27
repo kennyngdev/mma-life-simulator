@@ -1119,6 +1119,7 @@ function finishRound(state: GameState): GameState {
   const playerScore = difference >= 0 ? 10 : Math.abs(difference) > 18 ? 8 : 9
   const opponentScore = difference <= 0 ? 10 : Math.abs(difference) > 18 ? 8 : 9
   fight.scores.push({ round: fight.round, player: playerScore, opponent: opponentScore, note: `有效攻擊 ${fight.playerEffective}–${fight.opponentEffective}，控制 ${fight.playerControl}–${fight.opponentControl}。${Math.abs(difference) > 18 ? '一方形成明顯差距。' : '回合差距有限。'}` })
+  fight.position = 'range'
   fight.cornerAdjustment = undefined
   fight.cornerTarget = undefined
   fight.commentary.push(`回合結束。場邊暫估 ${playerScore}–${opponentScore}。`)
