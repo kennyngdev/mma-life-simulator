@@ -1,0 +1,213 @@
+import { z } from 'zod'
+import type { Branch, Motive, Region, TechniqueNode } from './types'
+
+export const REGION_LABELS: Record<Region, string> = {
+  'hong-kong': '香港',
+  taiwan: '台灣',
+  mainland: '中國大陸',
+}
+
+export const MOTIVES: Record<Motive, { name: string; description: string }> = {
+  family: { name: '為家人而戰', description: '你最在意的是收入和對家人的承諾，不是名氣。' },
+  prove: { name: '證明自己', description: '越是被看衰，你越想打一場讓人閉嘴的比賽。' },
+  honor: { name: '守住拳館', description: '教練、隊友和拳館的招牌，都比個人得失重要。' },
+  fame: { name: '站上聚光燈', description: '你想打出名堂，接下最受矚目的比賽。' },
+}
+
+export const BRANCH_META: Record<Branch, { name: string; short: string; accent: string }> = {
+  boxing: { name: '拳擊', short: '拳', accent: '#e45c3b' },
+  kicking: { name: '踢擊', short: '踢', accent: '#d69335' },
+  clinch: { name: '纏抱', short: '抱', accent: '#3f9e92' },
+  wrestling: { name: '摔投', short: '摔', accent: '#5b82c6' },
+  ground: { name: '地戰', short: '地', accent: '#8f67b6' },
+}
+
+export const TECHNIQUE_AFFINITIES: Array<{ from: Branch; to: Branch; label: string; bonus: number; hybridNode?: string }> = [
+  { from: 'boxing', to: 'kicking', label: '拳路迫使防守抬高，踢擊趁隙進入', bonus: 7, hybridNode: 'hybrid-range' },
+  { from: 'kicking', to: 'boxing', label: '踢擊牽制重心，拳路接續命中', bonus: 6, hybridNode: 'hybrid-pressure' },
+  { from: 'boxing', to: 'wrestling', label: '拳擊掩護變換高度', bonus: 6 },
+  { from: 'kicking', to: 'clinch', label: '踢擊迫使對手收窄站姿', bonus: 5, hybridNode: 'hybrid-pressure' },
+  { from: 'clinch', to: 'wrestling', label: '上身控制接續摔投', bonus: 8, hybridNode: 'hybrid-cage' },
+  { from: 'wrestling', to: 'clinch', label: '抱摔威脅讓內勾更容易建立', bonus: 5, hybridNode: 'hybrid-cage' },
+  { from: 'wrestling', to: 'ground', label: '抱摔落地直接銜接地面控制', bonus: 9, hybridNode: 'hybrid-ground-pound' },
+  { from: 'ground', to: 'wrestling', label: '地面轉位創造重新站起或掃摔的角度', bonus: 5, hybridNode: 'hybrid-sub-hunter' },
+]
+
+export const BACKGROUNDS: Array<{
+  id: string
+  name: string
+  description: string
+  primary: Branch
+  secondary: Branch
+  startingNodes?: [string, string]
+}> = [
+  { id: 'boxing', name: '業餘拳擊手', description: '腳步扎實，出拳俐落，但一被拖到地面就無所適從。', primary: 'boxing', secondary: 'clinch' },
+  { id: 'sanda', name: '散打校隊', description: '你會踢、會打，也熟悉接腿後的摔法。', primary: 'kicking', secondary: 'wrestling' },
+  { id: 'muay-thai', name: '泰拳館少年', description: '你不怕近身硬拚，通常會用膝和肘回敬對手。', primary: 'kicking', secondary: 'clinch' },
+  { id: 'wrestling', name: '自由式摔跤選手', description: '壓低重心、連續進腿和控制對手已成習慣；現在該學的是站立打擊與降服。', primary: 'wrestling', secondary: 'ground', startingNodes: ['wrestle-sprawl', 'wrestle-double'] },
+  { id: 'judo', name: '柔道黑帶新秀', description: '你很會讓對手失去平衡，但沒有道服可抓時，一切都得重新適應。', primary: 'clinch', secondary: 'wrestling' },
+  { id: 'bjj', name: '巴西柔術選手', description: '你熟悉防守架、轉位與各種降服；難的是如何先把對手拖到地面。', primary: 'ground', secondary: 'wrestling', startingNodes: ['ground-posture', 'ground-guard'] },
+]
+
+export const WEIGHT_CLASSES = [
+  { name: '雛量級', limit: 61.2 },
+  { name: '羽量級', limit: 65.8 },
+  { name: '輕量級', limit: 70.3 },
+  { name: '次中量級', limit: 77.1 },
+  { name: '中量級', limit: 83.9 },
+  { name: '輕重量級', limit: 93 },
+] as const
+
+export const REGION_NAMES: Record<Region, { given: string[]; family: string[] }> = {
+  'hong-kong': {
+    family: ['陳', '李', '梁', '黃', '周', '何', '郭', '鄧', '張', '劉', '羅', '許', '謝', '馮', '葉', '蘇', '潘', '馬', '蔡', '杜'],
+    given: ['家朗', '俊熙', '柏謙', '梓峰', '皓然', '天佑', '子健', '浩文', '卓賢', '嘉俊', '逸朗', '樂軒', '晉希', '啟文', '駿謙', '諾言', '朗賢', '志恆', '偉霆', '文皓'],
+  },
+  taiwan: {
+    family: ['林', '陳', '張', '王', '黃', '吳', '許', '江', '蔡', '楊', '劉', '鄭', '謝', '郭', '洪', '邱', '曾', '廖', '賴', '徐'],
+    given: ['致遠', '子翔', '柏勳', '冠廷', '承恩', '曜宇', '家豪', '維哲', '昱辰', '品睿', '彥廷', '宇謙', '哲維', '奕翔', '宗翰', '俊傑', '秉宸', '威廷', '祐嘉', '凱翔'],
+  },
+  mainland: {
+    family: ['王', '李', '張', '劉', '趙', '孫', '高', '馬', '陳', '楊', '黃', '周', '吳', '徐', '胡', '朱', '郭', '何', '羅', '宋'],
+    given: ['昊然', '宇航', '子軒', '博文', '俊傑', '天宇', '浩然', '振東', '澤宇', '嘉豪', '明軒', '凱文', '睿哲', '承宇', '景程', '逸凡', '皓軒', '鵬飛', '志遠', '文博'],
+  },
+}
+
+export const OPPONENT_NATIONALITIES: Record<Region, string> = {
+  'hong-kong': '香港',
+  taiwan: '台灣',
+  mainland: '中國',
+}
+
+export const INTERNATIONAL_OPPONENTS: Array<{ name: string; nationality: string }> = [
+  { name: 'Marco Silva', nationality: '巴西' },
+  { name: 'Lucas Ferreira', nationality: '巴西' },
+  { name: 'Rafael Nunes', nationality: '巴西' },
+  { name: 'Thiago Almeida', nationality: '巴西' },
+  { name: 'Ren Sato', nationality: '日本' },
+  { name: 'Kenji Mori', nationality: '日本' },
+  { name: 'Daichi Tanaka', nationality: '日本' },
+  { name: 'Yuto Nakamura', nationality: '日本' },
+  { name: 'Dae-Hyun Park', nationality: '南韓' },
+  { name: 'Min-Jun Kim', nationality: '南韓' },
+  { name: 'Ji-Ho Lee', nationality: '南韓' },
+  { name: 'Seong-Hun Choi', nationality: '南韓' },
+  { name: 'Arman Petrov', nationality: '俄羅斯' },
+  { name: 'Mikhail Volkov', nationality: '俄羅斯' },
+  { name: 'Timur Sadykov', nationality: '哈薩克' },
+  { name: 'Azamat Bekov', nationality: '吉爾吉斯' },
+  { name: 'Noah Williams', nationality: '美國' },
+  { name: 'Eli Turner', nationality: '美國' },
+  { name: 'Malik Johnson', nationality: '美國' },
+  { name: 'Connor Hayes', nationality: '美國' },
+  { name: 'Rafiq Hasan', nationality: '孟加拉' },
+  { name: 'Arjun Mehta', nationality: '印度' },
+  { name: 'Aditya Rao', nationality: '印度' },
+  { name: 'Fahad Rahman', nationality: '巴基斯坦' },
+  { name: 'Diego Costa', nationality: '葡萄牙' },
+  { name: 'Tomas Varga', nationality: '匈牙利' },
+  { name: 'Jakub Nowak', nationality: '波蘭' },
+  { name: 'Mateo Ruiz', nationality: '西班牙' },
+  { name: 'Omar Haddad', nationality: '黎巴嫩' },
+  { name: 'Karim Mansour', nationality: '埃及' },
+  { name: 'Youssef Amrani', nationality: '摩洛哥' },
+  { name: 'Amir Hosseini', nationality: '伊朗' },
+  { name: 'Somchai Kietchai', nationality: '泰國' },
+  { name: 'Niran Saelim', nationality: '泰國' },
+  { name: 'Anurak Boonmee', nationality: '泰國' },
+  { name: 'Krit Srisuk', nationality: '泰國' },
+  { name: 'Nguyen Minh Quan', nationality: '越南' },
+  { name: 'Tran Duc Anh', nationality: '越南' },
+  { name: 'Iko Pratama', nationality: '印尼' },
+  { name: 'Dimas Saputra', nationality: '印尼' },
+  { name: 'Aiman Iskandar', nationality: '馬來西亞' },
+  { name: 'Farid Hakim', nationality: '馬來西亞' },
+  { name: 'Liam O’Connor', nationality: '愛爾蘭' },
+  { name: 'Callum Fraser', nationality: '英國' },
+  { name: 'Jack Bennett', nationality: '澳洲' },
+  { name: 'Wiremu Rangi', nationality: '紐西蘭' },
+  { name: 'Bastien Moreau', nationality: '法國' },
+  { name: 'Luca Romano', nationality: '義大利' },
+]
+
+function makeNode(
+  id: string,
+  name: string,
+  branch: TechniqueNode['branch'],
+  tier: 1 | 2 | 3,
+  kind: TechniqueNode['kind'],
+  description: string,
+  effect: string,
+  prerequisites: string[],
+  unlockKey: string,
+  extras: Partial<TechniqueNode> = {},
+): TechniqueNode {
+  return { id, name, branch, tier, cost: tier, kind, description, effect, prerequisites, unlockKey, ...extras }
+}
+
+export const TECHNIQUE_NODES: TechniqueNode[] = [
+  makeNode('box-foot-jab', '刺拳切角', 'boxing', 1, 'foundation', '反覆練習刺拳與橫移，讓自己打中後能迅速離開正面。', '刺拳後切角更容易成功，失手時也較能保持距離。', [], 'jab-exit'),
+  makeNode('box-body-work', '重擊軀幹', 'boxing', 1, 'chain', '把拳頭送進對手的腹部與肋部，削弱後半場的體力。', '打中時會額外消耗對手體力。', ['box-foot-jab'], 'body-work'),
+  makeNode('box-cross-counter', '後手迎擊', 'boxing', 2, 'response', '抓準對手逼近的時機，用後手重拳迎面截擊。', '受壓迫時可以反擊，趁機拉開距離。', ['box-foot-jab'], 'cross-counter', { evidence: { key: 'fights', amount: 2, label: '完成 2 場比賽' } }),
+  makeNode('box-cage-combo', '籠邊連擊', 'boxing', 2, 'chain', '對手背靠鐵網時連續出拳，不給他喘息或逃走的機會。', '在籠邊打中後，可以繼續壓制對手。', ['box-body-work'], 'cage-combo'),
+  makeNode('box-pull-counter', '重擺拳', 'boxing', 3, 'response', '放棄一部分防守，把全身重量集中到弧線重拳。', '解鎖高傷害、高耗能的重擺拳。', ['box-cross-counter'], 'haymaker', { evidence: { key: 'knockdowns', amount: 1, label: '生涯擊倒對手 1 次' }, tradeoff: '揮空會大量消耗體力，也會暴露反擊空間。' }),
+  makeNode('box-volume-trap', '節奏變化', 'boxing', 3, 'style', '用固定節奏誘使對手習慣，再突然改變連擊的收尾。', '以拳擊為主攻時更加穩定，打滿回合也比較省力。', ['box-cage-combo', 'box-pull-counter'], 'volume-trap', { tradeoff: '出拳量增加，雙手也更容易受傷。' }),
+
+  makeNode('kick-low', '低掃牽制', 'kicking', 1, 'foundation', '練好低掃的時機與重心，出腳時不再輕易失去平衡。', '低掃更容易命中，也較不會因此遭到反擊或抱摔。', [], 'low-kick'),
+  makeNode('kick-front', '前踢控距', 'kicking', 1, 'response', '反覆練習出腳時機，確保踢完後能穩穩站住。', '用前踢拉開距離時更加穩定，也比較省力。', ['kick-low'], 'front-kick'),
+  makeNode('kick-body', '重踢軀幹', 'kicking', 2, 'chain', '先用拳吸引防守，再重踢對手的軀幹。', '軀幹傷害更高，後半場也更容易取得體力優勢。', ['kick-low'], 'body-kick', { evidence: { key: 'fights', amount: 2, label: '完成 2 場比賽' } }),
+  makeNode('kick-catch-counter', '超人拳', 'kicking', 2, 'response', '用抬膝假動作讓對手預判踢擊，再突然躍進出拳。', '解鎖跨越遠距的超人拳，成功時能造成顯著傷害。', ['kick-front'], 'superman-punch'),
+  makeNode('kick-high-setup', '高踢佈局', 'kicking', 3, 'chain', '先反覆攻擊軀幹，等對手降低防守後再踢向頭部。', '對手軀幹受創後，高踢終結的機會更大。', ['kick-body'], 'high-kick', { evidence: { key: 'knockdowns', amount: 1, label: '生涯擊倒對手 1 次' }, tradeoff: '一旦被看穿，可能遭到抱摔。' }),
+  makeNode('kick-flow', '三路踢擊', 'kicking', 3, 'style', '在低、中、高三個位置之間靈活變換攻擊。', '對手更難只靠一種防守化解你的踢擊。', ['kick-catch-counter', 'kick-high-setup'], 'kick-flow', { tradeoff: '大量踢擊會加重膝腿負擔。' }),
+
+  makeNode('clinch-frame', '框架防守', 'clinch', 1, 'foundation', '練好頭位與前臂支撐，在纏抱中替自己撐出空間。', '更容易撐開對手，從纏抱中脫身。', [], 'clinch-frame'),
+  makeNode('clinch-knee', '近身膝擊', 'clinch', 1, 'chain', '控制住對手的頭位後，以膝擊持續傷害軀幹。', '取得纏抱優勢時，可以用膝擊造成傷害。', ['clinch-frame'], 'clinch-knee'),
+  makeNode('clinch-underhook', '內勾爭位', 'clinch', 2, 'response', '用內勾配合頭位，重新奪回纏抱中的控制權。', '更容易搶到內勾，也更容易在籠邊與對手交換位置。', ['clinch-frame'], 'underhook', { evidence: { key: 'cageMinutes', amount: 2, label: '累積 2 分鐘籠邊控制' } }),
+  makeNode('clinch-elbow', '近身短肘', 'clinch', 2, 'chain', '在狹窄空間用短肘切開防守，也可能劃傷對手。', '近身擊中時更有機會迫使裁判終止比賽。', ['clinch-knee'], 'short-elbow'),
+  makeNode('clinch-trip', '內圍絆摔', 'clinch', 3, 'chain', '控制住對手的上半身，再看準時機絆開他的支撐腳。', '貼身絆摔更容易成功，摔倒對手後也能守穩上位。', ['clinch-underhook'], 'clinch-trip', { evidence: { key: 'takedowns', amount: 3, label: '完成 3 次抱摔' } }),
+  makeNode('clinch-grind', '壓迫纏抱', 'clinch', 3, 'style', '每次纏抱都把重量壓在對手身上，慢慢耗掉他的力氣。', '籠邊控制更有效，也更能消耗對手體力。', ['clinch-elbow', 'clinch-trip'], 'clinch-grind', { tradeoff: '遠距離的進攻能力會成長得比較慢。' }),
+
+  makeNode('wrestle-sprawl', '下壓防摔', 'wrestling', 1, 'response', '反覆練習髖部後撤與重心下壓，讓防摔成為本能反應。', '更容易擋住抱摔，成功後也能迅速拉開距離。', [], 'sprawl'),
+  makeNode('wrestle-double', '雙腿抱摔', 'wrestling', 1, 'foundation', '改善壓低身體、切入的角度，以及抱住雙腿後的收尾。', '雙腿抱摔更容易成功，失敗時也比較不耗體力。', ['wrestle-sprawl'], 'double-leg'),
+  makeNode('wrestle-chain', '連鎖摔法', 'wrestling', 2, 'chain', '第一個摔法被擋住後，立刻換方向接上另一招。', '抱摔失敗時，可以馬上換招再試一次。', ['wrestle-double'], 'chain-wrestle', { evidence: { key: 'takedowns', amount: 2, label: '完成 2 次抱摔' } }),
+  makeNode('wrestle-wall', '籠邊抱摔', 'wrestling', 2, 'chain', '用頭位和腰控壓住對手，再突然換方向將他摔倒。', '籠邊抱摔更容易成功，摔倒對手後也能守穩上位。', ['wrestle-double'], 'wall-takedown'),
+  makeNode('wrestle-mat-return', '抱腰回摔', 'wrestling', 3, 'response', '對手試圖起身時繼續抱住腰部，再次將他摔回地面。', '更不容易失去上位控制。', ['wrestle-chain'], 'mat-return', { evidence: { key: 'takedowns', amount: 5, label: '完成 5 次抱摔' } }),
+  makeNode('wrestle-pressure', '連續進腿', 'wrestling', 3, 'style', '一次又一次切入抱摔，逼得對手只能忙著防守。', '以摔法為主攻時，可以更頻繁地變換招式。', ['wrestle-wall', 'wrestle-mat-return'], 'wrestle-pressure', { tradeoff: '進腿一旦失敗，會消耗大量體力。' }),
+
+  makeNode('ground-posture', '穩住上位', 'ground', 1, 'foundation', '練好髖部、頭位和平衡，在上位不再輕易被對手掀翻。', '上位控制更加穩定，也能更安全地出拳。', [], 'top-posture'),
+  makeNode('ground-guard', '封閉式防守', 'ground', 1, 'response', '改善下位的防守架與腿部控制，必要時也能主動把對手拉進防守架。', '封閉式防守更加穩定，主動拉防守失敗時的代價也會降低。', ['ground-posture'], 'closed-guard'),
+  makeNode('ground-escape', '籠邊起身', 'ground', 2, 'response', '反覆練習背靠鐵網起身，同時護住頭部避免挨打。', '貼籠起身更容易成功，過程中受到的傷害也會降低。', ['ground-guard'], 'wall-walk', { evidence: { key: 'bottomEscapes', amount: 1, label: '從下位脫困 1 次' } }),
+  makeNode('ground-arm', '十字架控制', 'ground', 2, 'chain', '用腿固定一側手臂，再以手臂控制頭部，形成十字架上位。', '學會十字架控制後，可以持續打擊對手，甚至迫使裁判終止比賽。', ['ground-posture'], 'crucifix'),
+  makeNode('ground-submission', '下位降服', 'ground', 3, 'response', '被壓制時，以三角鎖或十字固突然反攻。', '從下位嘗試降服時更容易成功，並能累積這項技術的精通。', ['ground-escape'], 'bottom-submission', { evidence: { key: 'bottomEscapes', amount: 2, label: '從下位脫困 2 次' }, tradeoff: '失敗時可能連防守位置都保不住。' }),
+  makeNode('ground-hunter', '控位獵手', 'ground', 3, 'style', '不急著收尾，先一步步封死對手的每條退路。', '在上位轉換位置與連接降服時更加穩定。', ['ground-arm', 'ground-submission'], 'position-hunter', { tradeoff: '只顧著控制，可能因進攻不夠積極而輸掉回合。' }),
+
+  makeNode('hybrid-range', '遠距反擊', 'hybrid', 3, 'style', '結合刺拳的腳步與前踢的控距，在外圍誘使對手撲空。', '保持距離時，反擊和脫身都更有效率。', ['box-cross-counter', 'kick-front'], 'style-range', { tradeoff: '不擅長主動追趕後退的對手。' }),
+  makeNode('hybrid-pressure', '全距壓迫', 'hybrid', 3, 'style', '從踢擊一路逼近到纏抱，不給對手任何安全距離。', '無論距離如何變化，都能繼續向前施壓。', ['kick-body', 'clinch-knee'], 'style-pressure', { tradeoff: '整場維持壓迫會消耗更多體力。' }),
+  makeNode('hybrid-cage', '籠邊壓制', 'hybrid', 3, 'style', '用上半身控制配合籠邊摔法，一步步封死對手的選擇。', '在籠邊可以順暢連接控制、打擊與摔法。', ['clinch-underhook', 'wrestle-wall'], 'style-cage', { tradeoff: '回到場中央後，站立攻防會比較笨重。' }),
+  makeNode('hybrid-sprawl', '防摔拳手', 'hybrid', 3, 'style', '靠紮實的防摔把比賽留在站立，繼續發揮拳擊優勢。', '防摔成功後，可以立刻接上拳擊反擊。', ['box-body-work', 'wrestle-sprawl'], 'style-sprawl', { tradeoff: '主動進入地面戰的手段比較少。' }),
+  makeNode('hybrid-ground-pound', '摔打連鎖', 'hybrid', 3, 'style', '抱摔只是第一步，取得上位後的重擊才是目的。', '抱摔成功後，上位打擊更有威脅，也更容易終結比賽。', ['wrestle-chain', 'ground-posture'], 'style-ground-pound', { tradeoff: '為了守住上位，會消耗大量力氣。' }),
+  makeNode('hybrid-sub-hunter', '降服獵人', 'hybrid', 3, 'style', '在纏抱和混戰中不斷尋找裸露的頸部與手臂。', '轉換位置時，更容易抓到降服的機會。', ['clinch-trip', 'ground-arm'], 'style-submission', { tradeoff: '貿然出手失敗，很容易失去位置。' }),
+]
+
+const techniqueNodeSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  branch: z.enum(['boxing', 'kicking', 'clinch', 'wrestling', 'ground', 'hybrid']),
+  tier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  cost: z.number().int().min(1).max(3),
+  prerequisites: z.array(z.string()),
+  unlockKey: z.string().min(1),
+})
+
+export function validateContent(): void {
+  z.array(techniqueNodeSchema).length(36).parse(TECHNIQUE_NODES)
+  const ids = new Set(TECHNIQUE_NODES.map((node) => node.id))
+  if (ids.size !== TECHNIQUE_NODES.length) throw new Error('科技節點 ID 重複')
+  for (const node of TECHNIQUE_NODES) {
+    for (const required of node.prerequisites) {
+      if (!ids.has(required)) throw new Error(`節點 ${node.id} 缺少前置 ${required}`)
+    }
+  }
+}
+
+validateContent()
