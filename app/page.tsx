@@ -85,7 +85,7 @@ export default function DaxiaPage() {
     const saved = window.localStorage.getItem(SAVE_KEY);
     if (!saved) return;
     const timer = window.setTimeout(() => {
-      try { const parsed = JSON.parse(saved) as { screen: LifeScreen; run: LifeRun }; if (parsed.run?.version === 6 && parsed.screen !== 'start') { setRun(parsed.run); setScreen(parsed.screen); } else { window.localStorage.removeItem(SAVE_KEY); } } catch { window.localStorage.removeItem(SAVE_KEY); }
+      try { const parsed = JSON.parse(saved) as { screen: LifeScreen; run: LifeRun }; if (parsed.run?.version === 7 && parsed.screen !== 'start') { setRun(parsed.run); setScreen(parsed.screen); } else { window.localStorage.removeItem(SAVE_KEY); } } catch { window.localStorage.removeItem(SAVE_KEY); }
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
