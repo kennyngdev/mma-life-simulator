@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, TECHNIQUE_NODES } from '../src/game/content'
 import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
-import { advance, createNewRun, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, getUnlockStatus, riskLabelForGap } from '../src/game/engine'
-import type { GameCommand, GameState } from '../src/game/types'
+import { advance, createNewRun, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, getUnlockStatus, mirrorPosition, riskLabelForGap } from '../src/game/engine'
+import type { GameCommand, GameState, Position } from '../src/game/types'
 
 const input = { name: '林致遠', region: 'taiwan' as const, motive: 'prove' as const, seed: 'TESTCAGE01' }
 
@@ -12,6 +12,10 @@ function apply(state: GameState, command: GameCommand): GameState {
 
 function safestMove(state: GameState) {
   return state.fight!.prompt!.allOptions.find((option) => option.conservative) ?? state.fight!.prompt!.featuredOptions[0]
+}
+
+function currentPosition(state: GameState) {
+  return state.fight!.position
 }
 
 function resolveMinigame(state: GameState): GameState {
@@ -236,7 +240,7 @@ describe('拳途人生模擬核心', () => {
     expect(apply(growth, { type: 'CONTINUE_GROWTH' }).phase).toBe('offer')
   })
 
-  it('任何背景在籠邊都能嘗試基本抱摔或拉防守', () => {
+  it('任何背景在籠邊都會依壓制方取得合法的摔法或脫困路線', () => {
     let checkedCageSituation = false
     for (let index = 0; index < 20 && !checkedCageSituation; index += 1) {
       let state = createNewRun({ ...input, seed: `BJJ-CAGE-${index}` })
@@ -244,10 +248,14 @@ describe('拳途人生模擬核心', () => {
       state.fighter.background = '業餘拳擊手'
       state.fighter.unlockedNodes = state.fighter.unlockedNodes.filter((node) => node !== 'wrestle-wall' && node !== 'ground-guard')
       state = apply(reachFirstRoundPlan(state), { type: 'SET_ROUND_PLAN', plan: 'cage' })
-      if (state.fight!.prompt!.position === 'cage' || state.fight!.prompt!.position === 'clinch') {
-        const labels = state.fight!.prompt!.allOptions.map((option) => option.label)
-        expect(labels).toContain('籠邊抱摔')
-        expect(labels).toContain('拉防守')
+      if (state.fight!.prompt!.position === 'cage-control') {
+        const ids = state.fight!.prompt!.allOptions.map((option) => option.intentId)
+        expect(ids).toContain('wall-takedown')
+        expect(ids).toContain('pull-guard')
+        checkedCageSituation = true
+      } else if (state.fight!.prompt!.position === 'cage-defense') {
+        const ids = state.fight!.prompt!.allOptions.map((option) => option.intentId)
+        expect(ids).toEqual(expect.arrayContaining(['turn-off-cage', 'cage-whizzer', 'cage-underhook-escape', 'pull-guard']))
         checkedCageSituation = true
       }
     }
@@ -302,6 +310,173 @@ describe('拳途人生模擬核心', () => {
     expect(TECHNIQUE_NODES.find((node) => node.id === 'box-pull-counter')?.name).toBe('重擺拳')
     expect(TECHNIQUE_NODES.find((node) => node.id === 'kick-catch-counter')?.name).toBe('超人拳')
     expect(TECHNIQUE_NODES.find((node) => node.id === 'ground-arm')?.name).toBe('十字架控制')
+  })
+
+  it('站立戰提供可直接辨認的拳法與踢法，而不是只藏在泛用指令裡', () => {
+    const required = ['jab-cross', 'lead-hook', 'uppercut', 'haymaker', 'front-kick', 'body-kick', 'head-kick', 'spinning-back-kick']
+    expect(required.every((id) => FIGHT_INTENTS.some((intent) => intent.id === id))).toBe(true)
+
+    let rangeChecked = false
+    let pocketChecked = false
+    for (let index = 0; index < 30 && (!rangeChecked || !pocketChecked); index += 1) {
+      if (!rangeChecked) {
+        const range = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `MOVE-RANGE-${index}` })), { type: 'SET_ROUND_PLAN', plan: 'distance' })
+        if (range.fight!.position === 'range') {
+          const ids = range.fight!.prompt!.allOptions.map((option) => option.intentId)
+          expect(ids).toEqual(expect.arrayContaining(['jab-cross', 'haymaker', 'front-kick', 'body-kick', 'head-kick', 'spinning-back-kick']))
+          rangeChecked = true
+        }
+      }
+      if (!pocketChecked) {
+        const pocket = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `MOVE-POCKET-${index}` })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
+        if (pocket.fight!.position === 'pocket') {
+          const ids = pocket.fight!.prompt!.allOptions.map((option) => option.intentId)
+          expect(ids).toEqual(expect.arrayContaining(['lead-hook', 'uppercut', 'haymaker', 'body-kick', 'head-kick']))
+          pocketChecked = true
+        }
+      }
+    }
+    expect(rangeChecked).toBe(true)
+    expect(pocketChecked).toBe(true)
+  })
+
+  it('奪背會建立獨立背後控制位置，並解鎖裸絞與背後攻防', () => {
+    let checked = false
+    for (let index = 0; index < 100 && !checked; index += 1) {
+      let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `BACK-RNC-${index}` })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+      if (currentPosition(state) !== 'clinch') continue
+      const takedown = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'clinch-throw')
+      if (!takedown) continue
+      takedown.chance = { min: 140, max: 140 }
+      state.fight!.finishWindowsUsed = 4
+      state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: takedown.id })
+      if (state.phase !== 'critical' || currentPosition(state) !== 'top') continue
+
+      const backTake = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'take-back')
+      expect(backTake).toBeDefined()
+      expect(backTake!.finishRoute).toBeUndefined()
+      backTake!.chance = { min: 140, max: 140 }
+      state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: backTake!.id })
+      if (state.phase !== 'critical' || currentPosition(state) !== 'back-control') continue
+
+      expect(state.fight!.prompt!.title).toContain('背後控制')
+      const backOptions = state.fight!.prompt!.allOptions.map((option) => option.intentId)
+      expect(backOptions).toEqual(expect.arrayContaining(['secure-back', 'body-triangle', 'back-strikes', 'trap-arm-from-back', 'rear-naked-choke', 'back-armbar', 'back-to-mount']))
+      const rnc = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'rear-naked-choke')!
+      const armbar = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'back-armbar')!
+      expect(rnc.label).toContain('RNC')
+      expect(rnc.finishRoute).toContain('降服路線')
+      expect(armbar.label).toContain('十字固')
+      expect(armbar.finishRoute).toContain('降服路線')
+
+      rnc.chance = { min: 140, max: 140 }
+      Object.assign(state.fight!, { playerStamina: 100, opponentStamina: 10, opponentDamage: 70, momentum: 40, finishPressure: 100, playerControl: 60, opponentControl: 0, initiative: 'player', finishWindowsUsed: 0 })
+      state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: rnc.id })
+      if (state.phase !== 'finish-minigame') continue
+      expect(state.fight!.activeFinishWindow?.kind).toBe('submission')
+      expect(state.fight!.activeFinishWindow?.sourceAction).toContain('裸絞')
+      checked = true
+    }
+    expect(checked).toBe(true)
+    expect(FIGHT_INTENTS.filter((intent) => intent.positions.includes('back-defense')).map((intent) => intent.id))
+      .toEqual(expect.arrayContaining(['hand-fight-rnc', 'clear-back-hooks', 'turn-into-guard', 'back-wall-escape']))
+  })
+
+  it('每個位置都有合法的專屬招式組，支配位完整包含進攻、轉位與控位', () => {
+    const positions: Position[] = [
+      'range', 'pocket', 'clinch', 'cage', 'cage-control', 'cage-defense',
+      'thai-clinch', 'thai-clinch-defense', 'body-lock', 'body-lock-defense',
+      'front-headlock-control', 'front-headlock-defense', 'top', 'bottom', 'scramble',
+      'side-control', 'side-control-defense', 'mount', 'mount-defense', 'back-control', 'back-defense',
+    ]
+    const dominant: Position[] = ['cage-control', 'thai-clinch', 'body-lock', 'front-headlock-control', 'top', 'side-control', 'mount', 'back-control']
+    const defensive: Position[] = ['cage-defense', 'thai-clinch-defense', 'body-lock-defense', 'front-headlock-defense', 'bottom', 'side-control-defense', 'mount-defense', 'back-defense']
+
+    for (const position of positions) {
+      const legal = FIGHT_INTENTS.filter((intent) => intent.positions.includes(position))
+      expect(legal.length, position).toBeGreaterThanOrEqual(4)
+      expect(FIGHT_INTENTS.some((intent) => intent.positions.includes(mirrorPosition(position))), `mirror:${position}`).toBe(true)
+    }
+    for (const position of dominant) {
+      const legal = FIGHT_INTENTS.filter((intent) => intent.positions.includes(position))
+      expect(new Set(legal.map((intent) => intent.category)), position).toEqual(new Set(['offense', 'transition', 'defense']))
+    }
+    for (const position of defensive) {
+      const legal = FIGHT_INTENTS.filter((intent) => intent.positions.includes(position))
+      expect(legal.some((intent) => intent.category === 'defense'), position).toBe(true)
+      expect(legal.some((intent) => intent.category === 'transition' && intent.cleanPosition), position).toBe(true)
+    }
+  })
+
+  it('踢拳、纏抱與摔跤都有位置專屬的進攻、防守與連鎖路線', () => {
+    const idsAt = (position: Position, branch?: 'boxing' | 'kicking' | 'clinch' | 'wrestling') => FIGHT_INTENTS
+      .filter((intent) => intent.positions.includes(position) && (!branch || intent.branch === branch))
+      .map((intent) => intent.id)
+
+    expect(idsAt('range', 'kicking')).toEqual(expect.arrayContaining([
+      'calf-kick', 'inside-low-kick', 'front-kick', 'body-kick', 'switch-kick', 'head-kick', 'question-mark-kick', 'check-low-kick',
+    ]))
+    expect(idsAt('pocket')).toEqual(expect.arrayContaining(['check-hook', 'shovel-hook', 'step-knee', 'spinning-elbow', 'shell-counter']))
+    expect(idsAt('clinch')).toEqual(expect.arrayContaining(['double-collar-entry', 'body-lock-control', 'snapdown-entry', 'arm-drag-clinch', 'clinch-throw']))
+    expect(idsAt('cage-control')).toEqual(expect.arrayContaining(['cage-body-head', 'cage-knee-elbow', 'wall-takedown', 'cage-single-leg', 'cage-mat-return', 'cage-arm-drag']))
+    expect(idsAt('scramble', 'wrestling')).toEqual(expect.arrayContaining(['ankle-ride', 'scramble-sitout', 'granby-roll', 'switch-reversal', 'limp-leg-escape', 'scramble-front-headlock']))
+    expect(idsAt('front-headlock-control')).toEqual(expect.arrayContaining(['front-headlock-go-behind', 'front-headlock-spin-top', 'front-headlock-guillotine', 'front-headlock-anaconda']))
+  })
+
+  it('中立纏抱能乾淨推進到泰式頸抱與前頸控制的專屬招式庫', () => {
+    let thai = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'THAI-CLINCH-CHAIN' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    const collar = thai.fight!.prompt!.allOptions.find((option) => option.intentId === 'double-collar-entry')!
+    collar.chance = { min: 140, max: 140 }
+    thai.fight!.finishWindowsUsed = 4
+    thai = apply(thai, { type: 'RESOLVE_CRITICAL', optionId: collar.id })
+    expect(thai.fight!.position).toBe('thai-clinch')
+    expect(thai.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
+      'plum-body-knees', 'plum-head-knee', 'plum-slicing-elbow', 'plum-outside-trip', 'plum-release-elbow', 'plum-control',
+    ]))
+
+    let front = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'FRONT-HEADLOCK-CHAIN' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    const snapdown = front.fight!.prompt!.allOptions.find((option) => option.intentId === 'snapdown-entry')!
+    snapdown.chance = { min: 140, max: 140 }
+    front.fight!.finishWindowsUsed = 4
+    front = apply(front, { type: 'RESOLVE_CRITICAL', optionId: snapdown.id })
+    expect(front.fight!.position).toBe('front-headlock-control')
+    expect(front.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
+      'front-headlock-go-behind', 'front-headlock-spin-top', 'front-headlock-guillotine', 'front-headlock-anaconda', 'front-headlock-snap',
+    ]))
+  })
+
+  it('籠邊壓制能接入抱腰控制，再選擇回摔、絆摔、繞背或繼續壓籠', () => {
+    let checked = false
+    for (let index = 0; index < 40 && !checked; index += 1) {
+      let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `BODY-LOCK-CHAIN-${index}` })), { type: 'SET_ROUND_PLAN', plan: 'cage' })
+      if (state.fight!.position !== 'cage-control') continue
+      const bodyLock = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'body-lock-control')!
+      bodyLock.chance = { min: 140, max: 140 }
+      state.fight!.finishWindowsUsed = 4
+      state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: bodyLock.id })
+      expect(state.fight!.position).toBe('body-lock')
+      expect(state.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
+        'body-lock-knees', 'body-lock-inside-trip', 'body-lock-outside-trip', 'body-lock-mat-return', 'body-lock-back-take', 'body-lock-cage-drive', 'body-lock-grind',
+      ]))
+      checked = true
+    }
+    expect(checked).toBe(true)
+    expect(mirrorPosition('body-lock')).toBe('body-lock-defense')
+    expect(mirrorPosition('cage-control')).toBe('cage-defense')
+  })
+
+  it('地面位置形成防守架、側控、騎乘與背控的可玩推進鏈', () => {
+    const byPosition = (position: Position) => FIGHT_INTENTS.filter((intent) => intent.positions.includes(position))
+    expect(byPosition('top').filter((intent) => intent.cleanPosition === 'side-control').map((intent) => intent.id))
+      .toEqual(expect.arrayContaining(['improve-position', 'pass-guard']))
+    expect(byPosition('side-control').filter((intent) => intent.cleanPosition === 'mount').map((intent) => intent.id))
+      .toContain('mount-transition')
+    expect(byPosition('mount').filter((intent) => intent.cleanPosition === 'back-control').map((intent) => intent.id))
+      .toContain('take-back')
+    expect(byPosition('back-control').filter((intent) => intent.submission).map((intent) => intent.id))
+      .toEqual(expect.arrayContaining(['rear-naked-choke', 'back-armbar']))
+    expect(byPosition('bottom').filter((intent) => intent.submission).map((intent) => intent.id))
+      .toEqual(expect.arrayContaining(['bottom-submission', 'guard-armbar', 'guard-kimura']))
   })
 
   it('拳擊背景在近身有完整拳擊選擇，推薦不再被分支多樣性稀釋', () => {

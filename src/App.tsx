@@ -17,6 +17,7 @@ import type {
   Motive,
   MoveCategory,
   Opponent,
+  Position,
   Region,
   RiskLabel,
   RoundPlan,
@@ -477,9 +478,12 @@ function CriticalView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const [showAllMoves, setShowAllMoves] = useState(false)
   const [moveCategory, setMoveCategory] = useState<MoveCategory>('offense')
+  const [moveBranch, setMoveBranch] = useState<'all' | Branch>('all')
   const momentum = fight.initiative === 'player' ? '你掌握攻勢' : fight.initiative === 'opponent' ? '對手開始壓制' : '局勢膠著'
   const remaining = prompt.allOptions.length - prompt.featuredOptions.length
-  const categoryMoves = prompt.allOptions.filter((option) => option.category === moveCategory)
+  const categoryPool = prompt.allOptions.filter((option) => option.category === moveCategory)
+  const availableBranches = BRANCHES.filter((branch) => categoryPool.some((option) => option.branch === branch))
+  const categoryMoves = categoryPool.filter((option) => moveBranch === 'all' || option.branch === moveBranch)
   const resolve = (optionId: string) => { setShowAllMoves(false); dispatch({ type: 'RESOLVE_CRITICAL', optionId }) }
   const outcomeLabel = fight.lastNarrative?.outcome === 'clean' ? '乾淨奏效' : fight.lastNarrative?.outcome === 'contested' ? '互有得失' : '遭到破解'
   return <Screen title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · ${momentum}`}>
@@ -495,11 +499,17 @@ function CriticalView({ game, dispatch }: ViewProps) {
     {fight.playerOpenings.length > 0 && <div className="opening-strip danger"><span>你的防守空檔</span>{fight.playerOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
     <div className="move-section-label"><span>關鍵選擇</span><small>克制、招牌、轉位與安全路線</small></div>
     <div className="choice-list">{prompt.featuredOptions.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} />)}</div>
-    {remaining > 0 && <button className="more-moves-button" onClick={() => setShowAllMoves(true)}>查看其餘 {remaining} 種招式 <span>進攻、轉位與防守</span></button>}
+    {remaining > 0 && <button className="more-moves-button" onClick={() => { setMoveBranch('all'); setShowAllMoves(true) }}>查看其餘 {remaining} 種招式 <span>進攻、轉位與防守</span></button>}
     {showAllMoves && <div className="sheet-backdrop move-sheet-backdrop" role="presentation" onClick={() => setShowAllMoves(false)}>
       <section className="detail-sheet move-sheet" role="dialog" aria-modal="true" aria-labelledby="move-sheet-title" onClick={(event) => event.stopPropagation()}>
         <header className="sheet-head"><div><span>完整招式庫</span><h2 id="move-sheet-title">{prompt.title}</h2></div><button onClick={() => setShowAllMoves(false)} aria-label="關閉完整招式庫">×</button></header>
-        <nav className="move-tabs" aria-label="招式分類">{([['offense', '進攻'], ['transition', '轉位'], ['defense', '防守']] as Array<[MoveCategory, string]>).map(([id, label]) => <button className={moveCategory === id ? 'active' : ''} key={id} onClick={() => setMoveCategory(id)}>{label}<small>{prompt.allOptions.filter((option) => option.category === id).length}</small></button>)}</nav>
+        <div className="move-filters">
+          <nav className="move-tabs" aria-label="招式分類">{([['offense', '進攻'], ['transition', '轉位'], ['defense', '防守']] as Array<[MoveCategory, string]>).map(([id, label]) => <button className={moveCategory === id ? 'active' : ''} key={id} onClick={() => { setMoveCategory(id); setMoveBranch('all') }}>{label}<small>{prompt.allOptions.filter((option) => option.category === id).length}</small></button>)}</nav>
+          {categoryPool.length > 8 && availableBranches.length > 1 && <nav className="branch-tabs" aria-label="技術分類">
+            <button className={moveBranch === 'all' ? 'active' : ''} onClick={() => setMoveBranch('all')}>全部 <small>{categoryPool.length}</small></button>
+            {availableBranches.map((branch) => <button className={moveBranch === branch ? 'active' : ''} key={branch} onClick={() => setMoveBranch(branch)}>{BRANCH_META[branch].name} <small>{categoryPool.filter((option) => option.branch === branch).length}</small></button>)}
+          </nav>}
+        </div>
         <div className="sheet-scroll move-sheet-list">{categoryMoves.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} compact />)}</div>
       </section>
     </div>}
@@ -776,8 +786,20 @@ function downloadBiography(bio: Biography) {
 function FightArena({ game, compact = false }: { game: GameState; compact?: boolean }) {
   const fight = game.fight!
   const opponent = getOpponent(game)!
-  const positions: Record<string, [number, number]> = { range: [28, 72], pocket: [43, 57], clinch: [48, 52], cage: [17, 10], top: [48, 52], bottom: [52, 48], scramble: [44, 56] }
-  const [playerX, opponentX] = positions[fight.position]
+  const positions: Record<Position, { player: [number, number]; opponent: [number, number] }> = {
+    range: { player: [28, 28], opponent: [72, 28] }, pocket: { player: [43, 28], opponent: [57, 28] },
+    clinch: { player: [48, 28], opponent: [52, 28] }, cage: { player: [17, 28], opponent: [10, 28] },
+    'cage-control': { player: [18, 28], opponent: [10, 28] }, 'cage-defense': { player: [10, 28], opponent: [18, 28] },
+    'thai-clinch': { player: [48, 25], opponent: [52, 30] }, 'thai-clinch-defense': { player: [52, 30], opponent: [48, 25] },
+    'body-lock': { player: [47, 28], opponent: [53, 28] }, 'body-lock-defense': { player: [53, 28], opponent: [47, 28] },
+    'front-headlock-control': { player: [46, 26], opponent: [54, 32] }, 'front-headlock-defense': { player: [54, 32], opponent: [46, 26] },
+    top: { player: [48, 25], opponent: [52, 34] }, bottom: { player: [52, 34], opponent: [48, 25] },
+    'side-control': { player: [45, 25], opponent: [53, 34] }, 'side-control-defense': { player: [53, 34], opponent: [45, 25] },
+    mount: { player: [50, 23], opponent: [50, 34] }, 'mount-defense': { player: [50, 34], opponent: [50, 23] },
+    scramble: { player: [44, 29], opponent: [56, 27] },
+    'back-control': { player: [47, 26], opponent: [53, 30] }, 'back-defense': { player: [53, 30], opponent: [47, 26] },
+  }
+  const markers = positions[fight.position]
   const lastBeat = fight.beatHistory.at(-1)
   const playerHit = lastBeat?.damageEvents.find((event) => event.side === 'player')
   const opponentHit = lastBeat?.damageEvents.find((event) => event.side === 'opponent')
@@ -790,8 +812,8 @@ function FightArena({ game, compact = false }: { game: GameState; compact?: bool
     <svg viewBox="0 0 100 54" role="img" aria-label={`目前位置：${positionLabel(fight.position)}`}>
       <defs><pattern id="mesh" width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 0 7 7M7 0 0 7" stroke="currentColor" strokeWidth=".25" opacity=".28" /></pattern></defs>
       <path d="M8 8h84v37H8z" fill="url(#mesh)" stroke="currentColor" strokeWidth="1" />
-      <circle cx={playerX} cy={fight.position === 'bottom' ? 34 : fight.position === 'top' ? 25 : 28} r="5" className="fighter-dot player-dot" />
-      <circle cx={opponentX} cy={fight.position === 'bottom' ? 25 : fight.position === 'top' ? 34 : 28} r="5" className="fighter-dot opponent-dot" />
+      <circle cx={markers.player[0]} cy={markers.player[1]} r="5" className="fighter-dot player-dot" />
+      <circle cx={markers.opponent[0]} cy={markers.opponent[1]} r="5" className="fighter-dot opponent-dot" />
       <text x="50" y="51" textAnchor="middle">{positionLabel(fight.position)}</text>
     </svg>
     <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>
@@ -809,7 +831,17 @@ function DamageRibbon({ damage, opponent = false }: { damage: { head: number; bo
 }
 
 function positionLabel(position: string) {
-  return ({ range: '遠距站立', pocket: '近身交換', clinch: '中央纏抱', cage: '籠邊控制', top: '上位', bottom: '下位', scramble: '混戰' } as Record<string, string>)[position]
+  return ({
+    range: '遠距站立', pocket: '近身交換', clinch: '中央纏抱', cage: '籠邊爭位',
+    'cage-control': '籠邊壓制', 'cage-defense': '背靠籠網',
+    'thai-clinch': '泰式頸抱', 'thai-clinch-defense': '被控頸抱',
+    'body-lock': '抱腰控制', 'body-lock-defense': '被抱腰',
+    'front-headlock-control': '前頸控制', 'front-headlock-defense': '被控前頸',
+    top: '防守架上位', bottom: '防守架下位', scramble: '混戰',
+    'side-control': '側控', 'side-control-defense': '側控下位',
+    mount: '騎乘位', 'mount-defense': '騎乘下位',
+    'back-control': '背後控制', 'back-defense': '背部被控',
+  } as Record<string, string>)[position]
 }
 
 function ContextStrip({ fighter }: { fighter: FighterState }) {

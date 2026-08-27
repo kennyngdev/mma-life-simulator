@@ -534,9 +534,23 @@ function severityTier(value: number): number {
   return value >= 75 ? 3 : value >= 50 ? 2 : value >= 25 ? 1 : 0
 }
 
-function mirrorPosition(position: Position): Position {
+export function mirrorPosition(position: Position): Position {
   if (position === 'top') return 'bottom'
   if (position === 'bottom') return 'top'
+  if (position === 'cage-control') return 'cage-defense'
+  if (position === 'cage-defense') return 'cage-control'
+  if (position === 'thai-clinch') return 'thai-clinch-defense'
+  if (position === 'thai-clinch-defense') return 'thai-clinch'
+  if (position === 'body-lock') return 'body-lock-defense'
+  if (position === 'body-lock-defense') return 'body-lock'
+  if (position === 'front-headlock-control') return 'front-headlock-defense'
+  if (position === 'front-headlock-defense') return 'front-headlock-control'
+  if (position === 'side-control') return 'side-control-defense'
+  if (position === 'side-control-defense') return 'side-control'
+  if (position === 'mount') return 'mount-defense'
+  if (position === 'mount-defense') return 'mount'
+  if (position === 'back-control') return 'back-defense'
+  if (position === 'back-defense') return 'back-control'
   return position
 }
 
@@ -575,9 +589,9 @@ function opponentExecution(intent: FightMoveDefinition) {
 function threatLevelFor(fight: FightState, intent: FightMoveDefinition): OpponentIntent['threatLevel'] {
   const target = moveTarget(intent)
   const current = target ? fight.playerDamageByPart[target] : 0
-  if (intent.submission && (fight.position === 'top' || fight.position === 'bottom')) return 'critical'
+  if (intent.submission && ['front-headlock-control', 'front-headlock-defense', 'top', 'bottom', 'side-control', 'side-control-defense', 'mount', 'mount-defense', 'back-control', 'back-defense'].includes(fight.position)) return 'critical'
   if (target && current + Math.max(intent.effects.headDamage, intent.effects.bodyDamage, intent.effects.legDamage) >= 75) return 'critical'
-  if (intent.effects.finishPressure >= 10 || intent.cleanPosition === 'top' || intent.category === 'transition') return 'danger'
+  if (intent.effects.finishPressure >= 10 || ['top', 'side-control', 'mount', 'back-control'].includes(intent.cleanPosition ?? '') || intent.category === 'transition') return 'danger'
   return 'watch'
 }
 
@@ -618,8 +632,11 @@ function pickFeaturedOptions(options: CriticalOption[]): CriticalOption[] {
   const take = (candidate?: CriticalOption) => {
     if (candidate && !picked.some((item) => item.id === candidate.id)) picked.push(candidate)
   }
+  take(options[0])
   take(options.find((option) => option.matchup === 'favored'))
   take(options.find((option) => option.recommendation?.includes('擅長')))
+  take(options.find((option) => option.finishRoute?.includes('降服') && option.usesOpenings?.length))
+  take(options.find((option) => option.finishRoute?.includes('降服')))
   take(options.find((option) => option.category === 'transition'))
   take(options.find((option) => option.conservative))
   for (const option of options) {
@@ -686,7 +703,7 @@ function buildCriticalPrompt(state: GameState, fight: FightState): [DecisionProm
       usesOpenings: exploited, affinityLabel: affinity?.label, affinityBonus: affinity?.bonus,
       recommendation: exploited.length ? `利用：${exploited.map((key) => OPENING_LABELS[key]).join('、')}` : style ? `${background.name}擅長的路線` : `${stage.name}階段適合`,
       finishRoute: intent.submission ? '降服路線：位置、控制與破綻會開啟終結窗口'
-        : intent.effects.finishPressure >= 10 ? 'TKO 路線：重創會直接累積終結壓力' : undefined,
+        : intent.category === 'offense' && intent.effects.finishPressure >= 10 ? 'TKO 路線：重創會直接累積終結壓力' : undefined,
       conservative: intent.defensive,
       unlockNode: firstRule?.node.id,
       odds: oddsFor(chance), matchup, matchupReason: matchupReason(matchup, opponentMove.category),
@@ -704,7 +721,17 @@ function buildCriticalPrompt(state: GameState, fight: FightState): [DecisionProm
 }
 
 function positionLabel(position: Position): string {
-  return ({ range: '遠距', pocket: '近身', clinch: '纏抱', cage: '籠邊', top: '上位', bottom: '下位', scramble: '混戰' } as const)[position]
+  return ({
+    range: '遠距', pocket: '近身', clinch: '纏抱', cage: '籠邊',
+    'cage-control': '籠邊壓制', 'cage-defense': '背靠籠網',
+    'thai-clinch': '泰式頸抱', 'thai-clinch-defense': '被控頸抱',
+    'body-lock': '抱腰控制', 'body-lock-defense': '被抱腰',
+    'front-headlock-control': '前頸控制', 'front-headlock-defense': '被控前頸',
+    top: '防守架上位', bottom: '防守架下位', scramble: '混戰',
+    'side-control': '側控', 'side-control-defense': '側控下位',
+    mount: '騎乘位', 'mount-defense': '騎乘下位',
+    'back-control': '背後控制', 'back-defense': '背部被控',
+  } as const)[position]
 }
 
 function chanceFor(state: GameState, opponent: Opponent, branch: Branch, position: Position, nodeId?: string) {
@@ -712,7 +739,12 @@ function chanceFor(state: GameState, opponent: Opponent, branch: Branch, positio
   const mastery = strengthened && nodeId ? (state.fighter.mastery[nodeId]?.value ?? 0) : 0
   const health = Object.values(state.fighter.health).reduce((sum, value) => sum + value, 0) / 4
   const opponentDefense = opponent.technique[branch] * 0.55 + opponent.composure * 0.2
-  const positional = position === 'bottom' && branch !== 'ground' ? -12 : position === 'cage' && (branch === 'clinch' || branch === 'wrestling') ? 8 : 0
+  const defensiveGround = ['bottom', 'side-control-defense', 'mount-defense', 'back-defense', 'front-headlock-defense'].includes(position)
+  const dominantGround = ['side-control', 'mount', 'back-control', 'front-headlock-control'].includes(position)
+  const clinchPosition = ['clinch', 'cage', 'cage-control', 'cage-defense', 'thai-clinch', 'thai-clinch-defense', 'body-lock', 'body-lock-defense'].includes(position)
+  const positional = defensiveGround && branch !== 'ground' && branch !== 'wrestling' ? -12
+    : dominantGround && branch === 'ground' ? 10
+      : clinchPosition && (branch === 'clinch' || branch === 'wrestling') ? 8 : 0
   const reachDelta = state.fighter.reachCm - opponent.reachCm
   const reachEffect = position === 'range' && (branch === 'boxing' || branch === 'kicking')
     ? Math.max(-7, Math.min(7, reachDelta * 0.6))
@@ -769,8 +801,9 @@ function setRoundPlan(state: GameState, plan: RoundPlan): GameState {
   fight.opponentStamina = clamp(fight.opponentStamina - (plan === 'pressure' || plan === 'cage' ? 6 : 4))
   fight.position = margin < -8 && opponent.technique.wrestling >= opponent.technique[opponent.weakness]
     ? 'bottom'
-    : plan === 'takedown' ? 'clinch' : plan === 'cage' ? 'cage' : plan === 'pressure' ? 'pocket' : 'range'
-  fight.commentary.push(`第 ${fight.round} 回合，${planLabel(plan)}。${margin >= 0 ? '你先取得較好的接觸位置。' : `${opponent.name}提前讀到你的意圖。`}`)
+    : plan === 'takedown' ? 'clinch' : plan === 'cage' ? (margin >= 0 ? 'cage-control' : 'cage-defense') : plan === 'pressure' ? 'pocket' : 'range'
+  const openingPlan = plan === 'cage' && margin < 0 ? `${opponent.name}反過來把你壓向籠邊` : planLabel(plan)
+  fight.commentary.push(`第 ${fight.round} 回合，${openingPlan}。${margin >= 0 ? '你先取得較好的接觸位置。' : `${opponent.name}提前讀到你的意圖。`}`)
   const [prompt, nextRng] = buildCriticalPrompt({ ...state, rng }, fight)
   fight.prompt = prompt
   return { ...state, rng: nextRng, fight, phase: 'critical' }
@@ -806,7 +839,7 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   let outcome: FightOutcome = roll * 100 <= liveOdds.clean ? 'clean' : roll * 100 <= liveOdds.clean + liveOdds.contested ? 'contested' : 'countered'
   const rules = unlockedRulesFor(state, intent.id)
   const ruleEffects = new Set(rules.map((item) => item.rule.effect).filter(Boolean))
-  if (outcome === 'countered' && intent.id === 'shot-entry' && ruleEffects.has('chain-wrestle') && !fight.techniqueTriggersThisRound.includes('chain-wrestle')) {
+  if (outcome === 'countered' && ['shot-entry', 'single-leg-shot', 'blast-double', 'cage-single-leg', 'scramble-top', 'ankle-ride', 'switch-reversal'].includes(intent.id) && ruleEffects.has('chain-wrestle') && !fight.techniqueTriggersThisRound.includes('chain-wrestle')) {
     outcome = 'contested'
     fight.techniqueTriggersThisRound.push('chain-wrestle')
     fight.playerStamina = clamp(fight.playerStamina - 3)
@@ -857,18 +890,18 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   fight.opponentStamina = clamp(fight.opponentStamina - Math.max(1, Math.round(opponentCost * (outcome === 'clean' ? 1.2 : 1))))
   const forcedExertion = Math.round(Math.max(0, playerAmount('bodyDamage')) * 0.35 + Math.max(0, playerAmount('control')) * 0.2)
   const clinchGrind = state.fighter.unlockedNodes.includes('clinch-grind')
-    && (intent.id === 'body-lock-control' || intent.id === 'head-control') ? 2 : 0
+    && ['body-lock-control', 'head-control', 'cage-pressure', 'plum-control', 'body-lock-grind'].includes(intent.id) ? 2 : 0
   fight.opponentStamina = clamp(fight.opponentStamina - forcedExertion - clinchGrind)
   if (outcome === 'clean' && ruleEffects.has('body-work')) fight.opponentStamina = clamp(fight.opponentStamina - 5)
   else if (outcome === 'contested' && ruleEffects.has('body-work')) fight.opponentStamina = clamp(fight.opponentStamina - 2)
   if (outcome === 'clean' && ruleEffects.has('clinch-knee')) fight.opponentStamina = clamp(fight.opponentStamina - 5)
   fight.finishPressure = clamp(fight.finishPressure + Math.round(playerAmount('finishPressure')) - Math.round(opponentAmount('finishPressure')))
   if (outcome === 'clean') fight.position = intent.cleanPosition ?? fight.position
-  else if (outcome === 'countered') fight.position = mirrorPosition(opponentMove.cleanPosition ?? opponentMove.contestedPosition ?? positionBefore)
+  else if (outcome === 'countered') fight.position = intent.counteredPosition ?? mirrorPosition(opponentMove.cleanPosition ?? opponentMove.contestedPosition ?? positionBefore)
   else if (intent.category === 'transition' && opponentMove.category === 'transition') fight.position = 'scramble'
   else if (intent.category === 'transition') fight.position = intent.contestedPosition ?? fight.position
   else if (opponentMove.category === 'transition') fight.position = mirrorPosition(opponentMove.contestedPosition ?? opponentMove.cleanPosition ?? fight.position)
-  if (outcome === 'countered' && ruleEffects.has('safe-low-kick') && intent.id === 'low-kick-pocket') fight.position = 'pocket'
+  if (outcome === 'countered' && ruleEffects.has('safe-low-kick') && ['damage-base', 'calf-kick', 'inside-low-kick', 'low-kick-pocket'].includes(intent.id)) fight.position = positionBefore
   if (outcome === 'countered' && ruleEffects.has('closed-guard') && (intent.id === 'rebuild-guard' || intent.id === 'pull-guard')) fight.position = 'bottom'
   if (outcome !== 'countered' && ruleEffects.has('jab-exit') && (intent.id === 'probe-range' || intent.id === 'angle-away')) fight.position = 'range'
 
@@ -913,11 +946,11 @@ function resolveCritical(state: GameState, optionId: string): GameState {
       mastery.value = clamp(mastery.value + gain)
       mastery.gainedThisFight += gain
     }
-    if (outcome === 'clean' && intent.cleanPosition === 'top') fighter.evidence.takedowns += 1
-    if (outcome === 'clean' && intent.submission) fighter.evidence.submissions += 1
-    if (outcome === 'clean' && intent.id === 'wall-walk') fighter.evidence.bottomEscapes += 1
-    if (outcome === 'clean' && intent.effects.headDamage >= 10) fighter.evidence.knockdowns += roll * 100 < liveOdds.clean * 0.28 ? 1 : 0
   }
+  if (outcome === 'clean' && intent.cleanPosition === 'top' && positionBefore !== 'back-defense') fighter.evidence.takedowns += 1
+  if (outcome === 'clean' && intent.submission) fighter.evidence.submissions += 1
+  if (outcome === 'clean' && ['wall-walk', 'side-wall-escape', 'elbow-knee-escape', 'backdoor-escape', 'clear-back-hooks', 'back-wall-escape', 'plum-pummel-inside', 'body-lock-hip-heist', 'front-headlock-sitout'].includes(intent.id)) fighter.evidence.bottomEscapes += 1
+  if (outcome === 'clean' && intent.effects.headDamage >= 10) fighter.evidence.knockdowns += roll * 100 < liveOdds.clean * 0.28 ? 1 : 0
   fight.initiative = outcome === 'clean' ? 'player' : outcome === 'countered' ? 'opponent' : 'even'
   fight.momentum = clamp(fight.momentum + (outcome === 'clean' ? 11 : outcome === 'contested' ? 1 : -13), -40, 40)
   if (outcome !== 'countered') {
@@ -930,7 +963,7 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   const finishOption = attacker === 'player' ? option : { ...option, actionKey: opponentMove.id, branch: opponentMove.branch, conservative: opponentMove.defensive, executionName: opponentMoveExecution.name, usesOpenings: opponentIntent.exploitsOpenings }
   const finishKind = finishMove.submission ? 'submission' : 'strike'
   let window: FinishWindow | undefined
-  if (outcome !== 'contested' || finishOpportunity({ ...state, fighter }, fight, finishOption, attacker, finishKind) >= 64) {
+  if (finishMove.category === 'offense' && (outcome !== 'contested' || finishOpportunity({ ...state, fighter }, fight, finishOption, attacker, finishKind) >= 64)) {
     const createdWindow = maybeCreateFinishWindow({ ...state, fighter, rng }, fight, finishOption, attacker, finishKind)
     window = createdWindow[0]
     rng = createdWindow[1]
@@ -1005,10 +1038,18 @@ export function finishOpportunity(state: GameState, fight: FightState, option: C
   const technical = attacker === 'player'
     ? state.fighter.technique[option.branch ?? 'boxing'] + state.fighter.mind.composure * 0.22
     : opponent.technique[option.branch ?? 'boxing'] + opponent.composure * 0.22
+  const attackerPosition = attacker === 'player' ? fight.position : mirrorPosition(fight.position)
   const positionBonus = kind === 'submission'
-    ? (fight.position === 'top' || fight.position === 'bottom' ? 17 : fight.position === 'clinch' || fight.position === 'scramble' ? 8 : 0)
-    : (fight.position === 'pocket' || fight.position === 'cage' ? 14 : fight.position === 'top' ? 12 : 3)
-  const actionBonus = option.actionKey === 'risky-power' || option.actionKey === 'ground-strikes' || option.actionKey === 'bottom-submission' || option.actionKey === 'seek-choke' ? 14 : option.conservative ? -22 : 3
+    ? (attackerPosition === 'back-control' ? 24 : attackerPosition === 'mount' ? 22 : attackerPosition === 'front-headlock-control' ? 20 : attackerPosition === 'side-control' ? 19 : attackerPosition === 'top' || attackerPosition === 'bottom' ? 17 : attackerPosition === 'clinch' || attackerPosition === 'scramble' ? 8 : 0)
+    : (attackerPosition === 'mount' ? 17 : attackerPosition === 'pocket' || attackerPosition === 'cage' || attackerPosition === 'cage-control' ? 14 : attackerPosition === 'thai-clinch' ? 13 : attackerPosition === 'top' || attackerPosition === 'side-control' || attackerPosition === 'back-control' ? 12 : 3)
+  const finishingActions = [
+    'risky-power', 'haymaker', 'head-kick', 'question-mark-kick', 'spinning-back-kick', 'spinning-elbow',
+    'cage-body-head', 'cage-knee-elbow', 'plum-head-knee', 'plum-slicing-elbow',
+    'ground-strikes', 'side-elbows', 'mount-punches', 'mount-elbows', 'back-strikes',
+    'front-headlock-guillotine', 'front-headlock-anaconda', 'bottom-submission', 'guard-armbar', 'guard-kimura', 'americana', 'side-kimura', 'north-south-choke', 'seek-choke',
+    'arm-triangle', 'mounted-armbar', 'rear-naked-choke', 'back-armbar',
+  ]
+  const actionBonus = finishingActions.includes(option.actionKey) ? 14 : option.conservative ? -22 : 3
   const momentumBonus = attacker === 'player' ? Math.max(0, fight.momentum) : Math.max(0, -fight.momentum)
   const defendingHead = attacker === 'player' ? fight.opponentDamageByPart.head : fight.playerDamageByPart.head
   const headSeverityBonus = kind === 'strike' ? [0, 4, 9, 15][severityTier(defendingHead)] : 0

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { createNewRun, getWeightOptions } from '../src/game/engine'
-import type { FinishKind, GameState } from '../src/game/types'
+import type { CriticalOption, FinishKind, GameState } from '../src/game/types'
 
 const storage = vi.hoisted(() => ({
   archiveBiography: vi.fn(),
@@ -36,6 +36,27 @@ function gameAtFinishMinigame(kind: FinishKind): GameState {
     },
     commentary: ['前面的攻防替你創造了終結窗口。'], scores: [], finished: false,
   }
+  return game
+}
+
+function gameAtBackControl(): GameState {
+  const game = gameAtFinishMinigame('submission')
+  const option = (id: string, label: string, category: CriticalOption['category'], executionName: string): CriticalOption => ({
+    id, label, description: label === '裸絞（RNC）' ? '從背後繞臂進頸，以胸背貼合和雙鉤完成裸絞。' : label.includes('十字固') ? '把防守手臂拉過胸線，轉髖跨頭完成十字固。' : '從背後以短拳迫使對手抬手護頭。',
+    chance: { min: 55, max: 75 }, positives: [], negatives: [], actionKey: id, intentId: id,
+    executionId: `base-${id}`, executionName, branch: 'ground', category,
+    effectSummary: label === '裸絞（RNC）' || label.includes('十字固') ? '主效：建立降服終結壓力 · 代價：體力 10' : '主效：頭部傷害 · 代價：體力 7',
+    finishRoute: label === '裸絞（RNC）' || label.includes('十字固') ? '降服路線：位置、控制與破綻會開啟終結窗口' : undefined,
+    odds: { clean: 42, contested: 35, countered: 23 }, matchup: 'neutral', matchupReason: '雙方戰術沒有直接克制',
+  })
+  const rnc = option('rear-naked-choke', '裸絞（RNC）', 'offense', '裸絞')
+  const armbar = option('back-armbar', '背後十字固', 'offense', '背後十字固')
+  const strikes = option('back-strikes', '背後短拳', 'offense', '背後短拳')
+  game.phase = 'critical'
+  Object.assign(game.fight!, {
+    position: 'back-control', sequenceStep: 3, stageName: 'turn', activeFinishWindow: undefined,
+    prompt: { id: 'back-control-test', title: '轉折｜背後控制', description: '你已取得背後。', position: 'back-control', options: [rnc, armbar, strikes], featuredOptions: [rnc, armbar, strikes], allOptions: [rnc, armbar, strikes] },
+  })
   return game
 }
 
@@ -179,5 +200,16 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: '快速連點' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '改用節奏長按' }))
     expect(screen.getByRole('button', { name: '亮區內按住' })).toBeInTheDocument()
+  })
+
+  it('背後控制在戰鬥介面顯示獨立位置、裸絞、十字固與背後打擊', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtBackControl() })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '轉折｜背後控制' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '目前位置：背後控制' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /裸絞（RNC）/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /背後十字固/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /背後短拳/ })).toBeInTheDocument()
   })
 })

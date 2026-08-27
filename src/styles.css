@@ -305,6 +305,12 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .move-tabs button { min-height: 44px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--surface); font-weight: 700; }
 .move-tabs button.active { border-color: var(--accent); color: var(--ink); background: rgb(226 83 53 / .12); }
 .move-tabs small { margin-left: 5px; color: var(--dim); }
+.move-filters { border-bottom: 1px solid var(--line); }
+.move-filters .move-tabs { border-bottom: 0; }
+.branch-tabs { padding: 0 14px 10px; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.branch-tabs button { flex: 0 0 auto; min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font-weight: 700; }
+.branch-tabs button.active { border-color: var(--accent); color: var(--ink); background: rgb(226 83 53 / .12); }
+.branch-tabs small { margin-left: 4px; color: var(--dim); }
 .move-sheet-list { padding: 12px 14px max(18px, env(safe-area-inset-bottom)); }
 .move-sheet-list .choice-row + .choice-row { margin-top: 8px; }
 .move-sheet-list .opening-use { width: fit-content; margin-top: 7px; display: block; }

@@ -150,7 +150,7 @@ export const TECHNIQUE_NODES: TechniqueNode[] = [
   makeNode('box-body-work', '重擊軀幹', 'boxing', 1, 'chain', '把拳頭送進對手的腹部與肋部，削弱後半場的體力。', '打中時會額外消耗對手體力。', ['box-foot-jab'], 'body-work'),
   makeNode('box-cross-counter', '後手迎擊', 'boxing', 2, 'response', '抓準對手逼近的時機，用後手重拳迎面截擊。', '受壓迫時可以反擊，趁機拉開距離。', ['box-foot-jab'], 'cross-counter', { evidence: { key: 'fights', amount: 2, label: '完成 2 場比賽' } }),
   makeNode('box-cage-combo', '籠邊連擊', 'boxing', 2, 'chain', '對手背靠鐵網時連續出拳，不給他喘息或逃走的機會。', '在籠邊打中後，可以繼續壓制對手。', ['box-body-work'], 'cage-combo'),
-  makeNode('box-pull-counter', '重擺拳', 'boxing', 3, 'response', '放棄一部分防守，把全身重量集中到弧線重拳。', '解鎖高傷害、高耗能的重擺拳。', ['box-cross-counter'], 'haymaker', { evidence: { key: 'knockdowns', amount: 1, label: '生涯擊倒對手 1 次' }, tradeoff: '揮空會大量消耗體力，也會暴露反擊空間。' }),
+  makeNode('box-pull-counter', '重擺拳', 'boxing', 3, 'response', '先讓頭部離開中線，再把全身重量集中到弧線重拳。', '把基本重擺拳升級為傷害與終結壓力更高的拉閃反擊。', ['box-cross-counter'], 'haymaker', { evidence: { key: 'knockdowns', amount: 1, label: '生涯擊倒對手 1 次' }, tradeoff: '揮空會大量消耗體力，也會暴露反擊空間。' }),
   makeNode('box-volume-trap', '節奏變化', 'boxing', 3, 'style', '用固定節奏誘使對手習慣，再突然改變連擊的收尾。', '以拳擊為主攻時更加穩定，打滿回合也比較省力。', ['box-cage-combo', 'box-pull-counter'], 'volume-trap', { tradeoff: '出拳量增加，雙手也更容易受傷。' }),
 
   makeNode('kick-low', '低掃牽制', 'kicking', 1, 'foundation', '練好低掃的時機與重心，出腳時不再輕易失去平衡。', '乾淨低掃追加腿傷；近身低掃被破解時仍能站穩。', [], 'low-kick'),
