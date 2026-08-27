@@ -2,6 +2,8 @@ import { createBattle, reduceBattle, type BattleActionDefinition, type BattleAct
 
 export type SectId = 'huashan' | 'shaolin' | 'wudang' | 'beggar' | 'emei' | 'tang';
 export type DifficultyId = 'relaxed' | 'standard' | 'hard';
+export type RarityId = 'common' | 'rare' | 'legendary';
+export type IdentityKind = 'origin' | 'trait' | 'burden';
 export type LifePhase = '少年' | '入門' | '闖蕩' | '成名' | '晚年';
 export type LifeScreen = 'start' | 'reveal' | 'sect' | 'life' | 'battle' | 'result' | 'ending';
 export type StatKey = 'strength' | 'agility' | 'constitution' | 'wisdom' | 'will' | 'luck';
@@ -24,7 +26,7 @@ export type BattleMeta = { choiceId: LifeChoice['id']; actions: string[]; damage
 export type BattleResultCard = { won: boolean; grade: 'C' | 'B' | 'A' | 'S' | 'SSS'; score: number; moments: string[]; line: string; rewards: string[] };
 
 export type LifeRun = {
-  version: 4;
+  version: 5;
   seed: string;
   name: string;
   origin: string;
@@ -64,8 +66,14 @@ const hash = (input: string) => {
   for (let index = 0; index < input.length; index += 1) { value ^= input.charCodeAt(index); value = Math.imul(value, 16777619); }
   return value >>> 0;
 };
-const pick = <T,>(items: T[], seed: string) => items[hash(seed) % items.length];
+const pick = <T,>(items: readonly T[], seed: string) => items[hash(seed) % items.length];
 const range = (seed: string, min: number, max: number) => min + (hash(seed) % (max - min + 1));
+
+export const rarities: Array<{ id: RarityId; label: string; chance: number; description: string }> = [
+  { id: 'common', label: '普通', chance: 60, description: '常見，但仍然會決定你怎麼活。' },
+  { id: 'rare', label: '稀有', chance: 30, description: '少見的條件，通常帶來更鮮明的玩法。' },
+  { id: 'legendary', label: '傳說', chance: 10, description: '極少出現，不保證比較強，只保證這條命很有事。' },
+];
 
 export const statNames: Record<StatKey, string> = { strength: '力道', agility: '身法', constitution: '根骨', wisdom: '悟性', will: '心性', luck: '福緣' };
 export const phases: Array<{ name: LifePhase; start: number; end: number; age: number; year: number; premise: string }> = [
@@ -143,8 +151,25 @@ export const sects: Sect[] = [
 export const origins = ['藥鋪學徒', '鏢局雜役', '沒落軍戶', '寺外棄童', '商隊小孩', '縣城學徒'] as const;
 export const traits = ['過目不忘', '雨天手穩', '很會記仇', '吃苦耐勞', '臉皮很厚', '運氣不太好'] as const;
 export const burdens = ['家裡欠了錢', '有人等你回家', '師父欠你一句道歉', '你其實很怕打架', '一封信一直沒寄', '大家以為你很有錢'] as const;
+const identityRarities: Record<IdentityKind, Record<string, RarityId>> = {
+  origin: { '藥鋪學徒': 'common', '鏢局雜役': 'common', '縣城學徒': 'rare', '商隊小孩': 'rare', '沒落軍戶': 'legendary', '寺外棄童': 'legendary' },
+  trait: { '吃苦耐勞': 'common', '臉皮很厚': 'common', '雨天手穩': 'rare', '很會記仇': 'rare', '過目不忘': 'legendary', '運氣不太好': 'legendary' },
+  burden: { '家裡欠了錢': 'common', '大家以為你很有錢': 'common', '有人等你回家': 'rare', '你其實很怕打架': 'rare', '師父欠你一句道歉': 'legendary', '一封信一直沒寄': 'legendary' },
+};
 const friends = ['阿棠', '石見山', '柳小七', '顧晚舟', '沈二娘', '唐十三'];
 const rivals = ['范少白', '段鐵嘴', '莫問天', '金如意', '霍三娘', '葉無聲'];
+
+function rarityFromSeed(seed: string) {
+  const roll = range(seed, 1, 100);
+  let ceiling = 0;
+  return rarities.find((rarity) => { ceiling += rarity.chance; return roll <= ceiling; }) ?? rarities[0];
+}
+
+function pickIdentity<T extends string>(kind: IdentityKind, items: readonly T[], seed: string): T {
+  const rarity = rarityFromSeed(`${seed}:rarity`);
+  const pool = items.filter((item) => identityRarities[kind][item] === rarity.id);
+  return pick(pool.length ? pool : items, `${seed}:value:${rarity.id}`);
+}
 
 const originBonus: Record<(typeof origins)[number], Partial<Record<StatKey, number>> & { money?: number }> = {
   '藥鋪學徒': { wisdom: 1, will: 1 }, '鏢局雜役': { agility: 1, constitution: 1 }, '沒落軍戶': { strength: 1, will: 1 },
@@ -163,6 +188,11 @@ export function identityDetail(kind: 'trait' | 'burden', value: string) {
   return kind === 'trait' ? traitCopy[value as keyof typeof traitCopy] : burdenCopy[value as keyof typeof burdenCopy];
 }
 
+export function identityRarity(kind: IdentityKind, value: string) {
+  const id = identityRarities[kind][value] ?? 'common';
+  return rarities.find((rarity) => rarity.id === id) ?? rarities[0];
+}
+
 export function phaseForTurn(turn: number) { return phases.find((phase) => turn >= phase.start && turn <= phase.end) ?? phases.at(-1)!; }
 export function sectFor(id: SectId | null) { return sects.find((sect) => sect.id === id) ?? sects[0]; }
 export function difficultyFor(id: DifficultyId) { return difficulties.find((difficulty) => difficulty.id === id) ?? difficulties[1]; }
@@ -173,14 +203,14 @@ export function choiceRewardFor(run: LifeRun, choiceId: LifeChoice['id']) {
 }
 
 export function newLife(seed: string, name: string, difficulty: DifficultyId = 'standard', legacyRank = 0): LifeRun {
-  const origin = pick([...origins], `${seed}:origin`);
-  const trait = pick([...traits], `${seed}:trait`);
-  const burden = pick([...burdens], `${seed}:burden`);
+  const origin = pickIdentity('origin', origins, `${seed}:origin`);
+  const trait = pickIdentity('trait', traits, `${seed}:trait`);
+  const burden = pickIdentity('burden', burdens, `${seed}:burden`);
   const stats = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, range(`${seed}:${key}`, 3, 7) + (originBonus[origin][key] ?? 0)])) as Record<StatKey, number>;
   const potential = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, stats[key] + range(`${seed}:potential:${key}`, 3, 6)])) as Record<StatKey, number>;
   const maxHp = 66 + stats.constitution * 7 + (trait === '吃苦耐勞' ? 12 : 0);
   const maxQi = 24 + stats.will * 3;
-  return { version: 4, seed, name: name.trim() || '無名少俠', origin, trait, burden, difficulty, legacyRank, legacyClaimed: false, sectId: null, age: 12, year: 1590, turn: 0, stats, potential, hp: maxHp, maxHp, qi: maxQi, maxQi, money: range(`${seed}:money`, 8, 22) + (originBonus[origin].money ?? 0) - (burden === '家裡欠了錢' ? 6 : 0), mastery: legacyRank * 5, reputation: 0, bond: 0, friendName: pick(friends, `${seed}:friend`), rivalName: pick(rivals, `${seed}:rival`), friendship: 0, rivalry: 0, injury: 0, moments: [], chronicle: [], battle: null, battleMeta: null, result: null };
+  return { version: 5, seed, name: name.trim() || '無名少俠', origin, trait, burden, difficulty, legacyRank, legacyClaimed: false, sectId: null, age: 12, year: 1590, turn: 0, stats, potential, hp: maxHp, maxHp, qi: maxQi, maxQi, money: range(`${seed}:money`, 8, 22) + (originBonus[origin].money ?? 0) - (burden === '家裡欠了錢' ? 6 : 0), mastery: legacyRank * 5, reputation: 0, bond: 0, friendName: pick(friends, `${seed}:friend`), rivalName: pick(rivals, `${seed}:rival`), friendship: 0, rivalry: 0, injury: 0, moments: [], chronicle: [], battle: null, battleMeta: null, result: null };
 }
 
 export function eventFor(run: LifeRun): LifeEvent {

@@ -16,4 +16,6 @@ Before changing game behavior, read `docs/DESIGN_PRINCIPLES.md`. Before changing
 
 Keep the life engine and battle engine deterministic: the same version, seed, identity, difficulty, and choices must reproduce the same run. Update the relevant principle document when a material product or UI decision changes.
 
-Useful commands: `pnpm dev`, `pnpm test`, `pnpm lint`, and `pnpm build`. Node.js 22.13 or newer is required.
+Port **3010 is permanently reserved for the user's playtest server**. Keep `pnpm dev` running there when the user is playtesting. Agents must not bind, stop, restart, or reuse port 3010 for their own previews; use `pnpm dev:agent` on 3011 or explicitly choose another free non-3010 port.
+
+Useful commands: `pnpm dev` (user playtest on 3010), `pnpm dev:agent` (agent preview on 3011), `pnpm test`, `pnpm lint`, and `pnpm build`. Node.js 22.13 or newer is required.

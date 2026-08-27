@@ -5,6 +5,7 @@
 - Keep player-facing type at 14px minimum, with normal story text at 15px or larger. Reduce secondary detail before shrinking text.
 - Use available space purposefully. Primary actions stay obvious and reachable by touch and keyboard.
 - Represent bounded attributes with labeled horizontal bars. When growth has a cap, show current and potential fills together, include a visual key, and retain exact values in accessible labels.
+- Identity cards must show their actual rarity from game state, use distinct 普通／稀有／傳說 treatments, and disclose the 60/30/10 draw odds beside the reveal. Never imply that rarity guarantees power.
 - Enemy cards occupy the upper battle lane and allies the lower lane. Living enemies are selectable only on the player's turn; selected and defeated states must be obvious.
 - Keep the timeline above the arena, repeat the current target near actions, and anchor available moves at the bottom.
 - Health and inner power rely on bars as well as numbers. Do not communicate combat state through tiny text alone.

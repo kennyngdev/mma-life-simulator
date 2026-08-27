@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advance, choiceRewardFor, eventFor, identityDetail, isComplete, newLife, performMove, resolveBattle, sects, startBattle } from './life-engine';
+import { advance, choiceRewardFor, eventFor, identityDetail, identityRarity, isComplete, newLife, performMove, rarities, resolveBattle, sects, startBattle } from './life-engine';
 
 function playLife(sectId: (typeof sects)[number]['id']) {
   let run = { ...newLife(`test-${sectId}`, '阿測'), sectId, chronicle: ['開始'] };
@@ -19,6 +19,21 @@ function playLife(sectId: (typeof sects)[number]['id']) {
 describe('大俠模擬器 life engine', () => {
   it('makes a deterministic identity from a seed', () => {
     expect(newLife('same-fate', '小滿')).toMatchObject(newLife('same-fate', '小滿'));
+  });
+
+  it('draws real seeded rarity tiers with disclosed 60/30/10 odds', () => {
+    expect(rarities.map(({ label, chance }) => [label, chance])).toEqual([['普通', 60], ['稀有', 30], ['傳說', 10]]);
+    const counts = { common: 0, rare: 0, legendary: 0 };
+    for (let index = 0; index < 3000; index += 1) counts[identityRarity('trait', newLife(`rarity-${index}`, '').trait).id] += 1;
+    expect(counts.common).toBeGreaterThan(counts.rare);
+    expect(counts.rare).toBeGreaterThan(counts.legendary);
+    expect(counts.legendary).toBeGreaterThan(0);
+  });
+
+  it('assigns every identity item to a stable rarity tier', () => {
+    expect(identityRarity('origin', '藥鋪學徒').label).toBe('普通');
+    expect(identityRarity('trait', '雨天手穩').label).toBe('稀有');
+    expect(identityRarity('burden', '一封信一直沒寄').label).toBe('傳說');
   });
 
   it('turns a training choice into visible, potential-limited growth', () => {
