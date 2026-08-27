@@ -2,6 +2,7 @@
 
 - Use one mobile-first vertical frame capped at 720px on wider screens; do not turn the game into a desktop dashboard.
 - Fit each play state within `100dvh` without page scrolling. A clearly bounded internal reading panel may scroll when a biography is dense.
+- Treat mobile browser chrome as occupied space: use the small viewport and safe-area insets for the game frame. Any non-battle screen taller than the visible area must scroll internally so its primary action can always be reached without installing the game as a PWA.
 - Keep player-facing type at 14px minimum, with normal story text at 15px or larger. Reduce secondary detail before shrinking text.
 - Use available space purposefully. Primary actions stay obvious and reachable by touch and keyboard.
 - The life-event screen keeps persistent identity and relationship detail out of the lower chrome; that information belongs in 人物. Each preparation card instead shows its event-specific action, success rate, contributing stats and talents, guaranteed cost, full success effect, and explicit failure fallback before commitment. A contextual third option names why it exists, such as a sect, friend, rival, injury, or available money; unavailable options are replaced rather than disabled.
