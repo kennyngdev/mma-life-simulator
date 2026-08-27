@@ -17,8 +17,10 @@ The player is an ordinary person who is not chosen, secretly invincible, or guar
 - A useful scene has a concrete landing point, a disturbance, a deeper pressure, a choice between methods and costs, and a visible aftermath.
 - Each event should advance at least two of: a practical problem, a relationship, or a costly action.
 - Choice titles say what the player does; descriptions explain how and what it risks. No option should be the disguised correct answer.
+- Each event authors two methods from its concrete objects, people, and pressure. The third method may come from the current sect, relationship, injury, burden, or resources, and must explicitly name that causal source instead of disguising a generic choice with new wording.
 - Copy must not promise an effect the engine does not implement. Preview the actual reward and record the actual consequence.
 - Combat needs a clear reason to happen now and a remembered consequence afterward.
+- The brief transition into combat must name both the preparation outcome and the immediate reason it cannot prevent the fight. It may land one warm-satirical punchline about status, work, money, or social inconvenience, but never makes injury or death the joke.
 
 ## Characters and endings
 

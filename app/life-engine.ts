@@ -1,12 +1,19 @@
 import { createBattle, reduceBattle, type BattleActionDefinition, type BattleActor, type BattleRules, type BattleState } from './battle';
 
 export type SectId = 'huashan' | 'shaolin' | 'wudang' | 'beggar' | 'emei' | 'tang';
+export type InsightId = `${SectId}-${1 | 2 | 3}-${'a' | 'b'}`;
 export type DifficultyId = 'relaxed' | 'standard' | 'hard';
 export type RarityId = 'common' | 'rare' | 'legendary';
 export type IdentityKind = 'origin' | 'trait' | 'burden';
 export type LifePhase = '少年' | '入門' | '闖蕩' | '成名' | '晚年';
-export type LifeScreen = 'start' | 'reveal' | 'sect' | 'life' | 'battle' | 'result' | 'ending';
+export type LifeScreen = 'start' | 'reveal' | 'sect' | 'life' | 'prebattle' | 'battle' | 'result' | 'insight' | 'ending';
 export type StatKey = 'strength' | 'agility' | 'constitution' | 'wisdom' | 'will' | 'luck';
+export type ChoiceTag = 'study' | 'bargain' | 'protect' | 'force' | 'trick' | 'parley';
+export type LifeResource = 'proficiency' | 'money' | 'reputation' | 'bond' | 'friendship' | 'rivalry' | 'hp' | 'qi';
+export type LifeEffect = { type: 'resource'; resource: LifeResource; amount: number };
+export type BattlePreparation = { guard?: number; attack?: number; defense?: number; speed?: number; enemyAttack?: number; inviteFriend?: boolean };
+export type ChoiceAvailability = { type: 'always' } | { type: 'money'; minimum: number } | { type: 'friendship'; minimum: number } | { type: 'rivalry'; minimum: number } | { type: 'injury'; minimum: number } | { type: 'sect'; sectId: SectId } | { type: 'trait'; name: string } | { type: 'burden'; name: string };
+export type ChoiceFeedback = { successHeadline: string; failureHeadline: string; successBridge: string; failureBridge: string; successAction: string; failureAction: string };
 
 export type Sect = {
   id: SectId;
@@ -19,22 +26,22 @@ export type Sect = {
   moves: Array<{ id: string; name: string; description: string; qiCost: number; action: BattleActionDefinition }>;
 };
 
-export type LifeChoice = { id: 'train' | 'work' | 'help'; title: string; description: string; reward: string; prep: string };
+export type LifeChoice = { id: string; title: string; description: string; sourceLabel?: string; check: { primary: StatKey; secondary: StatKey }; tags: ChoiceTag[]; availability: ChoiceAvailability; commitEffects: LifeEffect[]; successEffects: LifeEffect[]; failureEffects: LifeEffect[]; battlePreparation: { success: BattlePreparation; failure: BattlePreparation }; growthStat: StatKey; feedback: ChoiceFeedback };
 export type EncounterObjective = { id: 'duel' | 'ambush' | 'crowd' | 'siege'; label: string; description: string; enemyRole: 'warrior' | 'assassin' | 'tank'; enemyCount: number };
-export type LifeEvent = { title: string; place: string; lead: string; weather: '晴' | '雨' | '風'; objective: EncounterObjective; enemyName: string; enemyRole: 'warrior' | 'assassin' | 'tank'; enemyCount: number; choices: LifeChoice[] };
-export type BattleMeta = { choiceId: LifeChoice['id']; actions: string[]; damageTaken: number; damageDealt: number; startedHp: number; startedQi: number };
+export type LifeEvent = { id: string; title: string; place: string; lead: string; conflict: string; weather: '晴' | '雨' | '風'; objective: EncounterObjective; enemyName: string; enemyRole: 'warrior' | 'assassin' | 'tank'; enemyCount: number; choices: LifeChoice[] };
+export type PreparationFeedback = { outcome: 'success' | 'failure'; chance: number; effect: string; headline: string; bridge: string; fightReason: string; actionLabel: string };
+export type BattleMeta = { choiceId: string; growthStat: StatKey; choiceSucceeded?: boolean; choiceChance?: number; feedback?: PreparationFeedback; preparation: BattlePreparation; actions: string[]; damageTaken: number; damageDealt: number; startedHp: number; startedQi: number };
 export type BattleResultCard = { won: boolean; grade: 'C' | 'B' | 'A' | 'S' | 'SSS'; score: number; moments: string[]; line: string; rewards: string[] };
 
 export type LifeRun = {
-  version: 7;
+  version: 12;
   seed: string;
   name: string;
   origin: string;
   trait: string;
   burden: string;
   difficulty: DifficultyId;
-  legacyRank: number;
-  legacyClaimed: boolean;
+  inheritedTrait: string | null;
   sectId: SectId | null;
   age: number;
   year: number;
@@ -46,7 +53,8 @@ export type LifeRun = {
   qi: number;
   maxQi: number;
   money: number;
-  mastery: number;
+  proficiency: number;
+  insights: InsightId[];
   reputation: number;
   bond: number;
   friendName: string;
@@ -54,6 +62,8 @@ export type LifeRun = {
   friendship: number;
   rivalry: number;
   injury: number;
+  dead: boolean;
+  deathReason: string | null;
   moments: string[];
   chronicle: string[];
   battle: BattleState | null;
@@ -89,61 +99,61 @@ export const difficulties: Array<{ id: DifficultyId; name: string; description: 
   { id: 'hard', name: '名宿的麻煩', description: '敵人更硬，傳奇也比較有面子。', enemyScale: 1 },
 ];
 
-const strike = (id: string, target: BattleActionDefinition['target'], qiCost: number, effects: BattleActionDefinition['effects']): BattleActionDefinition => ({ id, target, qiCost, effects });
+const strike = (id: string, label: string, target: BattleActionDefinition['target'], qiCost: number, effects: BattleActionDefinition['effects']): BattleActionDefinition => ({ id, label, target, qiCost, effects });
 
 export const sects: Sect[] = [
   {
     id: 'huashan', name: '華山', subtitle: '劍路越長，理由越少', color: '#e7a85f', icon: '劍', style: '連續進招，累積劍式後一口氣收尾。', quip: '師兄說這叫劍意。你看了一下，像是很貴的加班。',
     moves: [
-      { id: 'huashan-start', name: '起手式', description: '穩定傷害，累積劍式。', qiCost: 0, action: strike('huashan-start', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.06 }, { type: 'apply-status', id: 'sword-form', stacks: 1, target: 'self' }]) },
-      { id: 'huashan-break', name: '破雲一線', description: '消耗劍式，狠狠收尾。', qiCost: 12, action: strike('huashan-break', 'selected-enemy', 12, [{ type: 'consume-status-damage', id: 'sword-form', damagePerStack: 13, statusTarget: 'self' }, { type: 'damage', multiplier: 1.28 }]) },
-      { id: 'huashan-breath', name: '收劍調息', description: '回內力，也把人生放回劍鞘。', qiCost: 0, action: strike('huashan-breath', 'self', 0, [{ type: 'restore-qi', amount: 12 }, { type: 'guard', amount: 8 }]) },
-      { id: 'huashan-screen', name: '回風守勢', description: '擋一下，順便讓人知道你有在上課。', qiCost: 7, action: strike('huashan-screen', 'self', 7, [{ type: 'counter', damage: 13 }, { type: 'reduce-next-hit', percent: .45 }]) },
+      { id: 'huashan-start', name: '起手式', description: '穩定傷害，累積劍式。', qiCost: 0, action: strike('huashan-start', '起手式', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.06 }, { type: 'apply-status', id: 'sword-form', stacks: 1, recipient: 'actor' }]) },
+      { id: 'huashan-break', name: '破雲一線', description: '消耗劍式，狠狠收尾。', qiCost: 12, action: strike('huashan-break', '破雲一線', 'selected-enemy', 12, [{ type: 'consume-status-damage', id: 'sword-form', damagePerStack: 13, statusOwner: 'actor' }, { type: 'damage', multiplier: 1.28 }]) },
+      { id: 'huashan-breath', name: '收劍調息', description: '回內力，也把人生放回劍鞘。', qiCost: 0, action: strike('huashan-breath', '收劍調息', 'self', 0, [{ type: 'restore-qi', amount: 12, recipient: 'actor' }, { type: 'guard', amount: 8, recipient: 'actor' }]) },
+      { id: 'huashan-screen', name: '回風守勢', description: '擋一下，順便讓人知道你有在上課。', qiCost: 7, action: strike('huashan-screen', '回風守勢', 'self', 7, [{ type: 'counter', damage: 13 }, { type: 'reduce-next-hit', percent: .45, recipient: 'actor' }]) },
     ],
   },
   {
     id: 'shaolin', name: '少林', subtitle: '把麻煩站到沒力', color: '#e8c669', icon: '拳', style: '護體、續航、反震，越被打越難處理。', quip: '師父說忍耐是修行。你覺得他只是沒預算修屋頂。',
     moves: [
-      { id: 'shaolin-palm', name: '伏虎掌', description: '穩穩一掌，附帶護體。', qiCost: 0, action: strike('shaolin-palm', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.02 }, { type: 'guard', amount: 8 }]) },
-      { id: 'shaolin-bell', name: '金鐘撞', description: '有盾才叫輸出，沒有叫意外。', qiCost: 13, action: strike('shaolin-bell', 'selected-enemy', 13, [{ type: 'damage', multiplier: 1.45 }, { type: 'guard', amount: 18 }]) },
-      { id: 'shaolin-meditate', name: '坐忘', description: '回氣回血，暫時不回訊息。', qiCost: 0, action: strike('shaolin-meditate', 'self', 0, [{ type: 'heal', amount: 18 }, { type: 'restore-qi', amount: 8 }]) },
-      { id: 'shaolin-stance', name: '不動明王', description: '下次挨打少一點，嘴硬多一點。', qiCost: 8, action: strike('shaolin-stance', 'self', 8, [{ type: 'guard', amount: 24 }, { type: 'reduce-next-hit', percent: .55 }]) },
+      { id: 'shaolin-palm', name: '伏虎掌', description: '穩穩一掌，附帶護體。', qiCost: 0, action: strike('shaolin-palm', '伏虎掌', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.02 }, { type: 'guard', amount: 8, recipient: 'actor' }]) },
+      { id: 'shaolin-bell', name: '金鐘撞', description: '有盾才叫輸出，沒有叫意外。', qiCost: 13, action: strike('shaolin-bell', '金鐘撞', 'selected-enemy', 13, [{ type: 'damage', multiplier: 1.45 }, { type: 'guard', amount: 18, recipient: 'actor' }]) },
+      { id: 'shaolin-meditate', name: '坐忘', description: '回氣回血，暫時不回訊息。', qiCost: 0, action: strike('shaolin-meditate', '坐忘', 'self', 0, [{ type: 'heal', amount: 18, recipient: 'actor' }, { type: 'restore-qi', amount: 8, recipient: 'actor' }]) },
+      { id: 'shaolin-stance', name: '不動明王', description: '下次挨打少一點，嘴硬多一點。', qiCost: 8, action: strike('shaolin-stance', '不動明王', 'self', 8, [{ type: 'guard', amount: 24, recipient: 'actor' }, { type: 'reduce-next-hit', percent: .55, recipient: 'actor' }]) },
     ],
   },
   {
     id: 'wudang', name: '武當', subtitle: '借力可以，借錢不行', color: '#7ab8c5', icon: '太', style: '調息、化勁、反擊，把對方的努力退回去。', quip: '武當講究順勢而為。你第一天就發現勢通常是別人安排的。',
     moves: [
-      { id: 'wudang-cloud', name: '雲手', description: '借勢一擊，讓對方先想想。', qiCost: 0, action: strike('wudang-cloud', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.04 }, { type: 'expose-next-hit', percent: .2 }]) },
-      { id: 'wudang-turn', name: '借力打力', description: '先把局面推回去。', qiCost: 11, action: strike('wudang-turn', 'selected-enemy', 11, [{ type: 'damage', multiplier: 1.3 }, { type: 'reduce-next-hit', percent: .4 }]) },
-      { id: 'wudang-breath', name: '太和吐納', description: '呼吸一下，世界不一定會好。', qiCost: 0, action: strike('wudang-breath', 'self', 0, [{ type: 'heal', amount: 12 }, { type: 'restore-qi', amount: 13 }]) },
-      { id: 'wudang-circle', name: '圓轉如意', description: '把對方的熱情退貨。', qiCost: 8, action: strike('wudang-circle', 'self', 8, [{ type: 'counter', damage: 17 }, { type: 'guard', amount: 12 }]) },
+      { id: 'wudang-cloud', name: '雲手', description: '借勢一擊，讓對方先想想。', qiCost: 0, action: strike('wudang-cloud', '雲手', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.04 }, { type: 'expose-next-hit', percent: .2, recipient: 'target' }]) },
+      { id: 'wudang-turn', name: '借力打力', description: '先把局面推回去。', qiCost: 11, action: strike('wudang-turn', '借力打力', 'selected-enemy', 11, [{ type: 'damage', multiplier: 1.3 }, { type: 'reduce-next-hit', percent: .4, recipient: 'actor' }]) },
+      { id: 'wudang-breath', name: '太和吐納', description: '呼吸一下，世界不一定會好。', qiCost: 0, action: strike('wudang-breath', '太和吐納', 'self', 0, [{ type: 'heal', amount: 12, recipient: 'actor' }, { type: 'restore-qi', amount: 13, recipient: 'actor' }]) },
+      { id: 'wudang-circle', name: '圓轉如意', description: '把對方的熱情退貨。', qiCost: 8, action: strike('wudang-circle', '圓轉如意', 'self', 8, [{ type: 'counter', damage: 17 }, { type: 'guard', amount: 12, recipient: 'actor' }]) },
     ],
   },
   {
     id: 'beggar', name: '丐幫', subtitle: '人脈很廣，住處很窄', color: '#92b86d', icon: '棍', style: '連打、回氣、靠一點人情和很多臉皮。', quip: '丐幫消息最快，因為大家都在路邊，沒有會議室可以躲。',
     moves: [
-      { id: 'beggar-stick', name: '打狗棒影', description: '一棍先問候，第二棍再解釋。', qiCost: 0, action: strike('beggar-stick', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.1 }]) },
-      { id: 'beggar-wave', name: '百家一棍', description: '把街坊的意見集中寄出。', qiCost: 12, action: strike('beggar-wave', 'selected-enemy', 12, [{ type: 'damage', multiplier: 1.5 }, { type: 'restore-qi', amount: 5 }]) },
-      { id: 'beggar-wine', name: '一口濁酒', description: '不保證衛生，保證有精神。', qiCost: 0, action: strike('beggar-wine', 'self', 0, [{ type: 'heal', amount: 15 }, { type: 'restore-qi', amount: 10 }]) },
-      { id: 'beggar-footwork', name: '巷口步', description: '先退半步，讓他以為自己贏了。', qiCost: 7, action: strike('beggar-footwork', 'self', 7, [{ type: 'guard', amount: 16 }, { type: 'counter', damage: 12 }]) },
+      { id: 'beggar-stick', name: '打狗棒影', description: '一棍先問候，第二棍再解釋。', qiCost: 0, action: strike('beggar-stick', '打狗棒影', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.1 }]) },
+      { id: 'beggar-wave', name: '百家一棍', description: '把街坊的意見集中寄出。', qiCost: 12, action: strike('beggar-wave', '百家一棍', 'selected-enemy', 12, [{ type: 'damage', multiplier: 1.5 }, { type: 'restore-qi', amount: 5, recipient: 'actor' }]) },
+      { id: 'beggar-wine', name: '一口濁酒', description: '不保證衛生，保證有精神。', qiCost: 0, action: strike('beggar-wine', '一口濁酒', 'self', 0, [{ type: 'heal', amount: 15, recipient: 'actor' }, { type: 'restore-qi', amount: 10, recipient: 'actor' }]) },
+      { id: 'beggar-footwork', name: '巷口步', description: '先退半步，讓他以為自己贏了。', qiCost: 7, action: strike('beggar-footwork', '巷口步', 'self', 7, [{ type: 'guard', amount: 16, recipient: 'actor' }, { type: 'counter', damage: 12 }]) },
     ],
   },
   {
     id: 'emei', name: '峨眉', subtitle: '手很穩，耐心有限', color: '#c88cad', icon: '針', style: '點穴、精準與照料，讓對方每一步都不舒服。', quip: '峨眉的規矩不多，主要是每條都能讓你後悔。',
     moves: [
-      { id: 'emei-needle', name: '拂塵點穴', description: '精準一擊，讓對方先別急。', qiCost: 0, action: strike('emei-needle', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.05 }, { type: 'expose-next-hit', percent: .25 }]) },
-      { id: 'emei-moon', name: '月影封脈', description: '把你的人生行程往後排。', qiCost: 12, action: strike('emei-moon', 'selected-enemy', 12, [{ type: 'damage', multiplier: 1.35 }, { type: 'apply-status', id: 'toxin', stacks: 1, target: 'target' }]) },
-      { id: 'emei-medicine', name: '靜心敷藥', description: '先照顧自己，這不叫自私。', qiCost: 0, action: strike('emei-medicine', 'self', 0, [{ type: 'heal', amount: 22 }]) },
-      { id: 'emei-parry', name: '清規攔人', description: '拒絕得很有禮貌，但很難過。', qiCost: 7, action: strike('emei-parry', 'self', 7, [{ type: 'guard', amount: 14 }, { type: 'counter', damage: 15 }]) },
+      { id: 'emei-needle', name: '拂塵點穴', description: '精準一擊，讓對方先別急。', qiCost: 0, action: strike('emei-needle', '拂塵點穴', 'selected-enemy', 0, [{ type: 'damage', multiplier: 1.05 }, { type: 'expose-next-hit', percent: .25, recipient: 'target' }]) },
+      { id: 'emei-moon', name: '月影封脈', description: '把你的人生行程往後排。', qiCost: 12, action: strike('emei-moon', '月影封脈', 'selected-enemy', 12, [{ type: 'damage', multiplier: 1.35 }, { type: 'apply-status', id: 'toxin', stacks: 1, recipient: 'target' }]) },
+      { id: 'emei-medicine', name: '靜心敷藥', description: '先照顧自己，這不叫自私。', qiCost: 0, action: strike('emei-medicine', '靜心敷藥', 'self', 0, [{ type: 'heal', amount: 22, recipient: 'actor' }]) },
+      { id: 'emei-parry', name: '清規攔人', description: '拒絕得很有禮貌，但很難過。', qiCost: 7, action: strike('emei-parry', '清規攔人', 'self', 7, [{ type: 'guard', amount: 14, recipient: 'actor' }, { type: 'counter', damage: 15 }]) },
     ],
   },
   {
     id: 'tang', name: '唐門', subtitle: '不近人情，近距離很危險', color: '#a681d1', icon: '鏢', style: '暗器、毒性、延遲，讓戰鬥自己變糟。', quip: '唐門說暗器是藝術。你看帳單後覺得確實很藝術。',
     moves: [
-      { id: 'tang-needle', name: '細雨針', description: '傷害不高，心情會慢慢變差。', qiCost: 0, action: strike('tang-needle', 'selected-enemy', 0, [{ type: 'damage', multiplier: .92 }, { type: 'apply-status', id: 'toxin', stacks: 1, target: 'target' }]) },
-      { id: 'tang-bloom', name: '暴雨梨花', description: '把累積的不滿一次寄出。', qiCost: 12, action: strike('tang-bloom', 'selected-enemy', 12, [{ type: 'consume-status-damage', id: 'toxin', damagePerStack: 18 }, { type: 'damage', multiplier: 1.18 }]) },
-      { id: 'tang-antidote', name: '以毒養氣', description: '聽起來不健康，但有效。', qiCost: 0, action: strike('tang-antidote', 'self', 0, [{ type: 'heal', amount: 15 }, { type: 'restore-qi', amount: 10 }]) },
-      { id: 'tang-smoke', name: '迷煙退場', description: '不叫逃跑，叫保留選項。', qiCost: 8, action: strike('tang-smoke', 'self', 8, [{ type: 'guard', amount: 18 }, { type: 'counter', damage: 10 }]) },
+      { id: 'tang-needle', name: '細雨針', description: '傷害不高，心情會慢慢變差。', qiCost: 0, action: strike('tang-needle', '細雨針', 'selected-enemy', 0, [{ type: 'damage', multiplier: .92 }, { type: 'apply-status', id: 'toxin', stacks: 1, recipient: 'target' }]) },
+      { id: 'tang-bloom', name: '暴雨梨花', description: '把累積的不滿一次寄出。', qiCost: 12, action: strike('tang-bloom', '暴雨梨花', 'selected-enemy', 12, [{ type: 'consume-status-damage', id: 'toxin', damagePerStack: 18, statusOwner: 'target' }, { type: 'damage', multiplier: 1.18 }]) },
+      { id: 'tang-antidote', name: '以毒養氣', description: '聽起來不健康，但有效。', qiCost: 0, action: strike('tang-antidote', '以毒養氣', 'self', 0, [{ type: 'heal', amount: 15, recipient: 'actor' }, { type: 'restore-qi', amount: 10, recipient: 'actor' }]) },
+      { id: 'tang-smoke', name: '迷煙退場', description: '不叫逃跑，叫保留選項。', qiCost: 8, action: strike('tang-smoke', '迷煙退場', 'self', 8, [{ type: 'guard', amount: 18, recipient: 'actor' }, { type: 'counter', damage: 10 }]) },
     ],
   },
 ];
@@ -158,11 +168,11 @@ export const burdens = ['家裡欠了錢', '有人等你回家', '師父欠你�
 const identityRarities: Record<IdentityKind, Record<string, RarityId>> = {
   origin: { '藥鋪學徒': 'common', '鏢局雜役': 'common', '縣城學徒': 'rare', '商隊小孩': 'rare', '沒落軍戶': 'legendary', '寺外棄童': 'legendary' },
   trait: {
-    '吃苦耐勞': 'common', '臉皮很厚': 'common', '手腳俐落': 'common', '會看人臉色': 'common', '記路很牢': 'common', '不愛空手回家': 'common',
-    '雨天手穩': 'rare', '很會記仇': 'rare', '人多反而冷靜': 'rare', '越窮越有志氣': 'rare', '先禮後兵': 'rare', '氣走得太急': 'rare',
-    '過目不忘': 'legendary', '運氣不太好': 'legendary', '天妒英才': 'legendary', '百脈俱通': 'legendary', '背水才會贏': 'legendary', '四海皆兄弟': 'legendary',
+    '臉皮很厚': 'common', '會看人臉色': 'common', '記路很牢': 'common', '不愛空手回家': 'common', '雨天手穩': 'common', '很會記仇': 'common',
+    '手腳俐落': 'rare', '人多反而冷靜': 'rare', '越窮越有志氣': 'rare', '先禮後兵': 'rare', '氣走得太急': 'rare', '過目不忘': 'rare',
+    '吃苦耐勞': 'legendary', '運氣不太好': 'legendary', '天妒英才': 'legendary', '百脈俱通': 'legendary', '背水才會贏': 'legendary', '四海皆兄弟': 'legendary',
   },
-  burden: { '家裡欠了錢': 'common', '大家以為你很有錢': 'common', '有人等你回家': 'rare', '你其實很怕打架': 'rare', '師父欠你一句道歉': 'legendary', '一封信一直沒寄': 'legendary' },
+  burden: { '家裡欠了錢': 'common', '大家以為你很有錢': 'common', '師父欠你一句道歉': 'rare', '一封信一直沒寄': 'rare', '有人等你回家': 'legendary', '你其實很怕打架': 'legendary' },
 };
 const friends = ['阿棠', '石見山', '柳小七', '顧晚舟', '沈二娘', '唐十三'];
 const rivals = ['范少白', '段鐵嘴', '莫問天', '金如意', '霍三娘', '葉無聲'];
@@ -173,9 +183,9 @@ function rarityFromSeed(seed: string) {
   return rarities.find((rarity) => { ceiling += rarity.chance; return roll <= ceiling; }) ?? rarities[0];
 }
 
-function pickIdentity<T extends string>(kind: IdentityKind, items: readonly T[], seed: string): T {
+function pickIdentity<T extends string>(kind: IdentityKind, items: readonly T[], seed: string, excluded?: string | null): T {
   const rarity = rarityFromSeed(`${seed}:rarity`);
-  const pool = items.filter((item) => identityRarities[kind][item] === rarity.id);
+  const pool = items.filter((item) => identityRarities[kind][item] === rarity.id && item !== excluded);
   return pick(pool.length ? pool : items, `${seed}:value:${rarity.id}`);
 }
 
@@ -193,8 +203,8 @@ const burdenBonus: Partial<Record<(typeof burdens)[number], Partial<Record<StatK
   '一封信一直沒寄': { will: 3, money: -8 },
 };
 const traitCopy: Record<(typeof traits)[number], string> = {
-  '過目不忘': '練功得到武學 +24；但每次苦練氣血 -8。記得太清楚，也比較不會停。', '雨天手穩': '雨天攻擊 +8；無雨時攻擊 -2。手穩，天氣不一定配合。', '很會記仇': '每層舊傷提供攻擊 +3；舊傷越多，戰後恢復越差。',
-  '吃苦耐勞': '最大氣血 +12；勝戰後恢復最大氣血 72%（原為 60%）。', '臉皮很厚': '接差事銀兩 +4、名聲額外 +1。臉皮沒變薄，荷包比較沒那麼薄。', '運氣不太好': '每場敵人攻擊 +2；勝戰武學額外 +4，敗戰額外 +14。麻煩更多，悟得也更多。',
+  '過目不忘': '研習類準備成功時造詣加倍；但每次深入研習氣血 -8。記得太清楚，也比較不會停。', '雨天手穩': '雨天攻擊 +8；無雨時攻擊 -2。手穩，天氣不一定配合。', '很會記仇': '每 2 點宿敵提供攻擊 +3；每點宿敵令戰後恢復少 2%，最低 40%。',
+  '吃苦耐勞': '最大氣血 +12；勝戰後恢復最大氣血 72%（原為 60%）；速度 -1。你很能熬，快是另一回事。', '臉皮很厚': '議價類準備成功時銀兩 +4，成功率 +15%。臉皮沒變薄，荷包比較沒那麼薄。', '運氣不太好': '每場敵人攻擊 +2；勝戰造詣額外 +14。麻煩更多，活下來也悟得更多。',
   '手腳俐落': '每場速度 +2。你不一定想得快，但通常先動。', '會看人臉色': '管閒事時人情與交情額外 +1。先看懂，再伸手。',
   '記路很牢': '風天戰鬥防禦 +3。別人忙著擋風，你還記得退路。', '不愛空手回家': '每場勝戰多帶回銀兩 +2。多少都算有交代。',
   '人多反而冷靜': '面對兩名以上敵人攻擊 +7；單挑時攻擊 -2。人少了，反而不知道看誰。', '越窮越有志氣': '銀兩不超過 10 時攻擊 +7；有錢時攻擊 -2。安逸會讓你分心。',
@@ -203,8 +213,8 @@ const traitCopy: Record<(typeof traits)[number], string> = {
   '背水才會贏': '開戰氣血至多保留 55%，換取攻擊 +14、護盾 +14。你總要快輸了才像會贏。', '四海皆兄弟': '管閒事時人情與交情 +6，交情 3 就有朋友助戰；獨自上場時攻擊 -5。',
 };
 const burdenCopy: Record<(typeof burdens)[number], string> = {
-  '家裡欠了錢': '開局銀兩 -6；每次接差事再少賺 2。', '有人等你回家': '管閒事時人情 +5；但只恢復氣血 +6。你總得留一點力氣回去。', '師父欠你一句道歉': '入門期攻擊 +7；其他人生階段攻擊 -2。這口氣很強，也很窄。',
-  '你其實很怕打架': '每場先得護盾 +16；攻擊 -3。怕得有用，打得保守。', '一封信一直沒寄': '心性 +3；開局銀兩 -8。你把盤纏花在找一個始終沒寄出的地址。', '大家以為你很有錢': '每次接差事少賺 3。名聲先到了，錢沒有。',
+  '家裡欠了錢': '開局銀兩 -6；議價成功時再少賺 2。', '有人等你回家': '保護他人成功時人情與交情各額外 +2。有人等，所以你更知道要把誰送回去。', '師父欠你一句道歉': '入門期攻擊 +7；其他人生階段攻擊 -2。這口氣很強，也很窄。',
+  '你其實很怕打架': '每場先得護盾 +16；攻擊 -3。怕得有用，打得保守。', '一封信一直沒寄': '心性 +3；開局銀兩 -8。你把盤纏花在找一個始終沒寄出的地址。', '大家以為你很有錢': '議價成功時少賺 3。名聲先到了，錢沒有。',
 };
 
 export function identityDetail(kind: IdentityKind, value: string) {
@@ -217,68 +227,119 @@ export function identityRarity(kind: IdentityKind, value: string) {
   return rarities.find((rarity) => rarity.id === id) ?? rarities[0];
 }
 
+export function hasTalent(run: Pick<LifeRun, 'trait' | 'inheritedTrait'>, talent: string) {
+  return run.trait === talent || run.inheritedTrait === talent;
+}
+
 export function phaseForTurn(turn: number) { return phases.find((phase) => turn >= phase.start && turn <= phase.end) ?? phases.at(-1)!; }
 export function sectFor(id: SectId | null) { return sects.find((sect) => sect.id === id) ?? sects[0]; }
 export function difficultyFor(id: DifficultyId) { return difficulties.find((difficulty) => difficulty.id === id) ?? difficulties[1]; }
-function helpConnection(run: LifeRun) {
-  return 2 + (run.burden === '有人等你回家' ? 3 : 0) + (run.trait === '會看人臉色' ? 1 : 0) + (run.trait === '四海皆兄弟' ? 4 : 0);
+function maximumHp(stats: Record<StatKey, number>, talents: Pick<LifeRun, 'trait' | 'inheritedTrait'>) {
+  return 66 + stats.constitution * 7 + (hasTalent(talents, '吃苦耐勞') ? 12 : 0) - (hasTalent(talents, '天妒英才') ? 18 : 0) - (hasTalent(talents, '百脈俱通') ? 14 : 0);
 }
-function maximumHp(stats: Record<StatKey, number>, trait: string) {
-  return 66 + stats.constitution * 7 + (trait === '吃苦耐勞' ? 12 : 0) - (trait === '天妒英才' ? 18 : 0) - (trait === '百脈俱通' ? 14 : 0);
+function maximumQi(stats: Record<StatKey, number>, talents: Pick<LifeRun, 'trait' | 'inheritedTrait'>) {
+  return 24 + stats.will * 3 + (hasTalent(talents, '百脈俱通') ? 24 : 0);
 }
-function maximumQi(stats: Record<StatKey, number>, trait: string) {
-  return 24 + stats.will * 3 + (trait === '百脈俱通' ? 24 : 0);
+const tagTalentBonuses: Partial<Record<ChoiceTag, Array<[string, number]>>> = {
+  study: [['過目不忘', 15], ['吃苦耐勞', 8]], bargain: [['臉皮很厚', 15], ['不愛空手回家', 8]], protect: [['會看人臉色', 15], ['四海皆兄弟', 15]], trick: [['手腳俐落', 12], ['記路很牢', 8]], force: [['很會記仇', 10]], parley: [['先禮後兵', 12]],
+};
+function choiceBonuses(run: LifeRun, choice: LifeChoice) {
+  return choice.tags.flatMap((tag) => tagTalentBonuses[tag] ?? []).filter(([talent]) => hasTalent(run, talent));
 }
-export function choiceRewardFor(run: LifeRun, choiceId: LifeChoice['id']) {
-  if (choiceId === 'train') return `武學 +${run.trait === '過目不忘' ? 24 : 12}、內力 +6${run.trait === '過目不忘' ? '、氣血 -8' : ''}`;
-  if (choiceId === 'work') return `銀兩 +${(run.trait === '臉皮很厚' ? 14 : 10) - (run.burden === '家裡欠了錢' ? 2 : 0) - (run.burden === '大家以為你很有錢' ? 3 : 0)}、名聲 +${run.trait === '臉皮很厚' ? 2 : 1}`;
-  return `人情 +${helpConnection(run)}、氣血 +${run.burden === '有人等你回家' ? 6 : 10}`;
+export function choiceChanceFor(run: LifeRun, choice: LifeChoice) {
+  const talentBonus = choiceBonuses(run, choice).reduce((total, [, bonus]) => total + bonus, 0);
+  return Math.max(35, Math.min(92, 30 + run.stats[choice.check.primary] * 4 + run.stats[choice.check.secondary] * 2 + talentBonus));
+}
+export function choiceChanceDetailFor(run: LifeRun, choice: LifeChoice) {
+  const bonuses = choiceBonuses(run, choice).map(([talent, bonus]) => `${talent} +${bonus}%`);
+  return `${statNames[choice.check.primary]} ${run.stats[choice.check.primary]}、${statNames[choice.check.secondary]} ${run.stats[choice.check.secondary]}${bonuses.length ? ` · ${bonuses.join('、')}` : ''}`;
+}
+export function choiceSucceededFor(run: LifeRun, choice: LifeChoice) {
+  return range(`${run.seed}:choice:${run.turn}:${choice.id}`, 1, 100) <= choiceChanceFor(run, choice);
+}
+function adjustedEffects(run: LifeRun, choice: LifeChoice, effects: LifeEffect[]) {
+  const adjusted = effects.map((effect) => ({ ...effect }));
+  if (choice.tags.includes('study') && hasTalent(run, '過目不忘')) {
+    let studied = false;
+    for (const effect of adjusted) if (effect.resource === 'proficiency' && effect.amount > 0) { effect.amount *= 2; studied = true; }
+    if (studied) adjusted.push({ type: 'resource', resource: 'hp', amount: -8 });
+  }
+  if (choice.tags.includes('bargain')) {
+    for (const effect of adjusted) if (effect.resource === 'money' && effect.amount > 0) effect.amount += (hasTalent(run, '臉皮很厚') ? 4 : 0) - (run.burden === '家裡欠了錢' ? 2 : 0) - (run.burden === '大家以為你很有錢' ? 3 : 0);
+  }
+  if (choice.tags.includes('protect')) {
+    for (const effect of adjusted) if ((effect.resource === 'bond' || effect.resource === 'friendship') && effect.amount > 0) effect.amount += (run.burden === '有人等你回家' ? 2 : 0) + (hasTalent(run, '會看人臉色') ? 1 : 0) + (hasTalent(run, '四海皆兄弟') ? 3 : 0);
+  }
+  return adjusted;
+}
+const resourceLabels: Record<LifeResource, string> = { proficiency: '造詣', money: '銀兩', reputation: '名聲', bond: '人情', friendship: '交情', rivalry: '芥蒂', hp: '氣血', qi: '內力' };
+function describePreparation(preparation: BattlePreparation) {
+  return [preparation.guard ? `起手護體 +${preparation.guard}` : '', preparation.attack ? `本戰力道 +${preparation.attack}` : '', preparation.defense ? `本戰防禦 +${preparation.defense}` : '', preparation.speed ? `本戰身法 +${preparation.speed}` : '', preparation.enemyAttack ? `敵方攻擊 ${preparation.enemyAttack > 0 ? '+' : ''}${preparation.enemyAttack}` : '', preparation.inviteFriend ? '朋友助戰' : ''].filter(Boolean);
+}
+export function describeChoiceEffects(run: LifeRun, choice: LifeChoice, succeeded: boolean) {
+  const outcomeEffects = adjustedEffects(run, choice, succeeded ? choice.successEffects : choice.failureEffects);
+  const totals = [...adjustedEffects(run, choice, choice.commitEffects), ...outcomeEffects].reduce<Partial<Record<LifeResource, number>>>((result, effect) => ({ ...result, [effect.resource]: (result[effect.resource] ?? 0) + effect.amount }), {});
+  const all = (Object.entries(totals) as Array<[LifeResource, number]>).filter(([, amount]) => amount !== 0).map(([resource, amount]) => `${resourceLabels[resource]} ${amount >= 0 ? '+' : ''}${amount}`);
+  return [...all, ...describePreparation(succeeded ? choice.battlePreparation.success : choice.battlePreparation.failure)].join('、') || '沒有額外效果';
+}
+export function choiceCommitmentFor(run: LifeRun, choice: LifeChoice) {
+  return adjustedEffects(run, choice, choice.commitEffects).map((effect) => `${resourceLabels[effect.resource]} ${effect.amount >= 0 ? '+' : ''}${effect.amount}`).join('、');
+}
+export function choiceRewardFor(run: LifeRun, choice: LifeChoice) { return describeChoiceEffects(run, choice, true); }
+export function choiceFailureFor(run: LifeRun, choice: LifeChoice) { return describeChoiceEffects(run, choice, false); }
+
+export function preparationFeedbackFor(run: LifeRun, event: LifeEvent, choice: LifeChoice, succeeded = choiceSucceededFor(run, choice)): PreparationFeedback {
+  const outcome = succeeded ? 'success' : 'failure';
+  return { outcome, chance: choiceChanceFor(run, choice), effect: describeChoiceEffects(run, choice, succeeded), headline: succeeded ? choice.feedback.successHeadline : choice.feedback.failureHeadline, bridge: succeeded ? choice.feedback.successBridge : choice.feedback.failureBridge, actionLabel: succeeded ? choice.feedback.successAction : choice.feedback.failureAction, fightReason: event.conflict };
 }
 
-export function newLife(seed: string, name: string, difficulty: DifficultyId = 'standard', legacyRank = 0): LifeRun {
+export function newLife(seed: string, name: string, difficulty: DifficultyId = 'standard', inheritedTrait: string | null = null): LifeRun {
+  const carriedTrait = inheritedTrait && traits.includes(inheritedTrait as (typeof traits)[number]) ? inheritedTrait : null;
   const origin = pickIdentity('origin', origins, `${seed}:origin`);
-  const trait = pickIdentity('trait', traits, `${seed}:trait`);
+  const trait = pickIdentity('trait', traits, `${seed}:trait`, carriedTrait);
   const burden = pickIdentity('burden', burdens, `${seed}:burden`);
+  const talentState = { trait, inheritedTrait: carriedTrait };
   const stats = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, range(`${seed}:${key}`, 3, 7) + (originBonus[origin][key] ?? 0) + (burdenBonus[burden]?.[key] ?? 0)])) as Record<StatKey, number>;
-  const potential = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, stats[key] + range(`${seed}:potential:${key}`, 3, 6) + (trait === '天妒英才' ? 4 : 0)])) as Record<StatKey, number>;
-  const maxHp = maximumHp(stats, trait);
-  const maxQi = maximumQi(stats, trait);
+  const potential = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, stats[key] + range(`${seed}:potential:${key}`, 3, 6) + (hasTalent(talentState, '天妒英才') ? 4 : 0)])) as Record<StatKey, number>;
+  const maxHp = maximumHp(stats, talentState);
+  const maxQi = maximumQi(stats, talentState);
   const money = Math.max(0, range(`${seed}:money`, 8, 22) + (originBonus[origin].money ?? 0) + (burdenBonus[burden]?.money ?? 0) - (burden === '家裡欠了錢' ? 6 : 0));
-  return { version: 7, seed, name: name.trim() || '無名少俠', origin, trait, burden, difficulty, legacyRank, legacyClaimed: false, sectId: null, age: 12, year: 1590, turn: 0, stats, potential, hp: maxHp, maxHp, qi: maxQi, maxQi, money, mastery: legacyRank * 5, reputation: 0, bond: 0, friendName: pick(friends, `${seed}:friend`), rivalName: pick(rivals, `${seed}:rival`), friendship: 0, rivalry: 0, injury: 0, moments: [], chronicle: [], battle: null, battleMeta: null, result: null };
+  return { version: 12, seed, name: name.trim() || '無名少俠', origin, trait, burden, difficulty, inheritedTrait: carriedTrait, sectId: null, age: 12, year: 1590, turn: 0, stats, potential, hp: maxHp, maxHp, qi: maxQi, maxQi, money, proficiency: 0, insights: [], reputation: 0, bond: 0, friendName: pick(friends, `${seed}:friend`), rivalName: pick(rivals, `${seed}:rival`), friendship: 0, rivalry: 0, injury: 0, dead: false, deathReason: null, moments: [], chronicle: [], battle: null, battleMeta: null, result: null };
 }
 
-export function eventFor(run: LifeRun): LifeEvent {
+function baseEventFor(run: LifeRun): Omit<LifeEvent, 'choices'> {
   const phase = phaseForTurn(run.turn);
   const sect = sectFor(run.sectId);
-  const themes: Record<LifePhase, Array<{ title: string; place: string; lead: string; enemy: string }>> = {
+  const themes: Record<LifePhase, Array<{ title: string; place: string; lead: string; conflict: string; enemy: string }>> = {
     少年: [
-      { title: '柴房的第一堂課', place: '城外破廟', lead: '你只是想找個不漏雨的地方練拳，結果發現這裡的住戶對共享空間有很強的意見。', enemy: '地痞' },
-      { title: '學費可以晚點交嗎', place: '山門石階', lead: '招收新弟子的告示寫得很有氣勢，收費細則寫得更有。', enemy: '看門弟子' },
-      { title: '把人送回家', place: '夜市巷口', lead: '你幫人搬貨，對方說只是一小段路。江湖裡「一小段」通常會出事。', enemy: '醉漢' },
+      { title: '柴房的第一堂課', place: '城外破廟', lead: '你抱著鋪蓋走進破廟，只想借柴房躲一夜雨。三個地痞卻把門閂上，說連破屋也要繳「落腳錢」。', conflict: '他們扣住你的行囊，短刀已經出鞘；不把門前的人逼退，你和鋪蓋都走不出去。', enemy: '地痞' },
+      { title: '學費可以晚點交嗎', place: '山門石階', lead: '你踩著晨霧走到山門，招收弟子的告示寫得很有氣勢，收費細則寫得更有。你問能否晚交第一筆學費，看門弟子便把你的名字圈進「以試代繳」那一欄。', conflict: '規矩很直白：想跨過山門，就在石階前打贏看門弟子；現在退下，今年的名額便作廢。', enemy: '看門弟子' },
+      { title: '把人送回家', place: '夜市巷口', lead: '收攤後，你替一名腳夫扛貨回家。他說只隔兩條街，走到第二條時，幾個醉漢已把欠酒錢算在他頭上。', conflict: '醉漢堵死巷口，伸手搶貨，還把腳夫推倒在地；你若要把人和貨一起送到家，就得先清出一條路。', enemy: '攔路醉漢' },
     ],
     入門: [
-      { title: '門派大掃除', place: '後山演武場', lead: `${sect.name}說這叫磨練心性。你看著三十桶水，覺得心性已經磨到沒有了。`, enemy: '搶水的師兄' },
-      { title: '師兄的友善提醒', place: '練功房', lead: '有人很熱心地要幫你「測試程度」。旁邊的人已經開始下注。', enemy: '熱心師兄' },
-      { title: '山下採買', place: '市集', lead: '你只是買鹽，卻被捲進一場關於誰欠誰三文錢的武林大事。', enemy: '攤販打手' },
-      { title: '公告欄風波', place: '山門外', lead: '有人在公告欄貼了匿名批評。你本來想路過，名字卻剛好被寫得很大。', enemy: '匿名高手' },
+      { title: '三十桶水少了五桶', place: '後山演武場', lead: `${sect.name}叫你把三十桶水送上演武場，說這叫磨練心性。走到半山，你撞見幾名師兄正把其中五桶轉賣給山下酒樓。`, conflict: '領頭師兄要你當作沒看見，手卻已按上兵器；水送不齊，受罰的是你，想送齊就得從他手裡拿回來。', enemy: '截水師兄' },
+      { title: '師兄說只是切磋', place: '練功房', lead: '一名師兄當眾說要替你「測試程度」，旁邊的人很快擺好傷藥，也很快開了賭盤。你婉拒一次，他便把練功房的門扣上。', conflict: '這已不是一句玩笑：他要用你立威，不肯讓路；你若不接招，今天便只能躺著出去。', enemy: '熱心師兄' },
+      { title: '三文錢的山門顏面', place: '市集', lead: '你奉命下山買鹽，攤販卻說上回來的同門還欠三文錢。你正要掏錢，攤後的打手已把整袋門派採買扣下。', conflict: '打手認定你會為了山門顏面忍氣吞聲，連人帶貨一起圍住；鹽可以不要，但你得先保住同行的小弟子。', enemy: '攤販打手' },
+      { title: '公告欄上寫著你的名字', place: '山門外', lead: '有人在公告欄貼了匿名戰帖，把你的名字寫得比罪名還大。你撕下紙張時，一名蒙面人從樹後落地，說總算等到本人。', conflict: '對方拔劍封住回山的石徑，堅持今日要分勝負；戰帖是不是誤會，得先活過這一場才有機會問。', enemy: '蒙面挑戰者' },
     ],
     闖蕩: [
-      { title: '客戶說很簡單', place: '鏢局外', lead: '委託人說路上絕對安全。這句話的江湖翻譯是：請自備棺材。', enemy: '攔路客' },
-      { title: '英雄折扣', place: '河渡', lead: '船夫認出你的名號後加了價。他說這是支持本地文化。', enemy: '河盜' },
-      { title: '不小心上了熱榜', place: '茶樓', lead: '你的一場小衝突被說書人講成三百回。有人決定親自來驗證。', enemy: '挑戰者' },
-      { title: '房租與劍氣', place: '縣城客棧', lead: '掌櫃說屋頂漏水是自然景觀，房價因此不能降。你第一次想用劍講道理。', enemy: '催租打手' },
+      { title: '客戶說路上很安全', place: '鏢局外', lead: '委託人把一只封死的木匣交給你，反覆保證路上絕對安全。你才走出鏢局後巷，攔路客便準確叫出木匣上的暗記。', conflict: '對方不要錢，只要匣子，前後出口也都有人守著；這份差事從起步就只剩打出去一條路。', enemy: '攔路客' },
+      { title: '英雄沒有船票折扣', place: '河渡', lead: '船夫認出你的名號後不但沒減價，還說載名人風險高，要多收一份。價錢尚未談完，河盜的鉤索已扣上船舷。', conflict: '河盜先割纜繩、再跳上甲板，船退不回岸；你若不把他們逼下船，滿船乘客都會順流進賊寨。', enemy: '河盜' },
+      { title: '說書人把你講成三百回', place: '茶樓', lead: '你的一場小衝突被說書人添成三百回，連你本人都聽得很有興趣。台下卻有人摔碗起身，說要當場拆穿這樁假名聲。', conflict: '挑戰者把桌椅推開，兵器直指你胸口；茶樓後門已被他的同伴守住，這場驗證顯然不收口頭答覆。', enemy: '慕名挑戰者' },
+      { title: '漏雨的房也有人催租', place: '縣城客棧', lead: '客棧屋頂漏水，掌櫃卻說那是自然景觀，房價不能降。你還在擰乾被褥，催租打手已進門拿走隔壁寡婦的藥箱抵債。', conflict: '你攔住藥箱，打手便反鎖客棧大門，叫所有欠租的人一起看清規矩；要把藥留下，你得先站住。', enemy: '催租打手' },
     ],
     成名: [
-      { title: '江湖訪談', place: '大酒樓', lead: '有人要替你做人物專訪，問題從武學一路問到你有沒有固定交往對象。', enemy: '蹭名挑戰者' },
-      { title: '名號被註冊了', place: '商會', lead: '商會說你的名號有人先拿去賣護身符。你得先證明自己是自己。', enemy: '商會護衛' },
-      { title: '舊友來借錢', place: '雨亭', lead: '舊友說不是來借錢，只是需要你用武功替他談一件很小的事。', enemy: '債主' },
+      { title: '這場訪談沒有最後一題', place: '大酒樓', lead: '一名文士說要替你作傳，問題從武學一路問到婚配，連你都開始同情自己。酒樓忽然清場，你才看見採訪桌下藏著一排短刃。', conflict: '所謂訪談只是把你留在固定座位；蹭名挑戰者已帶人封住樓梯，要拿你的敗績替自己寫第一章。', enemy: '蹭名挑戰者' },
+      { title: '你的名號已被別人買走', place: '商會', lead: '商會說你的名號早被註冊，用來賣護身符與跌打酒。你拿出自己的臉作證，管事卻說臉不在契紙上。', conflict: '你要求停賣假貨，商會護衛便把大門合上，要你留下手印再走；那手印看起來需要連手一起留下。', enemy: '商會護衛' },
+      { title: '舊友說這不是借錢', place: '雨亭', lead: '舊友說不是來借錢，只想請你陪他和債主談一件很小的事。你趕到雨亭時，才發現「很小」指的是還款期限，不是債。', conflict: '債主的人押住舊友，還要拿他的家人抵帳；你既然露面，對方便決定連你的名聲也一起收走。', enemy: '索命債主' },
     ],
     晚年: [
-      { title: '年輕人很有想法', place: '山道', lead: '新一代少俠說你的招式太老。你同意，然後決定讓他親自體驗歷史。', enemy: '新秀' },
-      { title: '最後一份委託', place: '荒村', lead: '你本來只想回家，卻又有人把希望塞到你手上。這次連拒絕都很麻煩。', enemy: '舊怨' },
+      { title: '年輕人想替江湖換榜', place: '山道', lead: '一名新秀在山道攔你，說你的招式太老、名字卻佔榜太久。你同意前半句，正想繞過去，他已把劍鞘橫在路中。', conflict: '新秀要用擊敗你替自己換榜，還帶人封住下山路；若你想平安回去，只能讓他親自見識歷史有多重。', enemy: '換榜新秀' },
+      { title: '最後一份委託沒有酬金', place: '荒村', lead: '你本來只想回家，荒村的孩子卻把一串染血的門牌塞進你手裡。多年前放走的仇家如今帶人回來，要全村替舊帳付利息。', conflict: '村口已起火，舊怨的人馬正逐戶搜人；你可以晚點退休，但村民等不到明天。', enemy: '多年舊怨' },
     ],
   };
-  const template = pick(themes[phase.name], `${run.seed}:event:${run.turn}`);
+  const orderedThemes = [...themes[phase.name]].sort((left, right) => hash(`${run.seed}:event-deck:${phase.name}:${left.title}`) - hash(`${run.seed}:event-deck:${phase.name}:${right.title}`));
+  const template = orderedThemes[(run.turn - phase.start) % orderedThemes.length];
   const power = 1 + Math.floor(run.turn / 3);
   const weather = pick(['晴', '雨', '風'] as const, `${run.seed}:weather:${run.turn}`);
   const objective = pick<EncounterObjective>([
@@ -289,69 +350,211 @@ export function eventFor(run: LifeRun): LifeEvent {
   ], `${run.seed}:objective:${run.turn}`);
   const rivalScene = run.turn === 6 || run.turn === 12;
   const rivalObjective: EncounterObjective = { id: 'duel', label: run.turn === 6 ? '第一次算帳' : '舊帳重提', description: `${run.rivalName}說這次不是挑釁，只是剛好帶了兵器。`, enemyRole: 'warrior', enemyCount: 1 };
-  return { title: rivalScene ? (run.turn === 6 ? '那個人又來了' : '名聲總會帶人回來') : template.title, place: rivalScene ? (run.turn === 6 ? '山門外石階' : '雨後茶樓') : template.place, lead: rivalScene ? (run.turn === 6 ? `${run.rivalName}說你最近太得意。你回想了一下，自己明明只是在正常呼吸。` : `${run.rivalName}隔著人群叫出你的名字。這一次，旁邊已經有人開始替你們點評。`) : template.lead, weather, objective: rivalScene ? rivalObjective : objective, enemyName: rivalScene ? run.rivalName : template.enemy, enemyRole: rivalScene ? rivalObjective.enemyRole : objective.enemyRole, enemyCount: rivalScene ? rivalObjective.enemyCount : objective.enemyCount, choices: [
-    { id: 'train', title: '先把招練熟', description: '少說兩句，先讓身體記住。', reward: '武學 +12、內力 +6', prep: '你在開打前多練了幾遍，至少不是純靠勇氣。' },
-    { id: 'work', title: '接下這份差事', description: '錢不多，但對方看起來真的會給。', reward: '銀兩 +10、名聲 +1', prep: '你先談好價錢。這在江湖裡已經算很專業。' },
-    { id: 'help', title: '管這個閒事', description: '理智說別去，腳已經先到了。', reward: '人情 +2、氣血 +10', prep: '你替人站了一次，現在得站到底。' },
-  ] };
+  const enemyName = rivalScene ? run.rivalName : template.enemy;
+  const conflict = rivalScene
+    ? (run.turn === 6 ? `${run.rivalName}拔出兵器堵住回山的石階，要你當眾認輸；今日若不分高下，誰也不會讓路。` : `${run.rivalName}已請人封住茶樓兩端，這次要用一場勝負替多年的舊帳落款。`)
+    : template.conflict;
+  const templateIndex = themes[phase.name].findIndex((item) => item.title === template.title);
+  return { id: rivalScene ? `rival-${run.turn}` : `${phase.name}-${templateIndex}`, title: rivalScene ? (run.turn === 6 ? '那個人又來了' : '名聲總會帶人回來') : template.title, place: rivalScene ? (run.turn === 6 ? '山門外石階' : '雨後茶樓') : template.place, lead: rivalScene ? (run.turn === 6 ? `${run.rivalName}說你最近太得意，還當眾翻出你們入門以來的每一筆舊帳。你回想了一下，自己明明只是在正常呼吸。` : `${run.rivalName}隔著人群叫出你的名字，桌上還擺著你們當年沒喝完的那壺酒。這一次，旁邊已經有人開始替你們點評。`) : template.lead, conflict, weather, objective: rivalScene ? rivalObjective : objective, enemyName, enemyRole: rivalScene ? rivalObjective.enemyRole : objective.enemyRole, enemyCount: rivalScene ? rivalObjective.enemyCount : objective.enemyCount };
 }
 
-function enemyActor(run: LifeRun, event: LifeEvent, index: number): BattleActor {
+type ChoiceKind = ChoiceTag;
+type AuthoredChoice = { kind: ChoiceKind; title: string; description: string };
+export const eventChoiceCopy: Record<string, [AuthoredChoice, AuthoredChoice, string]> = {
+  '柴房的第一堂課': [{ kind: 'trick', title: '踢倒柴堆卡住門', description: '借破廟裡現成的木頭拆開包圍；路會變窄，你也得在灰塵裡先動手。' }, { kind: 'parley', title: '逐筆問清這間破屋歸誰', description: '逼地痞自己說穿這筆落腳錢沒有主人；說得動就能搶到氣勢，說不動便先挨一下。' }, '借香爐照本門步法站穩'],
+  '學費可以晚點交嗎': [{ kind: 'study', title: '先看石階上的舊腳印', description: '從歷屆考生留下的痕跡猜看門弟子的起手，拿悟性換一個較穩的開局。' }, { kind: 'force', title: '請他把試代繳寫進規矩', description: '當眾接下這場考驗，讓所有人都看見勝負與學費不是同一筆帳。' }, '用本門口訣回敬這場入門試'],
+  '把人送回家': [{ kind: 'protect', title: '把貨繩繫在自己腰上', description: '先讓腳夫退到牆邊，自己連人帶貨守住巷口；護得住人，也會成為最醒目的目標。' }, { kind: 'trick', title: '把酒罈滾進醉漢腳下', description: '利用滿地雜物拆開人群，成了能搶先手，失手便會讓巷子更亂。' }, '踩著巷牆走本門短路'],
+  '三十桶水少了五桶': [{ kind: 'study', title: '從濕腳印找出藏水處', description: '先找回被轉賣的水，再照師兄搬桶時露出的破綻準備迎戰。' }, { kind: 'parley', title: '請所有人一起數到三十', description: '把帳攤在演武場眾人面前；說服旁觀者能替你站穩道理，失敗就只剩自己站穩。' }, '借水桶排成本門起手陣'],
+  '師兄說只是切磋': [{ kind: 'force', title: '先把賭盤押在自己身上', description: '把這場立威變成你的公開挑戰；氣勢與名聲都可能到手，代價是沒有退路。' }, { kind: 'trick', title: '挪走練功房的傷藥', description: '逼圍觀師兄先分心保住賭本，再從空出的角度搶一個起手。' }, '按本門規矩行一次正式切磋禮'],
+  '三文錢的山門顏面': [{ kind: 'bargain', title: '把三文欠帳拆成三張收據', description: '逐張核對誰欠了什麼，談成便連貨與面子一起拿回，談崩則要自己墊錢。' }, { kind: 'protect', title: '讓小弟子抱鹽先走', description: '你留下擋住攤販打手，換同行的人安全離開，也讓朋友知道你沒有先算自己。' }, '用本門身法護住整袋鹽'],
+  '公告欄上寫著你的名字': [{ kind: 'study', title: '把戰帖折成對方的步幅', description: '從落款、劍痕與紙上泥點推回蒙面人的架勢，讓匿名少藏一點。' }, { kind: 'parley', title: '先問他寫錯了哪條罪名', description: '拖住對方的怒氣並逼他說出真正來意；若談不開，至少讓圍觀者知道誰先拔劍。' }, '照本門拆帖法接下戰帖'],
+  '客戶說路上很安全': [{ kind: 'bargain', title: '當街重談這只木匣的價錢', description: '風險已經現形，酬金也該跟著長；談成能補銀兩，談不成連原價都可能倒貼。' }, { kind: 'trick', title: '把空匣往另一條巷子送', description: '用鏢局雜物做一個假目標，成功便拆散伏兵，失手會讓自己先暴露。' }, '以本門手法試出木匣機關'],
+  '英雄沒有船票折扣': [{ kind: 'protect', title: '先把乘客壓到船艙下', description: '你與船夫封住艙門，讓河盜只能先面對你；人情會留下，退路則不會。' }, { kind: 'force', title: '沿著鉤索反登賊船', description: '趁河盜還在拉繩時把戰場送回去，成了能奪先手，失敗就會濕著回來。' }, '踩船舷走一遍本門步法'],
+  '說書人把你講成三百回': [{ kind: 'parley', title: '請說書人先講完敗筆那回', description: '主動承認故事裡最不好看的地方，削掉挑戰者借名聲起鬨的力道。' }, { kind: 'force', title: '把桌椅排成真正的擂台', description: '既然躲不過驗證，就把規矩與見證人都擺明；贏得漂亮會留下名聲。' }, '用本門真招刪掉兩百九十九回'],
+  '漏雨的房也有人催租': [{ kind: 'protect', title: '先把藥箱塞回寡婦懷裡', description: '你站在門與病人之間，讓這筆租先找上自己；朋友與街坊會記得。' }, { kind: 'bargain', title: '拿漏水被褥抵掉半月房錢', description: '把自然景觀折算成實際損失，談成能保住藥箱，談崩就得賠上一筆。' }, '借屋樑施展本門守勢'],
+  '這場訪談沒有最後一題': [{ kind: 'study', title: '重問一遍那些過分精準的問題', description: '從問題順序推回埋伏安排，讓訪談者自己暴露誰準備先動。' }, { kind: 'trick', title: '把墨水潑向桌下短刃', description: '用一團黑色先標出所有藏兵器的位置；若判斷失手，你只會得到一件髒衣服。' }, '用本門架勢回答最後一題'],
+  '你的名號已被別人買走': [{ kind: 'bargain', title: '逐件估算假貨欠你的分成', description: '拿商會自己的帳目逼管事重談；成功可追回銀兩，失敗仍得付驗契費。' }, { kind: 'parley', title: '請買過假貨的人當場試用', description: '讓護身符自己證明有沒有用，將商會的體面變成你的開場護體。' }, '用本門真招驗明名號正身'],
+  '舊友說這不是借錢': [{ kind: 'protect', title: '先替舊友家人解開繩索', description: '把最不能承受的代價先移開；成功會深化交情，也讓你獨自承受第一輪壓力。' }, { kind: 'bargain', title: '把債拆成能活著還的期數', description: '用自己的名聲替舊友爭取喘息，談成能保人，談崩便要付出現銀。' }, '用本門規矩替舊友作保'],
+  '年輕人想替江湖換榜': [{ kind: 'study', title: '請他先演一遍所謂的新招', description: '讓新秀把銳氣展示完整，再從漂亮動作裡找出不願承認的空隙。' }, { kind: 'parley', title: '把榜單留給他，把山路留下', description: '試著拆開名次與活路；談成能省力，談不成也會讓旁人聽見你的條件。' }, '以本門老架子壓住新劍'],
+  '最後一份委託沒有酬金': [{ kind: 'protect', title: '先帶孩子走過沒有火的路', description: '把村民集中到安全處，再回頭守住入口；這份人情沒有價碼，但有人會留下。' }, { kind: 'force', title: '直接去村口叫出舊仇名字', description: '讓搜村變成只對著你的一場舊帳，成功能奪回主動，失敗便帶傷起手。' }, '把一生所學擺在村口'],
+  '那個人又來了': [{ kind: 'parley', title: '請他只算你真的做過的帳', description: '把傳聞與舊怨逐筆拆開，若能說動旁人，宿敵就少一層氣勢可借。' }, { kind: 'force', title: '當眾承認就是看他不順眼', description: '不再替這場重逢找藉口，直接拿氣勢與芥蒂換一個更強的開局。' }, '用他最熟的本門起手回敬'],
+  '名聲總會帶人回來': [{ kind: 'study', title: '從那壺舊酒回想他的習慣', description: '把多年交手留下的細節重新拼起來；看得準能深化造詣，看錯就只是懷舊。' }, { kind: 'parley', title: '請他先說贏了以後要什麼', description: '逼宿敵承認這場勝負真正想換取的東西，讓旁人不再只替你們叫好。' }, '用本門如今的路數改寫舊招'],
+};
+
+const kindRules: Record<ChoiceKind, { check: LifeChoice['check']; success: LifeEffect[]; failure: LifeEffect[]; successPrep: BattlePreparation; failurePrep: BattlePreparation; growth: StatKey }> = {
+  study: { check: { primary: 'wisdom', secondary: 'will' }, success: [{ type: 'resource', resource: 'proficiency', amount: 12 }, { type: 'resource', resource: 'qi', amount: 6 }], failure: [{ type: 'resource', resource: 'qi', amount: 2 }], successPrep: { guard: 8 }, failurePrep: {}, growth: 'wisdom' },
+  bargain: { check: { primary: 'luck', secondary: 'wisdom' }, success: [{ type: 'resource', resource: 'money', amount: 10 }, { type: 'resource', resource: 'reputation', amount: 1 }], failure: [{ type: 'resource', resource: 'money', amount: -2 }], successPrep: { defense: 2 }, failurePrep: {}, growth: 'luck' },
+  protect: { check: { primary: 'will', secondary: 'agility' }, success: [{ type: 'resource', resource: 'bond', amount: 2 }, { type: 'resource', resource: 'friendship', amount: 2 }, { type: 'resource', resource: 'hp', amount: 10 }], failure: [{ type: 'resource', resource: 'bond', amount: 1 }, { type: 'resource', resource: 'friendship', amount: 1 }], successPrep: { guard: 12, inviteFriend: true }, failurePrep: { inviteFriend: true }, growth: 'will' },
+  force: { check: { primary: 'strength', secondary: 'constitution' }, success: [{ type: 'resource', resource: 'reputation', amount: 2 }], failure: [{ type: 'resource', resource: 'hp', amount: -6 }], successPrep: { attack: 3 }, failurePrep: { attack: 1 }, growth: 'strength' },
+  trick: { check: { primary: 'agility', secondary: 'luck' }, success: [{ type: 'resource', resource: 'qi', amount: 5 }], failure: [], successPrep: { speed: 3, guard: 6, enemyAttack: -1 }, failurePrep: {}, growth: 'agility' },
+  parley: { check: { primary: 'will', secondary: 'wisdom' }, success: [{ type: 'resource', resource: 'reputation', amount: 1 }, { type: 'resource', resource: 'rivalry', amount: -1 }], failure: [{ type: 'resource', resource: 'rivalry', amount: 1 }], successPrep: { guard: 10 }, failurePrep: {}, growth: 'will' },
+};
+
+function authoredChoice(event: Omit<LifeEvent, 'choices'>, authored: AuthoredChoice, suffix: string, sourceLabel?: string, availability: ChoiceAvailability = { type: 'always' }, commitEffects: LifeEffect[] = []): LifeChoice {
+  const rule = kindRules[authored.kind];
+  return { id: `${event.id}:${suffix}`, title: authored.title, description: authored.description, sourceLabel, check: rule.check, tags: [authored.kind], availability, commitEffects, successEffects: rule.success, failureEffects: rule.failure, battlePreparation: { success: rule.successPrep, failure: rule.failurePrep }, growthStat: rule.growth, feedback: { successHeadline: `${authored.title}，這一步算準了。`, failureHeadline: `${authored.title}，事情沒有照你想的走。`, successBridge: `你的準備改變了開局；${event.enemyName}仍舊沒有收起兵器。`, failureBridge: `準備沒有站穩，${event.enemyName}已經把距離逼近。`, successAction: '帶著成果迎戰 →', failureAction: '收拾失算迎戰 →' } };
+}
+
+function conditionalChoice(run: LifeRun, event: Omit<LifeEvent, 'choices'>, fallbackTitle: string): LifeChoice {
+  const candidates = [
+    run.friendship >= 3 ? () => authoredChoice(event, { kind: 'protect', title: `請${run.friendName}替你補上空位`, description: `你們已有足夠交情，不必臨場解釋每個眼色；代價是把朋友也放進這場風險。` }, 'friend', `與${run.friendName}交情 ${run.friendship}`, { type: 'friendship', minimum: 3 }) : null,
+    run.rivalry >= 2 ? () => authoredChoice(event, { kind: 'force', title: `拿${run.rivalName}教過你的痛處試一次`, description: `你把多年芥蒂變成一個具體判斷；成功是經驗，失敗則只是又添一筆。` }, 'rival', `與${run.rivalName}芥蒂 ${run.rivalry}`, { type: 'rivalry', minimum: 2 }) : null,
+    run.injury >= 1 ? () => authoredChoice(event, { kind: 'parley', title: '先替舊傷留一條退路', description: '你不再假裝身體沒有記性，改用位置與節奏保住最容易再裂開的地方。' }, 'injury', `舊傷 ${run.injury}`, { type: 'injury', minimum: 1 }) : null,
+    run.money >= 8 ? () => authoredChoice(event, { kind: 'bargain', title: '花六文請熟路人先佈置退路', description: '這不是買勝利，只是花錢讓最糟的開局少一點；無論成敗，銀兩都不會自己走回來。' }, 'money', `持有銀兩 ${run.money}`, { type: 'money', minimum: 8 }, [{ type: 'resource', resource: 'money', amount: -6 }]) : null,
+  ];
+  const offset = hash(`choice-hook:${event.id}`) % candidates.length;
+  for (let index = 0; index < candidates.length; index += 1) { const candidate = candidates[(offset + index) % candidates.length]; if (candidate) return candidate(); }
+  return authoredChoice(event, { kind: 'study', title: fallbackTitle, description: `眼前沒有多餘人情或銀兩可借，你只能把${sectFor(run.sectId).name}練過的東西放進這個具體場合。` }, 'sect', `因為你是${sectFor(run.sectId).name}弟子`, { type: 'sect', sectId: sectFor(run.sectId).id });
+}
+
+export function eventFor(run: LifeRun): LifeEvent {
+  const event = baseEventFor(run);
+  const copy = eventChoiceCopy[event.title];
+  const [first, second, fallback] = copy ?? [{ kind: 'trick', title: `繞著${event.enemyName}找空位`, description: '先讓眼前局勢露出一個可以利用的角度。' }, { kind: 'force', title: `正面接下${event.enemyName}`, description: '不再等待局勢自己變好，直接決定第一步。' }, `按本門步法站穩`] as [AuthoredChoice, AuthoredChoice, string];
+  return { ...event, choices: [authoredChoice(event, first, 'a'), authoredChoice(event, second, 'b'), conditionalChoice(run, event, fallback)] };
+}
+
+function enemyActor(run: LifeRun, event: LifeEvent, index: number, attackDelta = 0): BattleActor {
   const scale = Math.max(1, 1 + Math.floor(run.turn / 2) + index + difficultyFor(run.difficulty).enemyScale);
   const hp = 38 + scale * 13;
-  return { id: `enemy-${index}`, name: index ? `${event.enemyName}同夥` : event.enemyName, role: event.enemyRole, side: 'enemy', hp, maxHp: hp, qi: 18 + scale * 2, maxQi: 18 + scale * 2, attack: 8 + scale * 3 + (run.trait === '運氣不太好' ? 2 : 0), defense: 3 + Math.floor(scale / 2), guard: 0, progress: 0, baseSpeed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, speed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, actionsTaken: 0, actionIds: [event.enemyRole === 'assassin' ? 'enemy-assassin' : event.enemyRole === 'tank' ? 'enemy-guard' : 'enemy-strike'], passiveIds: [] };
+  return { id: `enemy-${index}`, name: index ? `${event.enemyName}同夥` : event.enemyName, role: event.enemyRole, side: 'enemy', hp, maxHp: hp, qi: 18 + scale * 2, maxQi: 18 + scale * 2, attack: 8 + scale * 3 + attackDelta + (hasTalent(run, '運氣不太好') ? 2 : 0), defense: 3 + Math.floor(scale / 2), guard: 0, progress: 0, baseSpeed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, speed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, actionsTaken: 0, actionIds: [event.enemyRole === 'assassin' ? 'enemy-assassin' : event.enemyRole === 'tank' ? 'enemy-guard' : 'enemy-strike'], passiveIds: [] };
 }
 
 function friendActor(run: LifeRun): BattleActor {
   const hp = 48 + run.stats.constitution * 5 + run.friendship * 2;
-  return { id: 'friend', name: run.friendName, role: 'healer', side: 'ally', hp, maxHp: hp, qi: 18 + run.friendship, maxQi: 18 + run.friendship, attack: 7 + Math.floor(run.mastery / 42) + Math.floor(run.friendship / 2), defense: 3 + Math.floor(run.friendship / 3), guard: 0, progress: 0, baseSpeed: 8 + Math.floor(run.stats.agility / 2), speed: 8 + Math.floor(run.stats.agility / 2), actionsTaken: 0, actionIds: ['friend-help', 'friend-strike'], passiveIds: [] };
+  return { id: 'friend', name: run.friendName, role: 'healer', side: 'ally', hp, maxHp: hp, qi: 18 + run.friendship, maxQi: 18 + run.friendship, attack: 7 + Math.floor(run.friendship / 2), defense: 3 + Math.floor(run.friendship / 3), guard: 0, progress: 0, baseSpeed: 8 + Math.floor(run.stats.agility / 2), speed: 8 + Math.floor(run.stats.agility / 2), actionsTaken: 0, actionIds: ['friend-help', 'friend-strike'], passiveIds: [] };
+}
+
+export type InsightDefinition = { id: InsightId; sectId: SectId; tier: 1 | 2 | 3; name: string; description: string; moveId: string; apply: (action: BattleActionDefinition) => BattleActionDefinition };
+export const insightThresholds = [35, 85, 145] as const;
+const tuneEffect = (action: BattleActionDefinition, type: BattleActionDefinition['effects'][number]['type'], values: Record<string, number>): BattleActionDefinition => ({ ...action, effects: action.effects.map((effect) => effect.type === type ? { ...effect, ...values } as typeof effect : effect) });
+const addEffect = (action: BattleActionDefinition, effect: BattleActionDefinition['effects'][number]): BattleActionDefinition => ({ ...action, effects: [...action.effects, effect] });
+const insight = (id: InsightId, sectId: SectId, tier: 1 | 2 | 3, name: string, description: string, moveId: string, apply: InsightDefinition['apply']): InsightDefinition => ({ id, sectId, tier, name, description, moveId, apply });
+export const insightDefinitions: InsightDefinition[] = [
+  insight('huashan-1-a', 'huashan', 1, '劍走連環', '起手式每次累積劍式 2 層。', 'huashan-start', (action) => tuneEffect(action, 'apply-status', { stacks: 2 })),
+  insight('huashan-1-b', 'huashan', 1, '藏鋒入鞘', '收劍調息回內力 18、護體 12。', 'huashan-breath', (action) => tuneEffect(tuneEffect(action, 'restore-qi', { amount: 18 }), 'guard', { amount: 12 })),
+  insight('huashan-2-a', 'huashan', 2, '破勢見骨', '破雲一線每層劍式追加傷害提高至 17。', 'huashan-break', (action) => tuneEffect(action, 'consume-status-damage', { damagePerStack: 17 })),
+  insight('huashan-2-b', 'huashan', 2, '回風有憑', '回風守勢反擊 18，化解下次傷害 55%。', 'huashan-screen', (action) => tuneEffect(tuneEffect(action, 'counter', { damage: 18 }), 'reduce-next-hit', { percent: .55 })),
+  insight('huashan-3-a', 'huashan', 3, '一線無滯', '破雲一線內力消耗降至 8。', 'huashan-break', (action) => ({ ...action, qiCost: 8 })),
+  insight('huashan-3-b', 'huashan', 3, '長風不息', '回風守勢反擊 23，化解下次傷害 65%。', 'huashan-screen', (action) => tuneEffect(tuneEffect(action, 'counter', { damage: 23 }), 'reduce-next-hit', { percent: .65 })),
+  insight('shaolin-1-a', 'shaolin', 1, '掌下生根', '伏虎掌獲得護體 14。', 'shaolin-palm', (action) => tuneEffect(action, 'guard', { amount: 14 })),
+  insight('shaolin-1-b', 'shaolin', 1, '坐忘深息', '坐忘回血 24、回內力 12。', 'shaolin-meditate', (action) => tuneEffect(tuneEffect(action, 'heal', { amount: 24 }), 'restore-qi', { amount: 12 })),
+  insight('shaolin-2-a', 'shaolin', 2, '鐘鳴省力', '金鐘撞內力消耗降至 10。', 'shaolin-bell', (action) => ({ ...action, qiCost: 10 })),
+  insight('shaolin-2-b', 'shaolin', 2, '明王受身', '不動明王護體 32，化解下次傷害 65%。', 'shaolin-stance', (action) => tuneEffect(tuneEffect(action, 'guard', { amount: 32 }), 'reduce-next-hit', { percent: .65 })),
+  insight('shaolin-3-a', 'shaolin', 3, '鐘掌相應', '金鐘撞傷害倍率 1.7，並獲得護體 24。', 'shaolin-bell', (action) => tuneEffect(tuneEffect(action, 'damage', { multiplier: 1.7 }), 'guard', { amount: 24 })),
+  insight('shaolin-3-b', 'shaolin', 3, '久戰不退', '伏虎掌護體 18，另化解下次傷害 20%。', 'shaolin-palm', (action) => addEffect(tuneEffect(action, 'guard', { amount: 18 }), { type: 'reduce-next-hit', percent: .2, recipient: 'actor' })),
+  insight('wudang-1-a', 'wudang', 1, '雲手留隙', '雲手令目標下次受擊增加 30%。', 'wudang-cloud', (action) => tuneEffect(action, 'expose-next-hit', { percent: .3 })),
+  insight('wudang-1-b', 'wudang', 1, '太和長息', '太和吐納回血 18、回內力 17。', 'wudang-breath', (action) => tuneEffect(tuneEffect(action, 'heal', { amount: 18 }), 'restore-qi', { amount: 17 })),
+  insight('wudang-2-a', 'wudang', 2, '借力留勁', '借力打力消耗 8，化解下次傷害 50%。', 'wudang-turn', (action) => tuneEffect({ ...action, qiCost: 8 }, 'reduce-next-hit', { percent: .5 })),
+  insight('wudang-2-b', 'wudang', 2, '圓轉成環', '圓轉如意反擊 23、護體 18。', 'wudang-circle', (action) => tuneEffect(tuneEffect(action, 'counter', { damage: 23 }), 'guard', { amount: 18 })),
+  insight('wudang-3-a', 'wudang', 3, '勢不落空', '雲手令目標下次受擊增加 42%。', 'wudang-cloud', (action) => tuneEffect(action, 'expose-next-hit', { percent: .42 })),
+  insight('wudang-3-b', 'wudang', 3, '卸盡來勢', '借力打力化解下次傷害 68%。', 'wudang-turn', (action) => tuneEffect(action, 'reduce-next-hit', { percent: .68 })),
+  insight('beggar-1-a', 'beggar', 1, '棒影追身', '打狗棒影傷害倍率提高至 1.22。', 'beggar-stick', (action) => tuneEffect(action, 'damage', { multiplier: 1.22 })),
+  insight('beggar-1-b', 'beggar', 1, '濁酒暖身', '一口濁酒回血 21、回內力 14。', 'beggar-wine', (action) => tuneEffect(tuneEffect(action, 'heal', { amount: 21 }), 'restore-qi', { amount: 14 })),
+  insight('beggar-2-a', 'beggar', 2, '百家借勁', '百家一棍消耗 9，回內力 8。', 'beggar-wave', (action) => tuneEffect({ ...action, qiCost: 9 }, 'restore-qi', { amount: 8 })),
+  insight('beggar-2-b', 'beggar', 2, '巷口熟路', '巷口步護體 22、反擊 17。', 'beggar-footwork', (action) => tuneEffect(tuneEffect(action, 'guard', { amount: 22 }), 'counter', { damage: 17 })),
+  insight('beggar-3-a', 'beggar', 3, '眾聲成棍', '百家一棍傷害倍率提高至 1.75。', 'beggar-wave', (action) => tuneEffect(action, 'damage', { multiplier: 1.75 })),
+  insight('beggar-3-b', 'beggar', 3, '棍去氣回', '打狗棒影每次命中回內力 4。', 'beggar-stick', (action) => addEffect(action, { type: 'restore-qi', amount: 4, recipient: 'actor' })),
+  insight('emei-1-a', 'emei', 1, '點穴入微', '拂塵點穴令目標下次受擊增加 35%。', 'emei-needle', (action) => tuneEffect(action, 'expose-next-hit', { percent: .35 })),
+  insight('emei-1-b', 'emei', 1, '藥到心定', '靜心敷藥回血提高至 30。', 'emei-medicine', (action) => tuneEffect(action, 'heal', { amount: 30 })),
+  insight('emei-2-a', 'emei', 2, '月影雙封', '月影封脈消耗 9，施加毒性 2 層。', 'emei-moon', (action) => tuneEffect({ ...action, qiCost: 9 }, 'apply-status', { stacks: 2 })),
+  insight('emei-2-b', 'emei', 2, '清規有鋒', '清規攔人護體 20、反擊 21。', 'emei-parry', (action) => tuneEffect(tuneEffect(action, 'guard', { amount: 20 }), 'counter', { damage: 21 })),
+  insight('emei-3-a', 'emei', 3, '封脈追月', '月影封脈傷害倍率提高至 1.58。', 'emei-moon', (action) => tuneEffect(action, 'damage', { multiplier: 1.58 })),
+  insight('emei-3-b', 'emei', 3, '一針留路', '拂塵點穴令目標下次受擊增加 48%。', 'emei-needle', (action) => tuneEffect(action, 'expose-next-hit', { percent: .48 })),
+  insight('tang-1-a', 'tang', 1, '細雨成霧', '細雨針每次施加毒性 2 層。', 'tang-needle', (action) => tuneEffect(action, 'apply-status', { stacks: 2 })),
+  insight('tang-1-b', 'tang', 1, '以毒續脈', '以毒養氣回血 21、回內力 14。', 'tang-antidote', (action) => tuneEffect(tuneEffect(action, 'heal', { amount: 21 }), 'restore-qi', { amount: 14 })),
+  insight('tang-2-a', 'tang', 2, '梨花收網', '暴雨梨花消耗 9，每層毒追加傷害 22。', 'tang-bloom', (action) => tuneEffect({ ...action, qiCost: 9 }, 'consume-status-damage', { damagePerStack: 22 })),
+  insight('tang-2-b', 'tang', 2, '迷煙藏身', '迷煙退場護體 25、反擊 15。', 'tang-smoke', (action) => tuneEffect(tuneEffect(action, 'guard', { amount: 25 }), 'counter', { damage: 15 })),
+  insight('tang-3-a', 'tang', 3, '毒盡花開', '暴雨梨花每層毒追加傷害 27，傷害倍率 1.38。', 'tang-bloom', (action) => tuneEffect(tuneEffect(action, 'consume-status-damage', { damagePerStack: 27 }), 'damage', { multiplier: 1.38 })),
+  insight('tang-3-b', 'tang', 3, '煙後有針', '細雨針傷害倍率 1.08，仍會深化毒性。', 'tang-needle', (action) => tuneEffect(action, 'damage', { multiplier: 1.08 })),
+];
+
+export function nextInsightTier(run: Pick<LifeRun, 'proficiency' | 'insights'>): 1 | 2 | 3 | null {
+  for (let index = 0; index < insightThresholds.length; index += 1) if (run.proficiency >= insightThresholds[index] && !run.insights.some((id) => id.includes(`-${index + 1}-`))) return (index + 1) as 1 | 2 | 3;
+  return null;
+}
+export function insightChoicesFor(run: Pick<LifeRun, 'sectId' | 'proficiency' | 'insights'>) {
+  const tier = nextInsightTier(run);
+  return tier && run.sectId ? insightDefinitions.filter((item) => item.sectId === run.sectId && item.tier === tier) : [];
+}
+export function chooseInsight(run: LifeRun, insightId: InsightId): LifeRun {
+  const option = insightDefinitions.find((item) => item.id === insightId);
+  const tier = nextInsightTier(run);
+  if (!option || option.sectId !== run.sectId || option.tier !== tier) return run;
+  return { ...run, insights: [...run.insights, insightId] };
+}
+export function resolvedSectFor(run: Pick<LifeRun, 'sectId' | 'insights'>): Sect {
+  const base = sectFor(run.sectId);
+  return { ...base, moves: base.moves.map((move) => {
+    const action = run.insights.map((id) => insightDefinitions.find((item) => item.id === id)).filter((item): item is InsightDefinition => Boolean(item) && item!.moveId === move.id).reduce((current, item) => item.apply(current), move.action);
+    return { ...move, qiCost: action.qiCost ?? 0, action };
+  }) };
 }
 
 export function rulesFor(sect: Sect): BattleRules {
   const moves = Object.fromEntries(sect.moves.map((move) => [move.id, move.action]));
   return { actions: {
     ...moves,
-    'enemy-strike': strike('enemy-strike', 'random-foe', 0, [{ type: 'damage', multiplier: 1 }]),
-    'enemy-assassin': strike('enemy-assassin', 'weakest-enemy', 4, [{ type: 'damage', multiplier: 1.22 }]),
-    'enemy-guard': strike('enemy-guard', 'random-foe', 0, [{ type: 'damage', multiplier: .86 }, { type: 'guard', amount: 8 }]),
-    'friend-help': strike('friend-help', 'weakest-ally', 7, [{ type: 'heal', amount: 14 }, { type: 'guard', amount: 7 }]),
-    'friend-strike': strike('friend-strike', 'weakest-enemy', 0, [{ type: 'damage', multiplier: .86 }]),
+    'enemy-strike': strike('enemy-strike', '迎面一擊', 'random-foe', 0, [{ type: 'damage', multiplier: 1 }]),
+    'enemy-assassin': strike('enemy-assassin', '趁虛突刺', 'weakest-enemy', 4, [{ type: 'damage', multiplier: 1.22 }]),
+    'enemy-guard': strike('enemy-guard', '穩守撞擊', 'random-foe', 0, [{ type: 'damage', multiplier: .86 }, { type: 'guard', amount: 8, recipient: 'actor' }]),
+    'friend-help': strike('friend-help', '援手照應', 'weakest-ally', 7, [{ type: 'heal', amount: 14, recipient: 'target' }, { type: 'guard', amount: 7, recipient: 'target' }]),
+    'friend-strike': strike('friend-strike', '趁隙出手', 'weakest-enemy', 0, [{ type: 'damage', multiplier: .86 }]),
   }, passives: {}, speedModifiers: [], damageModifiers: [] };
 }
 
-export function startBattle(run: LifeRun, event: LifeEvent, choice: LifeChoice): LifeRun {
-  const sect = sectFor(run.sectId);
-  const stats = { ...run.stats };
-  const next = { ...run, stats, battle: null, result: null };
-  if (choice.id === 'train') { next.mastery += run.trait === '過目不忘' ? 24 : 12; next.qi = Math.min(next.maxQi, next.qi + 6); if (run.trait === '過目不忘') next.hp = Math.max(1, next.hp - 8); }
-  if (choice.id === 'work') { const earnings = run.trait === '臉皮很厚' ? 14 : 10; next.money += earnings - (run.burden === '家裡欠了錢' ? 2 : 0) - (run.burden === '大家以為你很有錢' ? 3 : 0); next.reputation += run.trait === '臉皮很厚' ? 2 : 1; }
-  if (choice.id === 'help') { const connection = helpConnection(run); next.bond += connection; next.friendship += connection; next.hp = Math.min(next.maxHp, next.hp + (run.burden === '有人等你回家' ? 6 : 10)); }
-  if (choice.id === 'work') next.rivalry += 1;
-  if (run.trait === '氣走得太急') { next.qi = Math.min(next.maxQi, next.qi + 12); next.hp = Math.max(1, next.hp - 5); }
-  if (run.trait === '背水才會贏') next.hp = Math.max(1, Math.min(next.hp, Math.floor(next.maxHp * .55)));
-  const revenge = run.trait === '很會記仇' ? run.injury * 3 : 0;
-  const mountainGrudge = run.burden === '師父欠你一句道歉' ? (phaseForTurn(run.turn).name === '入門' ? 7 : -2) : 0;
-  const rainFocus = run.trait === '雨天手穩' ? (event.weather === '雨' ? 8 : -2) : 0;
-  const crowdFocus = run.trait === '人多反而冷靜' ? (event.enemyCount >= 2 ? 7 : -2) : 0;
-  const poorPride = run.trait === '越窮越有志氣' ? (run.money <= 10 ? 7 : -2) : 0;
-  const courtesy = run.trait === '先禮後兵' && choice.id !== 'help' ? -2 : 0;
-  const lastStand = run.trait === '背水才會贏' ? 14 : 0;
-  const fearGuard = run.burden === '你其實很怕打架' ? 16 : 0;
-  const friendThreshold = run.trait === '四海皆兄弟' ? 3 : 6;
-  const friend = next.friendship >= friendThreshold ? friendActor(next) : null;
-  const loneBrother = run.trait === '四海皆兄弟' && !friend ? -5 : 0;
-  const routeDefense = run.trait === '記路很牢' && event.weather === '風' ? 3 : 0;
-  const quickHands = run.trait === '手腳俐落' ? 2 : 0;
-  const player: BattleActor = { id: 'player', name: next.name, role: 'player', side: 'ally', hp: next.hp, maxHp: next.maxHp, qi: next.qi, maxQi: next.maxQi, attack: 8 + next.stats.strength * 2 + Math.floor(next.mastery / 35) + revenge + mountainGrudge + rainFocus + crowdFocus + poorPride + courtesy + lastStand + loneBrother + Math.floor(next.rivalry / 3) - (run.burden === '你其實很怕打架' ? 3 : 0), defense: 3 + next.stats.constitution + routeDefense, guard: (choice.id === 'train' ? 8 : choice.id === 'help' ? 12 : 0) + fearGuard + lastStand + (run.trait === '先禮後兵' && choice.id === 'help' ? 20 : 0) + Math.floor(next.friendship / 3) * 2, progress: 0, baseSpeed: 7 + next.stats.agility + quickHands, speed: 7 + next.stats.agility + quickHands, actionsTaken: 0, actionIds: sect.moves.map((move) => move.id), passiveIds: [] };
-  const battle = createBattle({ seed: `${next.seed}:battle:${next.turn}:${choice.id}`, rngIndex: 0, encounterId: `life-${next.turn}`, title: event.title, cause: choice.prep, stakes: `${event.objective.label}：${event.objective.description}`, mandatory: true, actors: [player, ...(friend ? [friend] : []), ...Array.from({ length: event.enemyCount }, (_, index) => enemyActor(next, event, index))], resources: { money: next.money, phoneCharges: 0, flags: [], talents: {}, strength: next.stats.strength, partySize: friend ? 1 : 0 } }, rulesFor(sect));
-  next.battle = battle;
-  next.battleMeta = { choiceId: choice.id, actions: [], damageTaken: 0, damageDealt: 0, startedHp: player.hp, startedQi: player.qi };
+function applyLifeEffects(run: LifeRun, effects: LifeEffect[]): LifeRun {
+  const next = { ...run };
+  for (const effect of effects) {
+    const amount = effect.amount;
+    if (effect.resource === 'hp') next.hp = Math.max(1, Math.min(next.maxHp, next.hp + amount));
+    else if (effect.resource === 'qi') next.qi = Math.max(0, Math.min(next.maxQi, next.qi + amount));
+    else if (effect.resource === 'money') next.money = Math.max(0, next.money + amount);
+    else if (effect.resource === 'proficiency') next.proficiency = Math.max(0, next.proficiency + amount);
+    else if (effect.resource === 'reputation') next.reputation = Math.max(0, next.reputation + amount);
+    else if (effect.resource === 'bond') next.bond = Math.max(0, next.bond + amount);
+    else if (effect.resource === 'friendship') next.friendship = Math.max(0, next.friendship + amount);
+    else next.rivalry = Math.max(0, next.rivalry + amount);
+  }
   return next;
 }
 
-export function advance(run: LifeRun): LifeRun {
+export function startBattle(run: LifeRun, event: LifeEvent, choice: LifeChoice): LifeRun {
+  if (run.dead) return run;
+  const sect = resolvedSectFor(run);
+  const choiceChance = choiceChanceFor(run, choice);
+  const choiceSucceeded = choiceSucceededFor(run, choice);
+  const feedback = preparationFeedbackFor(run, event, choice, choiceSucceeded);
+  const outcomeEffects = adjustedEffects(run, choice, choiceSucceeded ? choice.successEffects : choice.failureEffects);
+  const next: LifeRun = applyLifeEffects({ ...run, stats: { ...run.stats }, battle: null, result: null }, [...adjustedEffects(run, choice, choice.commitEffects), ...outcomeEffects]);
+  const preparation = { ...(choiceSucceeded ? choice.battlePreparation.success : choice.battlePreparation.failure) };
+  if (hasTalent(run, '先禮後兵') && choice.tags.includes('parley')) preparation.guard = (preparation.guard ?? 0) + 20;
+  if (hasTalent(run, '氣走得太急')) { next.qi = Math.min(next.maxQi, next.qi + 12); next.hp = Math.max(1, next.hp - 5); }
+  if (hasTalent(run, '背水才會贏')) next.hp = Math.max(1, Math.min(next.hp, Math.floor(next.maxHp * .55)));
+  const revenge = hasTalent(run, '很會記仇') ? Math.floor(next.rivalry / 2) * 3 : 0;
+  const mountainGrudge = run.burden === '師父欠你一句道歉' ? (phaseForTurn(run.turn).name === '入門' ? 7 : -2) : 0;
+  const rainFocus = hasTalent(run, '雨天手穩') ? (event.weather === '雨' ? 8 : -2) : 0;
+  const crowdFocus = hasTalent(run, '人多反而冷靜') ? (event.enemyCount >= 2 ? 7 : -2) : 0;
+  const poorPride = hasTalent(run, '越窮越有志氣') ? (run.money <= 10 ? 7 : -2) : 0;
+  const courtesy = hasTalent(run, '先禮後兵') && !choice.tags.includes('parley') ? -2 : 0;
+  const lastStand = hasTalent(run, '背水才會贏') ? 14 : 0;
+  const fearGuard = run.burden === '你其實很怕打架' ? 16 : 0;
+  const friendThreshold = hasTalent(run, '四海皆兄弟') ? 3 : 6;
+  const friend = preparation.inviteFriend && next.friendship >= friendThreshold ? friendActor(next) : null;
+  const loneBrother = hasTalent(run, '四海皆兄弟') && !friend ? -5 : 0;
+  const routeDefense = hasTalent(run, '記路很牢') && event.weather === '風' ? 3 : 0;
+  const speedTalent = (hasTalent(run, '手腳俐落') ? 2 : 0) - (hasTalent(run, '吃苦耐勞') ? 1 : 0);
+  const playerSpeed = 7 + next.stats.agility + speedTalent + (preparation.speed ?? 0);
+  const player: BattleActor = { id: 'player', name: next.name, role: 'player', side: 'ally', hp: next.hp, maxHp: next.maxHp, qi: next.qi, maxQi: next.maxQi, attack: 8 + next.stats.strength * 2 + (preparation.attack ?? 0) + revenge + mountainGrudge + rainFocus + crowdFocus + poorPride + courtesy + lastStand + loneBrother + Math.floor(next.rivalry / 3) - (run.burden === '你其實很怕打架' ? 3 : 0), defense: 3 + next.stats.constitution + routeDefense + (preparation.defense ?? 0), guard: (preparation.guard ?? 0) + fearGuard + lastStand + Math.floor(next.friendship / 3) * 2, progress: 0, baseSpeed: playerSpeed, speed: playerSpeed, actionsTaken: 0, actionIds: sect.moves.map((move) => move.id), passiveIds: [] };
+  const battle = createBattle({ seed: `${next.seed}:battle:${next.turn}:${choice.id}`, rngIndex: 0, encounterId: `life-${next.turn}`, title: event.title, cause: `${choiceSucceeded ? '準備成功' : '準備失手'}（${choiceChance}%）：${feedback.bridge}`, stakes: `${event.objective.label}：${event.objective.description}`, mandatory: true, actors: [player, ...(friend ? [friend] : []), ...Array.from({ length: event.enemyCount }, (_, index) => enemyActor(next, event, index, preparation.enemyAttack ?? 0))], resources: { money: next.money, phoneCharges: 0, flags: [], talents: {}, strength: next.stats.strength, partySize: friend ? 1 : 0 } }, rulesFor(sect));
+  next.battle = battle;
+  next.battleMeta = { choiceId: choice.id, growthStat: choice.growthStat, choiceSucceeded, choiceChance, feedback, preparation, actions: [], damageTaken: 0, damageDealt: 0, startedHp: player.hp, startedQi: player.qi };
+  return next;
+}
+
+export function advance(run: LifeRun, elapsedMs?: number): LifeRun {
   if (!run.battle || !run.sectId) return run;
-  const transition = reduceBattle(run.battle, { type: 'advance' }, rulesFor(sectFor(run.sectId)));
+  const transition = reduceBattle(run.battle, { type: 'advance', elapsedMs }, rulesFor(resolvedSectFor(run)));
   const player = transition.state.actors.find((actor) => actor.id === 'player');
   const damageTaken = Math.max(0, (run.battleMeta?.startedHp ?? player?.hp ?? 0) - (player?.hp ?? 0));
   return { ...run, battle: transition.state, battleMeta: run.battleMeta ? { ...run.battleMeta, damageTaken } : null };
@@ -359,8 +562,8 @@ export function advance(run: LifeRun): LifeRun {
 
 export function performMove(run: LifeRun, actionId: string): LifeRun {
   if (!run.battle || !run.sectId || run.battle.readyActorId !== 'player') return run;
-  const transition = reduceBattle(run.battle, { type: 'use-action', actionId, targetId: run.battle.selectedTargetId ?? undefined }, rulesFor(sectFor(run.sectId)));
-  const damage = transition.events.filter((event) => event.type === 'action' && event.actorId === 'player').reduce((total, event) => total + (event.damage ?? 0), 0);
+  const transition = reduceBattle(run.battle, { type: 'use-action', actionId, targetId: run.battle.selectedTargetId ?? undefined }, rulesFor(resolvedSectFor(run)));
+  const damage = transition.events.filter((event) => event.type === 'action').flatMap((event) => event.outcomes).reduce((total, outcome) => total + (outcome.type === 'damage' && outcome.sourceId === 'player' ? outcome.amount : 0), 0);
   const player = transition.state.actors.find((actor) => actor.id === 'player');
   const damageTaken = Math.max(0, (run.battleMeta?.startedHp ?? player?.hp ?? 0) - (player?.hp ?? 0));
   return { ...run, battle: transition.state, battleMeta: run.battleMeta ? { ...run.battleMeta, actions: [...run.battleMeta.actions, actionId], damageDealt: run.battleMeta.damageDealt + damage, damageTaken } : null };
@@ -368,12 +571,12 @@ export function performMove(run: LifeRun, actionId: string): LifeRun {
 
 export function selectTarget(run: LifeRun, targetId: string): LifeRun {
   if (!run.battle || !run.sectId) return run;
-  const transition = reduceBattle(run.battle, { type: 'select-target', targetId }, rulesFor(sectFor(run.sectId)));
+  const transition = reduceBattle(run.battle, { type: 'select-target', targetId }, rulesFor(resolvedSectFor(run)));
   return { ...run, battle: transition.state };
 }
 
 export function resolveBattle(run: LifeRun): LifeRun {
-  if (!run.battle || !run.battleMeta) return run;
+  if (!run.battle || !run.battleMeta || !run.battle.result) return run;
   const won = run.battle.result === 'victory';
   const player = run.battle.actors.find((actor) => actor.id === 'player');
   const hpPercent = Math.max(0, (player?.hp ?? 0) / run.maxHp);
@@ -384,33 +587,59 @@ export function resolveBattle(run: LifeRun): LifeRun {
   const sect = sectFor(run.sectId);
   const moments: string[] = [];
   if (won && run.battleMeta.startedHp / run.maxHp < .35) moments.push('逆境翻盤');
+  const gainedInjury = won && hpPercent <= .35;
+  if (gainedInjury) moments.push('帶傷收場');
   if (new Set(run.battleMeta.actions).size >= 3) moments.push('這也算一招');
   if (sect.id === 'tang' && run.battle.actors.some((actor) => (actor.statuses?.toxin ?? 0) >= 2)) moments.push('毒還在上班');
   if (sect.id === 'huashan' && run.battleMeta.actions.includes('huashan-break')) moments.push('一式破局');
   if (run.battle.actors.some((actor) => actor.id === 'friend') && won) moments.push('並肩作戰');
-  if (!moments.length) moments.push(won ? '很難解釋，但贏了' : '敗中悟招');
+  if (run.battleMeta.choiceSucceeded === true) moments.push('準備得手');
+  if (run.battleMeta.choiceSucceeded === false) moments.push('臨陣失算');
+  if (!won) moments.unshift('江湖除名');
+  else if (!moments.length) moments.push('很難解釋，但贏了');
   const phase = phaseForTurn(run.turn);
-  const injury = won ? Math.max(0, run.injury - 1) : run.injury + 1;
-  const growthKey: StatKey = run.battleMeta.choiceId === 'train' ? (sect.id === 'wudang' || sect.id === 'emei' ? 'wisdom' : sect.id === 'tang' ? 'agility' : 'strength') : run.battleMeta.choiceId === 'work' ? 'luck' : 'will';
+  if (!won) {
+    const deathReasons = [
+      '死因：對手招招致命，你招招都很有想法。',
+      '死因：最後一招沒接住。江湖規矩很多，復活不在其中。',
+      '死因：內力先見底，氣血隨後跟進，只有欠款始終充沛。',
+      '死因：你看懂了對方的招式，可惜雙腳晚了半步。',
+      '死因：輕功慢了半步，訃告倒是傳得很快。',
+      '死因：你格擋得很有禮貌，對方下手沒有。',
+      '死因：你把最後一口氣用來說「還能打」。江湖沒有採信。',
+      `死因：你倒在「${run.battle.title}」。江湖稱之為宿命，債主稱之為壞帳。`,
+    ];
+    const deathReason = pick(deathReasons, `${run.seed}:death:${run.turn}:${run.battle.title}`);
+    const chronicle = `${run.year} · ${phase.name} · ${run.battle.title}：亡（${grade}）· ${deathReason.replace('死因：', '')}`;
+    const wins = run.chronicle.filter((entry) => entry.includes('：勝')).length;
+    const result: BattleResultCard = { won: false, grade, score, moments, line: deathReason, rewards: [`享年 ${run.age} 歲`, `生前勝場 ${wins}`, '復活：門派未編列預算'] };
+    return { ...run, hp: 0, turn: run.turn + 1, dead: true, deathReason, moments: [...run.moments, ...moments].slice(-24), chronicle: [...run.chronicle, chronicle], battle: null, battleMeta: null, result };
+  }
+  const injury = run.injury + (gainedInjury ? 1 : 0);
+  const growthKey = run.battleMeta.growthStat;
   const canGrow = run.stats[growthKey] < run.potential[growthKey];
-  const growthGain = canGrow ? Math.min(run.trait === '天妒英才' ? 2 : 1, run.potential[growthKey] - run.stats[growthKey]) : 0;
+  const growthGain = canGrow ? Math.min(hasTalent(run, '天妒英才') ? 2 : 1, run.potential[growthKey] - run.stats[growthKey]) : 0;
   const stats = { ...run.stats, [growthKey]: run.stats[growthKey] + growthGain };
-  const maxHp = maximumHp(stats, run.trait);
-  const maxQi = maximumQi(stats, run.trait);
-  const recoveryRate = run.trait === '吃苦耐勞' ? .72 : run.trait === '很會記仇' ? Math.max(.4, .6 - run.injury * .05) : .6;
-  const recoveredHp = won ? Math.max(18, Math.round(maxHp * recoveryRate)) : Math.max(12, Math.round(maxHp * .38));
-  const masteryGain = ({ C: 5, B: 7, A: 10, S: 14, SSS: 18 } as const)[grade];
-  const chronicle = `${run.year} · ${phase.name} · ${run.battle.title}：${won ? '勝' : '敗'}（${grade}）· ${moments[0]}`;
-  const fateStudy = run.trait === '運氣不太好' ? (won ? 4 : 14) : 0;
-  const homePay = won && run.trait === '不愛空手回家' ? 2 : 0;
-  const result: BattleResultCard = { won, grade, score, moments, line: won ? `${sect.name}的人看你一眼，像是在考慮要不要承認你其實還行。` : '你沒有死，只是江湖暫時替你保留了臉面。', rewards: [`武學 +${masteryGain + fateStudy}`, canGrow ? `${statNames[growthKey]} +${growthGain} · 靠近潛力` : `${statNames[growthKey]} 已到目前潛力`, won ? `名聲 +2${homePay ? '、銀兩 +2' : ''}` : injury ? `舊傷 ${injury} 層` : '身體狀況良好'] };
-  return { ...run, stats, maxHp, maxQi, turn: run.turn + 1, age: phaseForTurn(Math.min(15, run.turn + 1)).age, year: phaseForTurn(Math.min(15, run.turn + 1)).year, hp: recoveredHp, qi: Math.max(8, Math.round(maxQi * .7)), money: run.money + homePay, mastery: run.mastery + masteryGain + fateStudy, reputation: run.reputation + (won ? 2 : 0), injury, moments: [...run.moments, ...moments].slice(-24), chronicle: [...run.chronicle, chronicle], battle: null, battleMeta: null, result };
+  const maxHp = maximumHp(stats, run);
+  const maxQi = maximumQi(stats, run);
+  const recoveryRate = hasTalent(run, '吃苦耐勞') ? .72 : hasTalent(run, '很會記仇') ? Math.max(.4, .6 - run.rivalry * .02) : .6;
+  const recoveredHp = Math.max(18, Math.round(maxHp * recoveryRate));
+  const proficiencyGain = ({ C: 5, B: 7, A: 10, S: 14, SSS: 18 } as const)[grade];
+  const chronicle = `${run.year} · ${phase.name} · ${run.battle.title}：勝（${grade}）· ${moments[0]}`;
+  const fateStudy = hasTalent(run, '運氣不太好') ? 14 : 0;
+  const homePay = hasTalent(run, '不愛空手回家') ? 2 : 0;
+  const proficiency = run.proficiency + proficiencyGain + fateStudy;
+  const crossedTier = insightThresholds.find((threshold, index) => run.proficiency < threshold && proficiency >= threshold && !run.insights.some((id) => id.includes(`-${index + 1}-`)));
+  const result: BattleResultCard = { won: true, grade, score, moments, line: `${sect.name}的人看你一眼，像是在考慮要不要承認你其實還行。`, rewards: [`造詣 +${proficiencyGain + fateStudy} · ${proficiency}${crossedTier ? `（可領悟第 ${insightThresholds.indexOf(crossedTier) + 1} 階）` : ''}`, canGrow ? `${statNames[growthKey]} +${growthGain} · 靠近潛力` : `${statNames[growthKey]} 已到目前潛力`, `名聲 +2${homePay ? '、銀兩 +2' : ''}${gainedInjury ? `、舊傷 +1（共 ${injury}）` : ''}`] };
+  return { ...run, stats, maxHp, maxQi, turn: run.turn + 1, age: phaseForTurn(Math.min(15, run.turn + 1)).age, year: phaseForTurn(Math.min(15, run.turn + 1)).year, hp: recoveredHp, qi: Math.max(8, Math.round(maxQi * .7)), money: run.money + homePay, proficiency, reputation: run.reputation + 2, injury, moments: [...run.moments, ...moments].slice(-24), chronicle: [...run.chronicle, chronicle], battle: null, battleMeta: null, result };
 }
 
-export function isComplete(run: LifeRun) { return run.turn >= 16; }
+export function isComplete(run: LifeRun) { return run.dead || run.turn >= 16; }
 export function endingFor(run: LifeRun) {
   const sect = sectFor(run.sectId);
-  const peak = run.reputation >= 24 ? '一方名宿' : run.mastery >= 150 ? '招牌高手' : run.bond >= 18 ? '江湖好人' : '認真活過的人';
-  const sentence = run.injury >= 4 ? `你沒能全身而退，但${run.friendship >= 6 ? run.friendName : '很多人'}記得你每次都先問「有沒有吃飯」。` : run.friendship >= 10 ? `後來提起你，${run.friendName}總說你打架不一定漂亮，做人倒是很準時。` : run.rivalry >= 7 ? `${run.rivalName}後來仍不服你；這種不服，剛好替你把名聲傳得很遠。` : run.reputation >= 24 ? `你把名號活成了招牌，也把招牌活成了麻煩。` : `你沒有改變整個江湖，但改變了幾個人的下雨天。`;
+  if (run.dead) return { sect, peak: '英年早退', sentence: run.deathReason ?? '死因：江湖不肯說，郎中也不肯退診金。', relationship: run.friendship >= run.rivalry ? `${run.friendName} · 替你收劍` : `${run.rivalName} · 終於閉嘴了一天` };
+  const peak = run.insights.length >= 3 ? '自成一家' : run.reputation >= 24 ? '一方名宿' : run.insights.length >= 2 ? '招牌高手' : run.bond >= 18 ? '江湖好人' : '認真活過的人';
+  const definingInsight = insightDefinitions.find((item) => item.id === run.insights.at(-1));
+  const sentence = run.insights.length >= 3 && definingInsight ? `你把${definingInsight.name}練成了自己的答案；${run.friendship >= run.rivalry ? run.friendName : run.rivalName}記得那不是天授，是一路選出來的。` : run.injury >= 4 ? `你沒能全身而退，但${run.friendship >= 6 ? run.friendName : '很多人'}記得你每次都先問「有沒有吃飯」。` : run.friendship >= 10 ? `後來提起你，${run.friendName}總說你打架不一定漂亮，做人倒是很準時。` : run.rivalry >= 7 ? `${run.rivalName}後來仍不服你；這種不服，剛好替你把名聲傳得很遠。` : run.reputation >= 24 ? `你把名號活成了招牌，也把招牌活成了麻煩。` : `你沒有改變整個江湖，但改變了幾個人的下雨天。`;
   return { sect, peak, sentence, relationship: run.friendship >= run.rivalry ? `${run.friendName} · 交情 ${run.friendship}` : `${run.rivalName} · 宿敵 ${run.rivalry}` };
 }

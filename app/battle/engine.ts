@@ -1,4 +1,4 @@
-import type { BattleActionDefinition, BattleActor, BattleCommand, BattleCondition, BattleEffect, BattleEvent, BattleIntent, BattleRules, BattleSetup, BattleState, BattleTarget, BattleTransition } from './types';
+import type { BattleActionDefinition, BattleActor, BattleCommand, BattleCondition, BattleEffect, BattleEvent, BattleIntent, BattleOutcome, BattleRules, BattleSetup, BattleState, BattleTarget, BattleTransition } from './types';
 
 const hash = (input: string) => {
   let value = 2166136261;
@@ -7,9 +7,14 @@ const hash = (input: string) => {
 };
 const clone = <T,>(value: T): T => structuredClone(value);
 const TOXIN_TURN_DAMAGE_PER_STACK = 9;
+const BATTLE_TICK_MS = 450;
+const TIMELINE_PRECISION = 1_000_000_000;
+const TIMELINE_EPSILON = 1 / TIMELINE_PRECISION;
+const timelineValue = (value: number) => Math.round(value * TIMELINE_PRECISION) / TIMELINE_PRECISION;
 const living = (state: BattleState, side: BattleActor['side']) => state.actors.filter((actor) => actor.side === side && actor.hp > 0);
 const weakest = (actors: BattleActor[]) => [...actors].sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
 const actorFor = (state: BattleState, id: string | null | undefined) => state.actors.find((actor) => actor.id === id);
+const recipientFor = (actor: BattleActor, target: BattleActor, recipient: 'actor' | 'target') => recipient === 'actor' ? actor : target;
 const hasTalent = (state: BattleState, id: string) => (state.resources.talents[id] ?? 0) > 0;
 
 function roll(state: BattleState, min: number, max: number) {
@@ -69,9 +74,9 @@ function resolveDamage(state: BattleState, source: BattleActor, target: BattleAc
   const interceptor = state.actors.find((actor) => actor.side === 'ally' && actor.passiveIds?.includes('guojing-intercept') && actor.hp > 0 && target.id === 'player' && passiveAvailable(state, actor, 'guojing-intercept', true));
   if (interceptor && amount > target.guard && amount - target.guard >= target.hp) {
     consumePassive(state, interceptor, 'guojing-intercept');
-    return { amount: applyDamage(state, source, interceptor, amount, rules), interceptedBy: interceptor.name };
+    return { outcomes: applyDamage(state, source, interceptor, amount, rules), interceptedBy: interceptor.name };
   }
-  return { amount: applyDamage(state, source, target, amount, rules) };
+  return { outcomes: applyDamage(state, source, target, amount, rules), interceptedBy: undefined };
 }
 function applyDamage(state: BattleState, source: BattleActor, target: BattleActor, amount: number, rules: BattleRules) {
   const mutable = actorFor(state, target.id)!;
@@ -82,40 +87,47 @@ function applyDamage(state: BattleState, source: BattleActor, target: BattleActo
     state.resources.money -= Math.ceil(prevented / 2); amount -= prevented;
   }
   if (amount > 0 && source.side === 'enemy' && mutable.id === 'player' && hasTalent(state, 'pain-generator')) mutable.qi = Math.min(mutable.maxQi, mutable.qi + Math.round(amount * .75));
+  const hpBefore = mutable.hp;
   if (amount > 0 && source.side === 'enemy' && mutable.id === 'player' && hasTalent(state, 'no-overtime-death') && !(state.consumedPassives ?? []).includes('player:no-overtime-death') && mutable.hp - amount <= 0) {
     (state.consumedPassives ??= []).push('player:no-overtime-death'); mutable.hp = 1; mutable.guard += mutable.maxHp * .5; mutable.progress = 100;
   } else mutable.hp = Math.max(0, mutable.hp - amount);
+  const outcomes: BattleOutcome[] = [{ type: 'damage', sourceId: source.id, recipientId: mutable.id, amount: hpBefore - mutable.hp, guardAbsorbed: absorbed }];
   if (mutable.counter && mutable.hp > 0 && source.hp > 0) {
     const counter = mutable.counter; mutable.counter = null;
     const attacker = actorFor(state, source.id); if (attacker) {
       const counterDamage = Math.max(1, counter.damage - Math.round(attacker.defense * .25));
+      const attackerHpBefore = attacker.hp;
       attacker.hp = Math.max(0, attacker.hp - counterDamage);
+      outcomes.push({ type: 'damage', sourceId: mutable.id, recipientId: attacker.id, amount: attackerHpBefore - attacker.hp, guardAbsorbed: 0 });
       if (counter.grantStatus) {
         const recipient = counter.grantStatus.target === 'source' ? attacker : mutable;
-        recipient.statuses = { ...(recipient.statuses ?? {}), [counter.grantStatus.id]: Math.min(5, (recipient.statuses?.[counter.grantStatus.id] ?? 0) + (counter.grantStatus.stacks ?? 1)) };
+        const before = recipient.statuses?.[counter.grantStatus.id] ?? 0;
+        const stacks = Math.min(5, before + (counter.grantStatus.stacks ?? 1));
+        recipient.statuses = { ...(recipient.statuses ?? {}), [counter.grantStatus.id]: stacks };
+        outcomes.push({ type: 'status', sourceId: mutable.id, recipientId: recipient.id, statusId: counter.grantStatus.id, change: stacks - before, stacks });
       }
     }
   }
   if (mutable.hp <= 0 && state.tauntActorId === mutable.id) { state.tauntActorId = null; mutable.tauntTurnsRemaining = 0; }
   refreshSpeeds(state, rules);
-  return amount;
+  return outcomes;
 }
 function applyEffects(state: BattleState, actor: BattleActor, target: BattleActor, action: BattleActionDefinition, rules: BattleRules) {
-  let damage: number | undefined; let heal: number | undefined; let guard: number | undefined; let interceptedBy: string | undefined;
+  const outcomes: BattleOutcome[] = []; let interceptedBy: string | undefined;
   for (const effect of action.effects) {
-    if (effect.type === 'damage') { const result = resolveDamage(state, actor, target, effect, rules); damage = (damage ?? 0) + result.amount; interceptedBy = result.interceptedBy; }
-    if (effect.type === 'heal') { const amount = effect.amount * (hasTalent(state, 'all-hands-overtime') && actor.side === 'ally' && actor.id !== 'player' ? 2 : 1); target.hp = Math.min(target.maxHp, target.hp + amount); heal = (heal ?? 0) + amount; }
-    if (effect.type === 'restore-qi') actor.qi = Math.min(actor.maxQi, actor.qi + effect.amount);
-    if (effect.type === 'guard') { const amount = (effect.amount + (effect.maxHpPercent ? target.maxHp * effect.maxHpPercent : 0)) * (hasTalent(state, 'all-hands-overtime') && actor.side === 'ally' && actor.id !== 'player' ? 2 : 1); target.guard += amount; guard = (guard ?? 0) + amount; }
+    if (effect.type === 'damage') { const result = resolveDamage(state, actor, target, effect, rules); outcomes.push(...result.outcomes); interceptedBy = result.interceptedBy ?? interceptedBy; }
+    if (effect.type === 'heal') { const recipient = recipientFor(actor, target, effect.recipient); const amount = effect.amount * (hasTalent(state, 'all-hands-overtime') && actor.side === 'ally' && actor.id !== 'player' ? 2 : 1); const restored = Math.min(recipient.maxHp, recipient.hp + amount) - recipient.hp; recipient.hp += restored; outcomes.push({ type: 'heal', sourceId: actor.id, recipientId: recipient.id, amount: restored }); }
+    if (effect.type === 'restore-qi') { const recipient = recipientFor(actor, target, effect.recipient); const restored = Math.min(recipient.maxQi, recipient.qi + effect.amount) - recipient.qi; recipient.qi += restored; outcomes.push({ type: 'restore-qi', sourceId: actor.id, recipientId: recipient.id, amount: restored }); }
+    if (effect.type === 'guard') { const recipient = recipientFor(actor, target, effect.recipient); const amount = (effect.amount + (effect.maxHpPercent ? recipient.maxHp * effect.maxHpPercent : 0)) * (hasTalent(state, 'all-hands-overtime') && actor.side === 'ally' && actor.id !== 'player' ? 2 : 1); recipient.guard += amount; outcomes.push({ type: 'guard', sourceId: actor.id, recipientId: recipient.id, amount }); }
     if (effect.type === 'taunt') { actor.tauntTurnsRemaining = effect.turns; actor.tauntCooldown = effect.cooldown; state.tauntActorId = actor.id; }
-    if (effect.type === 'apply-status') { const recipient = effect.target === 'self' ? actor : target; recipient.statuses = { ...(recipient.statuses ?? {}), [effect.id]: Math.min(5, (recipient.statuses?.[effect.id] ?? 0) + (effect.stacks ?? 1)) }; }
-    if (effect.type === 'consume-status-damage') { const statusHolder = effect.statusTarget === 'self' ? actor : target; const stacks = statusHolder.statuses?.[effect.id] ?? 0; if (stacks) { statusHolder.statuses = { ...(statusHolder.statuses ?? {}), [effect.id]: 0 }; const amount = applyDamage(state, actor, target, stacks * effect.damagePerStack, rules); damage = (damage ?? 0) + amount; target.progress = Math.max(0, target.progress - stacks * (effect.delayPerStack ?? 0)); } }
-    if (effect.type === 'counter') actor.counter = { damage: effect.damage, grantStatus: effect.grantStatus };
-    if (effect.type === 'reduce-next-hit') actor.nextHitMultiplier = Math.max(.1, 1 - effect.percent);
-    if (effect.type === 'expose-next-hit') actor.nextHitMultiplier = 1 + effect.percent;
+    if (effect.type === 'apply-status') { const recipient = recipientFor(actor, target, effect.recipient); const before = recipient.statuses?.[effect.id] ?? 0; const stacks = Math.min(5, before + (effect.stacks ?? 1)); recipient.statuses = { ...(recipient.statuses ?? {}), [effect.id]: stacks }; outcomes.push({ type: 'status', sourceId: actor.id, recipientId: recipient.id, statusId: effect.id, change: stacks - before, stacks }); }
+    if (effect.type === 'consume-status-damage') { const statusHolder = recipientFor(actor, target, effect.statusOwner); const stacks = statusHolder.statuses?.[effect.id] ?? 0; if (stacks) { statusHolder.statuses = { ...(statusHolder.statuses ?? {}), [effect.id]: 0 }; outcomes.push({ type: 'status', sourceId: actor.id, recipientId: statusHolder.id, statusId: effect.id, change: -stacks, stacks: 0 }); outcomes.push(...applyDamage(state, actor, target, stacks * effect.damagePerStack, rules)); target.progress = Math.max(0, target.progress - stacks * (effect.delayPerStack ?? 0)); } }
+    if (effect.type === 'counter') { actor.counter = { damage: effect.damage, grantStatus: effect.grantStatus }; outcomes.push({ type: 'modifier', sourceId: actor.id, recipientId: actor.id, modifier: 'counter', value: effect.damage }); }
+    if (effect.type === 'reduce-next-hit') { const recipient = recipientFor(actor, target, effect.recipient); recipient.nextHitMultiplier = Math.max(.1, 1 - effect.percent); outcomes.push({ type: 'modifier', sourceId: actor.id, recipientId: recipient.id, modifier: 'reduce-next-hit', value: effect.percent }); }
+    if (effect.type === 'expose-next-hit') { const recipient = recipientFor(actor, target, effect.recipient); recipient.nextHitMultiplier = 1 + effect.percent; outcomes.push({ type: 'modifier', sourceId: actor.id, recipientId: recipient.id, modifier: 'expose-next-hit', value: effect.percent }); }
   }
   refreshSpeeds(state, rules);
-  return { damage, heal, guard, interceptedBy };
+  return { outcomes, interceptedBy };
 }
 function resolveTurnStatuses(state: BattleState, actor: BattleActor) {
   const toxinStacks = actor.statuses?.toxin ?? 0;
@@ -125,32 +137,54 @@ function resolveTurnStatuses(state: BattleState, actor: BattleActor) {
   if (actor.hp <= 0 && state.tauntActorId === actor.id) { state.tauntActorId = null; actor.tauntTurnsRemaining = 0; }
   return { statusId: 'toxin', stacks: toxinStacks, damage };
 }
-function actionForAi(state: BattleState, actor: BattleActor, rules: BattleRules) {
+function planActionForAi(state: BattleState, actor: BattleActor, rules: BattleRules) {
   const actions = (actor.actionIds ?? []).map((id) => rules.actions[id]).filter(Boolean).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-  return actions.find((action) => {
+  for (const action of actions) {
+    if (action.id.includes('taunt') && (actor.tauntCooldown ?? 0) > 0) continue;
+    if (actor.qi < (action.qiCost ?? 0)) continue;
     const target = targetFor(state, actor, action.target);
-    if (!target || !conditionsMet(state, actor, target, action.conditions)) return false;
-    if (action.id.includes('taunt') && (actor.tauntCooldown ?? 0) > 0) return false;
-    return actor.qi >= (action.qiCost ?? 0);
-  });
+    if (!target || !conditionsMet(state, actor, target, action.conditions)) continue;
+    return { action, target };
+  }
+  return undefined;
 }
-function intents(state: BattleState, rules: BattleRules): BattleIntent[] {
+function intentValid(state: BattleState, intent: BattleIntent, rules: BattleRules) {
+  const actor = actorFor(state, intent.actorId);
+  if (!actor || actor.hp <= 0 || actor.role === 'player') return false;
+  if (!intent.actionId || !intent.targetId) return false;
+  const action = rules.actions[intent.actionId]; const target = actorFor(state, intent.targetId);
+  if (!action || !actor.actionIds?.includes(action.id) || !target || target.hp <= 0 || actor.qi < (action.qiCost ?? 0) || !conditionsMet(state, actor, target, action.conditions)) return false;
+  if (action.id.includes('taunt') && (actor.tauntCooldown ?? 0) > 0) return false;
+  const forced = actor.side === 'enemy' ? actorFor(state, state.tauntActorId) : undefined;
+  if (forced?.hp && action.target !== 'self' && target.id !== forced.id) return false;
+  if (action.target === 'self') return target.id === actor.id;
+  if (action.target === 'weakest-ally') return target.side === actor.side;
+  return target.side !== actor.side;
+}
+function reconcileIntents(state: BattleState, rules: BattleRules): BattleIntent[] {
+  const previous = new Map(state.intents.map((intent) => [intent.actorId, intent]));
   return state.actors.filter((actor) => actor.role !== 'player' && actor.hp > 0).map((actor) => {
-    const action = actionForAi(clone(state), actor, rules); const target = action ? targetFor(state, actor, action.target) : undefined;
-    return { actorId: actor.id, actorName: actor.name, icon: actor.role === 'tank' ? '盾' : actor.role === 'healer' ? '藥' : actor.role === 'assassin' ? '刃' : '刀', actionId: action?.id ?? 'basic-attack', targetId: target?.id ?? null };
+    const existing = previous.get(actor.id);
+    if (existing && intentValid(state, existing, rules)) return existing;
+    const plan = planActionForAi(state, actor, rules);
+    return { actorId: actor.id, actorName: actor.name, icon: actor.role === 'tank' ? '盾' : actor.role === 'healer' ? '藥' : actor.role === 'assassin' ? '刃' : '刀', actionId: plan?.action.id ?? null, targetId: plan?.target.id ?? null };
   });
 }
 function finish(state: BattleState, rules: BattleRules, events: BattleEvent[]) {
   if (!living(state, 'enemy').length) { state.result = 'victory'; events.push({ type: 'result', result: 'victory' }); return; }
   const player = actorFor(state, 'player');
   if (!player || player.hp <= 0 || !living(state, 'ally').length) { state.result = 'defeat'; events.push({ type: 'result', result: 'defeat' }); return; }
-  state.readyActorId = null; state.turn += 1; state.intents = intents(state, rules);
+  state.readyActorId = null; state.turn += 1; state.intents = reconcileIntents(state, rules);
 }
 export function createBattle(setup: BattleSetup, rules: BattleRules): BattleState {
   const state: BattleState = { ...clone(setup), turn: 1, tick: 0, readyActorId: null, selectedTargetId: null, actionSerial: 0, tauntActorId: null, result: null, intents: [], events: [], consumedPassives: [] };
   refreshSpeeds(state, rules);
-  for (const actor of state.actors) actor.progress = roll(state, 8, 70);
-  state.intents = intents(state, rules);
+  const availableStartingProgress = Array.from({ length: 63 }, (_, index) => index + 8);
+  for (const actor of state.actors) {
+    const progressIndex = roll(state, 0, availableStartingProgress.length - 1);
+    actor.progress = availableStartingProgress.splice(progressIndex, 1)[0];
+  }
+  state.intents = reconcileIntents(state, rules);
   return state;
 }
 export function reduceBattle(previous: BattleState, command: BattleCommand, rules: BattleRules): BattleTransition {
@@ -160,20 +194,36 @@ export function reduceBattle(previous: BattleState, command: BattleCommand, rule
     const target = actorFor(state, command.targetId); if (state.readyActorId === 'player' && target?.side === 'enemy' && target.hp > 0) state.selectedTargetId = target.id;
   }
   if (command.type === 'advance' && state.readyActorId !== 'player') {
-    refreshSpeeds(state, rules); const actors = state.actors.filter((actor) => actor.hp > 0); actors.forEach((actor) => { actor.progress = Math.min(150, actor.progress + actor.speed); }); state.tick += 1;
-    const ready = [...actors].sort((a, b) => b.progress - a.progress)[0];
+    refreshSpeeds(state, rules); const actors = state.actors.filter((actor) => actor.hp > 0);
+    let ready: BattleActor | undefined;
+    if (command.elapsedMs === undefined) {
+      actors.forEach((actor) => { actor.progress = Math.min(150, actor.progress + actor.speed); }); state.tick += 1;
+      ready = [...actors].sort((a, b) => b.progress - a.progress)[0];
+    } else {
+      const elapsedTicks = Math.max(0, command.elapsedMs) / BATTLE_TICK_MS;
+      let ticksToReady = Infinity;
+      for (const actor of actors) {
+        const candidate = Math.max(0, (100 - actor.progress) / actor.speed);
+        if (candidate < ticksToReady - TIMELINE_EPSILON) { ticksToReady = candidate; ready = actor; }
+      }
+      const advancedTicks = Math.min(elapsedTicks, ticksToReady);
+      actors.forEach((actor) => { actor.progress = timelineValue(Math.min(150, actor.progress + actor.speed * advancedTicks)); }); state.tick = timelineValue(state.tick + advancedTicks);
+      if (ticksToReady > elapsedTicks + TIMELINE_EPSILON) ready = undefined;
+    }
     if (ready && ready.progress >= 100) {
       ready.progress -= 100; state.readyActorId = ready.id;
       if (ready.id === 'player') { state.selectedTargetId = targetFor(state, ready, 'weakest-enemy')?.id ?? null; events.push({ type: 'ready', actorId: ready.id, actorName: ready.name, side: ready.side }); }
       else {
+        state.intents = reconcileIntents(state, rules);
         const status = ready.side === 'enemy' ? resolveTurnStatuses(state, ready) : undefined;
         if (status) {
           events.push({ type: 'status', actorId: ready.id, actorName: ready.name, side: ready.side, ...status });
-          if (ready.hp <= 0) { finish(state, rules, events); state.events = events; state.actionSerial += events.length; return { state, events, result: state.result, resourceChanges: { money: state.resources.money - previous.resources.money, flagsAdded: [] }, rngIndex: state.rngIndex }; }
+          if (ready.hp <= 0) { finish(state, rules, events); state.events = events; state.actionSerial += events.filter((event) => event.type === 'action' || event.type === 'status').length; return { state, events, result: state.result, resourceChanges: { money: state.resources.money - previous.resources.money, flagsAdded: [] }, rngIndex: state.rngIndex }; }
         }
         if (ready.role === 'tank' && (ready.tauntCooldown ?? 0) > 0) { ready.tauntCooldown = Math.max(0, (ready.tauntCooldown ?? 0) - 1); if (state.tauntActorId === ready.id && (ready.tauntTurnsRemaining ?? 0) > 0) { ready.tauntTurnsRemaining = Math.max(0, (ready.tauntTurnsRemaining ?? 0) - 1); if (!ready.tauntTurnsRemaining) state.tauntActorId = null; } }
-        const action = actionForAi(state, ready, rules); const target = action ? targetFor(state, ready, action.target) : undefined;
+        const intent = state.intents.find((item) => item.actorId === ready.id); const action = intent?.actionId ? rules.actions[intent.actionId] : undefined; const target = actorFor(state, intent?.targetId);
         if (action && target) { ready.actionsTaken += 1; ready.qi -= action.qiCost ?? 0; const result = applyEffects(state, ready, target, action, rules); events.push({ type: 'action', actorId: ready.id, actorName: ready.name, side: ready.side, actionId: action.id, targetId: target.id, targetName: target.name, ...result }); }
+        state.intents = state.intents.filter((item) => item.actorId !== ready.id);
         finish(state, rules, events);
       }
     }
@@ -182,5 +232,7 @@ export function reduceBattle(previous: BattleState, command: BattleCommand, rule
     const actor = actorFor(state, 'player'); const action = rules.actions[command.actionId]; const target = actor && action ? targetFor(state, actor, action.target, command.targetId) : undefined;
     if (actor && action && target && actor.qi >= (action.qiCost ?? 0) && conditionsMet(state, actor, target, action.conditions)) { actor.actionsTaken += 1; actor.qi -= action.qiCost ?? 0; state.selectedTargetId = target.id; const result = applyEffects(state, actor, target, action, rules); events.push({ type: 'action', actorId: actor.id, actorName: actor.name, side: actor.side, actionId: action.id, targetId: target.id, targetName: target.name, ...result }); finish(state, rules, events); }
   }
-  state.events = events; state.actionSerial += events.length; return { state, events, result: state.result, resourceChanges: { money: state.resources.money - previous.resources.money, flagsAdded: [] }, rngIndex: state.rngIndex };
+  if (events.some((event) => event.type === 'action' || event.type === 'status')) state.events = events;
+  state.actionSerial += events.filter((event) => event.type === 'action' || event.type === 'status').length;
+  return { state, events, result: state.result, resourceChanges: { money: state.resources.money - previous.resources.money, flagsAdded: [] }, rngIndex: state.rngIndex };
 }
