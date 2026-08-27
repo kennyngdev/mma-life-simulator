@@ -26,7 +26,7 @@ export type BattleMeta = { choiceId: LifeChoice['id']; actions: string[]; damage
 export type BattleResultCard = { won: boolean; grade: 'C' | 'B' | 'A' | 'S' | 'SSS'; score: number; moments: string[]; line: string; rewards: string[] };
 
 export type LifeRun = {
-  version: 5;
+  version: 6;
   seed: string;
   name: string;
   origin: string;
@@ -71,8 +71,8 @@ const range = (seed: string, min: number, max: number) => min + (hash(seed) % (m
 
 export const rarities: Array<{ id: RarityId; label: string; chance: number; description: string }> = [
   { id: 'common', label: '普通', chance: 60, description: '常見，但仍然會決定你怎麼活。' },
-  { id: 'rare', label: '稀有', chance: 30, description: '少見的條件，通常帶來更鮮明的玩法。' },
-  { id: 'legendary', label: '傳說', chance: 10, description: '極少出現，不保證比較強，只保證這條命很有事。' },
+  { id: 'rare', label: '稀有', chance: 30, description: '比普通更強，也會帶來可預測的小代價。' },
+  { id: 'legendary', label: '傳說', chance: 10, description: '足以改變一生的強項，代價也會一路跟著你。' },
 ];
 
 export const statNames: Record<StatKey, string> = { strength: '力道', agility: '身法', constitution: '根骨', wisdom: '悟性', will: '心性', luck: '福緣' };
@@ -172,19 +172,29 @@ function pickIdentity<T extends string>(kind: IdentityKind, items: readonly T[],
 }
 
 const originBonus: Record<(typeof origins)[number], Partial<Record<StatKey, number>> & { money?: number }> = {
-  '藥鋪學徒': { wisdom: 1, will: 1 }, '鏢局雜役': { agility: 1, constitution: 1 }, '沒落軍戶': { strength: 1, will: 1 },
-  '寺外棄童': { luck: 1, constitution: 1 }, '商隊小孩': { luck: 1, money: 8 }, '縣城學徒': { wisdom: 2 },
+  '藥鋪學徒': { wisdom: 1, will: 1 }, '鏢局雜役': { agility: 1, constitution: 1 },
+  '縣城學徒': { wisdom: 3, money: -4 }, '商隊小孩': { luck: 2, constitution: -1, money: 12 },
+  '沒落軍戶': { strength: 3, will: 2, luck: -1, money: -8 }, '寺外棄童': { constitution: 3, luck: 3, wisdom: -1, money: -8 },
+};
+const originCopy: Record<(typeof origins)[number], string> = {
+  '藥鋪學徒': '悟性 +1、心性 +1。尋常手藝，沒有額外代價。', '鏢局雜役': '身法 +1、根骨 +1。搬得多，跑得也快。',
+  '縣城學徒': '悟性 +3；拜師與紙墨讓開局銀兩 -4。', '商隊小孩': '福緣 +2、銀兩 +12；長年奔波讓根骨 -1。',
+  '沒落軍戶': '力道 +3、心性 +2；福緣 -1、開局銀兩 -8。家傳還在，家產不在。', '寺外棄童': '根骨 +3、福緣 +3；悟性 -1、開局銀兩 -8。很能活，沒人替你交學費。',
+};
+const burdenBonus: Partial<Record<(typeof burdens)[number], Partial<Record<StatKey, number>> & { money?: number }>> = {
+  '一封信一直沒寄': { will: 3, money: -8 },
 };
 const traitCopy: Record<(typeof traits)[number], string> = {
-  '過目不忘': '練功後更容易把悟到的東西留下。', '雨天手穩': '下雨的戰鬥，攻勢明顯更準。', '很會記仇': '帶著舊傷時，出手格外有精神。',
-  '吃苦耐勞': '根骨特別結實，恢復也不太講道理。', '臉皮很厚': '接差事時多賺一點，也比較不怕丟臉。', '運氣不太好': '壞事常常找上門，但敗戰悟性來得更快。',
+  '過目不忘': '練功得到武學 +24；但每次苦練氣血 -8。記得太清楚，也比較不會停。', '雨天手穩': '雨天攻擊 +8；無雨時攻擊 -2。手穩，天氣不一定配合。', '很會記仇': '每層舊傷提供攻擊 +3；舊傷越多，戰後恢復越差。',
+  '吃苦耐勞': '根骨特別結實，恢復也不太講道理。', '臉皮很厚': '接差事時多賺一點，也比較不怕丟臉。', '運氣不太好': '每場敵人攻擊 +2；勝戰武學額外 +4，敗戰額外 +14。麻煩更多，悟得也更多。',
 };
 const burdenCopy: Record<(typeof burdens)[number], string> = {
-  '家裡欠了錢': '每次接差事，先有兩文錢被命運拿走。', '有人等你回家': '管閒事時更容易累積人情。', '師父欠你一句道歉': '在門派裡特別不想輸。',
-  '你其實很怕打架': '開戰時先有一點護盾，但攻勢較保守。', '一封信一直沒寄': '晚年時總會想起某件沒做的事。', '大家以為你很有錢': '賺到的錢會有一小部分神秘蒸發。',
+  '家裡欠了錢': '開局銀兩 -6；每次接差事再少賺 2。', '有人等你回家': '管閒事時人情 +5；但只恢復氣血 +6。你總得留一點力氣回去。', '師父欠你一句道歉': '入門期攻擊 +7；其他人生階段攻擊 -2。這口氣很強，也很窄。',
+  '你其實很怕打架': '每場先得護盾 +16；攻擊 -3。怕得有用，打得保守。', '一封信一直沒寄': '心性 +3；開局銀兩 -8。你把盤纏花在找一個始終沒寄出的地址。', '大家以為你很有錢': '每次接差事少賺 3。名聲先到了，錢沒有。',
 };
 
-export function identityDetail(kind: 'trait' | 'burden', value: string) {
+export function identityDetail(kind: IdentityKind, value: string) {
+  if (kind === 'origin') return originCopy[value as keyof typeof originCopy];
   return kind === 'trait' ? traitCopy[value as keyof typeof traitCopy] : burdenCopy[value as keyof typeof burdenCopy];
 }
 
@@ -197,20 +207,21 @@ export function phaseForTurn(turn: number) { return phases.find((phase) => turn 
 export function sectFor(id: SectId | null) { return sects.find((sect) => sect.id === id) ?? sects[0]; }
 export function difficultyFor(id: DifficultyId) { return difficulties.find((difficulty) => difficulty.id === id) ?? difficulties[1]; }
 export function choiceRewardFor(run: LifeRun, choiceId: LifeChoice['id']) {
-  if (choiceId === 'train') return `武學 +${run.trait === '過目不忘' ? 18 : 12}、內力 +6`;
+  if (choiceId === 'train') return `武學 +${run.trait === '過目不忘' ? 24 : 12}、內力 +6${run.trait === '過目不忘' ? '、氣血 -8' : ''}`;
   if (choiceId === 'work') return `銀兩 +${(run.trait === '臉皮很厚' ? 14 : 10) - (run.burden === '家裡欠了錢' ? 2 : 0) - (run.burden === '大家以為你很有錢' ? 3 : 0)}、名聲 +${run.trait === '臉皮很厚' ? 2 : 1}`;
-  return `人情 +${run.burden === '有人等你回家' ? 4 : 2}、氣血 +10`;
+  return `人情 +${run.burden === '有人等你回家' ? 5 : 2}、氣血 +${run.burden === '有人等你回家' ? 6 : 10}`;
 }
 
 export function newLife(seed: string, name: string, difficulty: DifficultyId = 'standard', legacyRank = 0): LifeRun {
   const origin = pickIdentity('origin', origins, `${seed}:origin`);
   const trait = pickIdentity('trait', traits, `${seed}:trait`);
   const burden = pickIdentity('burden', burdens, `${seed}:burden`);
-  const stats = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, range(`${seed}:${key}`, 3, 7) + (originBonus[origin][key] ?? 0)])) as Record<StatKey, number>;
+  const stats = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, range(`${seed}:${key}`, 3, 7) + (originBonus[origin][key] ?? 0) + (burdenBonus[burden]?.[key] ?? 0)])) as Record<StatKey, number>;
   const potential = Object.fromEntries((Object.keys(statNames) as StatKey[]).map((key) => [key, stats[key] + range(`${seed}:potential:${key}`, 3, 6)])) as Record<StatKey, number>;
   const maxHp = 66 + stats.constitution * 7 + (trait === '吃苦耐勞' ? 12 : 0);
   const maxQi = 24 + stats.will * 3;
-  return { version: 5, seed, name: name.trim() || '無名少俠', origin, trait, burden, difficulty, legacyRank, legacyClaimed: false, sectId: null, age: 12, year: 1590, turn: 0, stats, potential, hp: maxHp, maxHp, qi: maxQi, maxQi, money: range(`${seed}:money`, 8, 22) + (originBonus[origin].money ?? 0) - (burden === '家裡欠了錢' ? 6 : 0), mastery: legacyRank * 5, reputation: 0, bond: 0, friendName: pick(friends, `${seed}:friend`), rivalName: pick(rivals, `${seed}:rival`), friendship: 0, rivalry: 0, injury: 0, moments: [], chronicle: [], battle: null, battleMeta: null, result: null };
+  const money = Math.max(0, range(`${seed}:money`, 8, 22) + (originBonus[origin].money ?? 0) + (burdenBonus[burden]?.money ?? 0) - (burden === '家裡欠了錢' ? 6 : 0));
+  return { version: 6, seed, name: name.trim() || '無名少俠', origin, trait, burden, difficulty, legacyRank, legacyClaimed: false, sectId: null, age: 12, year: 1590, turn: 0, stats, potential, hp: maxHp, maxHp, qi: maxQi, maxQi, money, mastery: legacyRank * 5, reputation: 0, bond: 0, friendName: pick(friends, `${seed}:friend`), rivalName: pick(rivals, `${seed}:rival`), friendship: 0, rivalry: 0, injury: 0, moments: [], chronicle: [], battle: null, battleMeta: null, result: null };
 }
 
 export function eventFor(run: LifeRun): LifeEvent {
@@ -265,7 +276,7 @@ export function eventFor(run: LifeRun): LifeEvent {
 function enemyActor(run: LifeRun, event: LifeEvent, index: number): BattleActor {
   const scale = Math.max(1, 1 + Math.floor(run.turn / 2) + index + difficultyFor(run.difficulty).enemyScale);
   const hp = 38 + scale * 13;
-  return { id: `enemy-${index}`, name: index ? `${event.enemyName}同夥` : event.enemyName, role: event.enemyRole, side: 'enemy', hp, maxHp: hp, qi: 18 + scale * 2, maxQi: 18 + scale * 2, attack: 8 + scale * 3, defense: 3 + Math.floor(scale / 2), guard: 0, progress: 0, baseSpeed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, speed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, actionsTaken: 0, actionIds: [event.enemyRole === 'assassin' ? 'enemy-assassin' : event.enemyRole === 'tank' ? 'enemy-guard' : 'enemy-strike'], passiveIds: [] };
+  return { id: `enemy-${index}`, name: index ? `${event.enemyName}同夥` : event.enemyName, role: event.enemyRole, side: 'enemy', hp, maxHp: hp, qi: 18 + scale * 2, maxQi: 18 + scale * 2, attack: 8 + scale * 3 + (run.trait === '運氣不太好' ? 2 : 0), defense: 3 + Math.floor(scale / 2), guard: 0, progress: 0, baseSpeed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, speed: event.enemyRole === 'assassin' ? 13 : event.enemyRole === 'tank' ? 7 : 10, actionsTaken: 0, actionIds: [event.enemyRole === 'assassin' ? 'enemy-assassin' : event.enemyRole === 'tank' ? 'enemy-guard' : 'enemy-strike'], passiveIds: [] };
 }
 
 function friendActor(run: LifeRun): BattleActor {
@@ -289,15 +300,15 @@ export function startBattle(run: LifeRun, event: LifeEvent, choice: LifeChoice):
   const sect = sectFor(run.sectId);
   const stats = { ...run.stats };
   const next = { ...run, stats, battle: null, result: null };
-  if (choice.id === 'train') { next.mastery += run.trait === '過目不忘' ? 18 : 12; next.qi = Math.min(next.maxQi, next.qi + 6); }
+  if (choice.id === 'train') { next.mastery += run.trait === '過目不忘' ? 24 : 12; next.qi = Math.min(next.maxQi, next.qi + 6); if (run.trait === '過目不忘') next.hp = Math.max(1, next.hp - 8); }
   if (choice.id === 'work') { const earnings = run.trait === '臉皮很厚' ? 14 : 10; next.money += earnings - (run.burden === '家裡欠了錢' ? 2 : 0) - (run.burden === '大家以為你很有錢' ? 3 : 0); next.reputation += run.trait === '臉皮很厚' ? 2 : 1; }
-  if (choice.id === 'help') { const connection = run.burden === '有人等你回家' ? 4 : 2; next.bond += connection; next.friendship += connection; next.hp = Math.min(next.maxHp, next.hp + 10); }
+  if (choice.id === 'help') { const connection = run.burden === '有人等你回家' ? 5 : 2; next.bond += connection; next.friendship += connection; next.hp = Math.min(next.maxHp, next.hp + (run.burden === '有人等你回家' ? 6 : 10)); }
   if (choice.id === 'work') next.rivalry += 1;
-  const revenge = run.trait === '很會記仇' ? run.injury * 2 : 0;
-  const mountainGrudge = run.burden === '師父欠你一句道歉' && phaseForTurn(run.turn).name === '入門' ? 3 : 0;
-  const rainFocus = run.trait === '雨天手穩' && event.weather === '雨' ? 5 : 0;
-  const fearGuard = run.burden === '你其實很怕打架' ? 10 : 0;
-  const player: BattleActor = { id: 'player', name: next.name, role: 'player', side: 'ally', hp: next.hp, maxHp: next.maxHp, qi: next.qi, maxQi: next.maxQi, attack: 8 + next.stats.strength * 2 + Math.floor(next.mastery / 35) + revenge + mountainGrudge + rainFocus + Math.floor(next.rivalry / 3) - (run.burden === '你其實很怕打架' ? 2 : 0), defense: 3 + next.stats.constitution, guard: (choice.id === 'train' ? 8 : choice.id === 'help' ? 12 : 0) + fearGuard + Math.floor(next.friendship / 3) * 2, progress: 0, baseSpeed: 7 + next.stats.agility, speed: 7 + next.stats.agility, actionsTaken: 0, actionIds: sect.moves.map((move) => move.id), passiveIds: [] };
+  const revenge = run.trait === '很會記仇' ? run.injury * 3 : 0;
+  const mountainGrudge = run.burden === '師父欠你一句道歉' ? (phaseForTurn(run.turn).name === '入門' ? 7 : -2) : 0;
+  const rainFocus = run.trait === '雨天手穩' ? (event.weather === '雨' ? 8 : -2) : 0;
+  const fearGuard = run.burden === '你其實很怕打架' ? 16 : 0;
+  const player: BattleActor = { id: 'player', name: next.name, role: 'player', side: 'ally', hp: next.hp, maxHp: next.maxHp, qi: next.qi, maxQi: next.maxQi, attack: 8 + next.stats.strength * 2 + Math.floor(next.mastery / 35) + revenge + mountainGrudge + rainFocus + Math.floor(next.rivalry / 3) - (run.burden === '你其實很怕打架' ? 3 : 0), defense: 3 + next.stats.constitution, guard: (choice.id === 'train' ? 8 : choice.id === 'help' ? 12 : 0) + fearGuard + Math.floor(next.friendship / 3) * 2, progress: 0, baseSpeed: 7 + next.stats.agility, speed: 7 + next.stats.agility, actionsTaken: 0, actionIds: sect.moves.map((move) => move.id), passiveIds: [] };
   const friend = next.friendship >= 6 ? friendActor(next) : null;
   const battle = createBattle({ seed: `${next.seed}:battle:${next.turn}:${choice.id}`, rngIndex: 0, encounterId: `life-${next.turn}`, title: event.title, cause: choice.prep, stakes: `${event.objective.label}：${event.objective.description}`, mandatory: true, actors: [player, ...(friend ? [friend] : []), ...Array.from({ length: event.enemyCount }, (_, index) => enemyActor(next, event, index))], resources: { money: next.money, phoneCharges: 0, flags: [], talents: {}, strength: next.stats.strength, partySize: friend ? 1 : 0 } }, rulesFor(sect));
   next.battle = battle;
@@ -352,12 +363,13 @@ export function resolveBattle(run: LifeRun): LifeRun {
   const stats = { ...run.stats, [growthKey]: run.stats[growthKey] + (canGrow ? 1 : 0) };
   const maxHp = 66 + stats.constitution * 7 + (run.trait === '吃苦耐勞' ? 12 : 0);
   const maxQi = 24 + stats.will * 3;
-  const recoveredHp = won ? Math.max(18, Math.round(maxHp * (run.trait === '吃苦耐勞' ? .72 : .6))) : Math.max(12, Math.round(maxHp * .38));
+  const recoveryRate = run.trait === '吃苦耐勞' ? .72 : run.trait === '很會記仇' ? Math.max(.4, .6 - run.injury * .05) : .6;
+  const recoveredHp = won ? Math.max(18, Math.round(maxHp * recoveryRate)) : Math.max(12, Math.round(maxHp * .38));
   const masteryGain = ({ C: 5, B: 7, A: 10, S: 14, SSS: 18 } as const)[grade];
   const chronicle = `${run.year} · ${phase.name} · ${run.battle.title}：${won ? '勝' : '敗'}（${grade}）· ${moments[0]}`;
-  const setbackStudy = !won && run.trait === '運氣不太好' ? 4 : 0;
-  const result: BattleResultCard = { won, grade, score, moments, line: won ? `${sect.name}的人看你一眼，像是在考慮要不要承認你其實還行。` : '你沒有死，只是江湖暫時替你保留了臉面。', rewards: [`武學 +${masteryGain + setbackStudy}`, canGrow ? `${statNames[growthKey]} +1 · 靠近潛力` : `${statNames[growthKey]} 已到目前潛力`, won ? '名聲 +2' : injury ? `舊傷 ${injury} 層` : '身體狀況良好'] };
-  return { ...run, stats, maxHp, maxQi, turn: run.turn + 1, age: phaseForTurn(Math.min(15, run.turn + 1)).age, year: phaseForTurn(Math.min(15, run.turn + 1)).year, hp: recoveredHp, qi: Math.max(8, Math.round(maxQi * .7)), mastery: run.mastery + masteryGain + setbackStudy, reputation: run.reputation + (won ? 2 : 0), injury, moments: [...run.moments, ...moments].slice(-24), chronicle: [...run.chronicle, chronicle], battle: null, battleMeta: null, result };
+  const fateStudy = run.trait === '運氣不太好' ? (won ? 4 : 14) : 0;
+  const result: BattleResultCard = { won, grade, score, moments, line: won ? `${sect.name}的人看你一眼，像是在考慮要不要承認你其實還行。` : '你沒有死，只是江湖暫時替你保留了臉面。', rewards: [`武學 +${masteryGain + fateStudy}`, canGrow ? `${statNames[growthKey]} +1 · 靠近潛力` : `${statNames[growthKey]} 已到目前潛力`, won ? '名聲 +2' : injury ? `舊傷 ${injury} 層` : '身體狀況良好'] };
+  return { ...run, stats, maxHp, maxQi, turn: run.turn + 1, age: phaseForTurn(Math.min(15, run.turn + 1)).age, year: phaseForTurn(Math.min(15, run.turn + 1)).year, hp: recoveredHp, qi: Math.max(8, Math.round(maxQi * .7)), mastery: run.mastery + masteryGain + fateStudy, reputation: run.reputation + (won ? 2 : 0), injury, moments: [...run.moments, ...moments].slice(-24), chronicle: [...run.chronicle, chronicle], battle: null, battleMeta: null, result };
 }
 
 export function isComplete(run: LifeRun) { return run.turn >= 16; }

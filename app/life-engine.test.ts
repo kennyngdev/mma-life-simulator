@@ -21,7 +21,7 @@ describe('大俠模擬器 life engine', () => {
     expect(newLife('same-fate', '小滿')).toMatchObject(newLife('same-fate', '小滿'));
   });
 
-  it('draws real seeded rarity tiers with disclosed 60/30/10 odds', () => {
+  it('draws real seeded rarity tiers with 60/30/10 odds', () => {
     expect(rarities.map(({ label, chance }) => [label, chance])).toEqual([['普通', 60], ['稀有', 30], ['傳說', 10]]);
     const counts = { common: 0, rare: 0, legendary: 0 };
     for (let index = 0; index < 3000; index += 1) counts[identityRarity('trait', newLife(`rarity-${index}`, '').trait).id] += 1;
@@ -51,8 +51,12 @@ describe('大俠模擬器 life engine', () => {
   });
 
   it('describes mechanical identity hooks instead of treating them as flavor only', () => {
-    expect(identityDetail('trait', '雨天手穩')).toContain('下雨');
+    expect(identityDetail('trait', '雨天手穩')).toContain('雨天');
     expect(identityDetail('burden', '家裡欠了錢')).toContain('差事');
+    expect(identityDetail('origin', '沒落軍戶')).toContain('力道 +3');
+    expect(identityDetail('origin', '沒落軍戶')).toContain('福緣 -1');
+    expect(identityDetail('trait', '運氣不太好')).toContain('敵人攻擊 +2');
+    expect(identityDetail('trait', '運氣不太好')).toContain('敗戰額外 +14');
   });
 
   it('keeps difficulty and inherited training deterministic in a new life', () => {
@@ -65,8 +69,29 @@ describe('大俠模擬器 life engine', () => {
 
   it('shows trait- and burden-adjusted choice rewards before the battle starts', () => {
     const run = newLife('same-fate', '小滿');
-    expect(choiceRewardFor({ ...run, trait: '過目不忘' }, 'train')).toContain('+18');
+    expect(choiceRewardFor({ ...run, trait: '過目不忘' }, 'train')).toContain('武學 +24');
+    expect(choiceRewardFor({ ...run, trait: '過目不忘' }, 'train')).toContain('氣血 -8');
     expect(choiceRewardFor({ ...run, trait: '臉皮很厚', burden: '大家以為你很有錢' }, 'work')).toContain('銀兩 +11');
+  });
+
+  it('makes rare and legendary identities stronger through explicit tradeoffs', () => {
+    const base = { ...newLife('tradeoff-fate', '小滿'), sectId: 'huashan' as const, trait: '雨天手穩', burden: '你其實很怕打架' };
+    const template = eventFor(base); const choice = template.choices[1];
+    const rainy = startBattle(base, { ...template, weather: '雨' }, choice);
+    const dry = startBattle(base, { ...template, weather: '晴' }, choice);
+    expect(rainy.battle!.actors.find((actor) => actor.id === 'player')!.attack - dry.battle!.actors.find((actor) => actor.id === 'player')!.attack).toBe(10);
+    expect(rainy.battle!.actors.find((actor) => actor.id === 'player')).toMatchObject({ guard: 16 });
+
+    const unlucky = startBattle({ ...base, trait: '運氣不太好' }, template, choice);
+    const normal = startBattle({ ...base, trait: '吃苦耐勞' }, template, choice);
+    expect(unlucky.battle!.actors.find((actor) => actor.side === 'enemy')!.attack - normal.battle!.actors.find((actor) => actor.side === 'enemy')!.attack).toBe(2);
+  });
+
+  it('charges the legendary photographic-memory training cost immediately', () => {
+    const run = { ...newLife('memory-fate', '小滿'), sectId: 'wudang' as const, trait: '過目不忘' };
+    const event = eventFor(run); const trained = startBattle(run, event, event.choices[0]);
+    expect(trained.mastery - run.mastery).toBe(24);
+    expect(trained.battle!.actors.find((actor) => actor.id === 'player')!.hp).toBe(Math.max(1, run.hp - 8));
   });
 
   it('creates several deterministic encounter shapes across a life', () => {

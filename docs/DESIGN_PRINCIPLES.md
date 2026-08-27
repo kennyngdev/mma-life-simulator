@@ -12,7 +12,7 @@ Every run follows this loop:
 
 - A life spans sixteen turns across youth, entry, wandering, renown, and later life. Each phase changes the context and stakes, not only the numbers.
 - Seeded identity reveals origin, a conditional trait, and a burden. Current ability is shown separately from potential; growth moves toward visible ceilings and potential never guarantees greatness.
-- Origin, trait, and burden each use a seeded rarity roll: 普通 60%, 稀有 30%, 傳說 10%, followed by an even pick within the rolled tier. Rarity means how often an identity appears, not raw power; rare burdens may be harsher and common traits can remain useful. The reveal screen always discloses these odds.
+- Origin, trait, and burden each use a seeded rarity roll: 普通 60%, 稀有 30%, 傳說 10%, followed by an even pick within the rolled tier. Higher rarity is generally stronger and more run-defining, but every rare or legendary advantage carries a larger, explicit side effect. A legendary identity should create a build question, not a free win. The reveal cards show each rolled tier and the complete benefit/cost text without a separate probability explanation block.
 - The six sects are distinct move kits and play styles. A sect provides direction, not a guaranteed ending.
 - Each turn previews a concrete encounter objective, offers preparation through training, paid work, or helping, then resolves a deterministic battle and a remembered aftermath.
 
@@ -33,7 +33,7 @@ Every run follows this loop:
 
 - Three deterministic difficulty profiles alter the pressure without changing causality.
 - Completed lives award locally stored 江湖見聞. Four points buy one modest 師門傳承 rank for future lives; account progress must remain less important than identity and choices.
-- Seeds support replay, comparison, sharing, and debugging. Save compatibility is explicit through the run version; rarity selection begins at save version 5, so earlier in-progress runs restart while legacy progression remains.
+- Seeds support replay, comparison, sharing, and debugging. Save compatibility is explicit through the run version; rarity power tradeoffs begin at save version 6, so earlier in-progress runs restart while legacy progression remains.
 
 ## Ethical engagement
 

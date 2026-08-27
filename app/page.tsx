@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import styles from './game.module.css';
-import { advance, choiceRewardFor, difficulties, endingFor, eventFor, identityDetail, identityRarity, isComplete, newLife, performMove, phases, rarities, resolveBattle, sectFor, sects, selectTarget, startBattle, statNames, type DifficultyId, type LifeRun, type LifeScreen, type RarityId, type SectId } from './life-engine';
+import { advance, choiceRewardFor, difficulties, endingFor, eventFor, identityDetail, identityRarity, isComplete, newLife, performMove, phases, resolveBattle, sectFor, sects, selectTarget, startBattle, statNames, type DifficultyId, type LifeRun, type LifeScreen, type RarityId, type SectId } from './life-engine';
 
 const SAVE_KEY = 'daxia-simulator-v1';
 const LEGACY_KEY = 'daxia-simulator-legacy-v1';
@@ -38,7 +38,7 @@ function rarityClass(id: RarityId) { return id === 'legendary' ? styles.legendar
 function Reveal({ run, onReroll, onContinue }: { run: LifeRun; onReroll: () => void; onContinue: () => void }) {
   const stats = Object.keys(statNames) as Array<keyof typeof statNames>;
   const originRarity = identityRarity('origin', run.origin); const traitRarity = identityRarity('trait', run.trait); const burdenRarity = identityRarity('burden', run.burden);
-  return <main className={styles.center}><section className={`${styles.panel} ${styles.reveal}`}><p className={styles.eyebrow}>這位少俠的命，先看一眼</p><h1>{run.name}</h1><p className={styles.lead}>你生在晚明，暫時沒有大志，主要是沒有錢。</p><div className={styles.revealCards}><article className={rarityClass(originRarity.id)}><span>出身 · {originRarity.label}</span><b>{run.origin}</b><small>出身已帶來基礎能力；長大仍然不會自動升級。</small></article><article className={rarityClass(traitRarity.id)}><span>天賦 · {traitRarity.label}</span><b>{run.trait}</b><small>{identityDetail('trait', run.trait)}</small></article><article className={rarityClass(burdenRarity.id)}><span>麻煩 · {burdenRarity.label}</span><b>{run.burden}</b><small>{identityDetail('burden', run.burden)}</small></article></div><p className={styles.rarityOdds}>{rarities.map((rarity) => `${rarity.label} ${rarity.chance}%`).join(' · ')}　稀有度只代表少見，不代表一定更強。</p><div className={styles.statGrid}>{stats.map((key) => <div key={key} className={styles.statRow}><span>{statNames[key]}</span><div className={styles.statBar} aria-label={`${statNames[key]}：目前 ${run.stats[key]}，潛力 ${run.potential[key]}`}><i className={styles.statPotential} style={{ width: `${(run.potential[key] / 15) * 100}%` }} /><i className={styles.statCurrent} style={{ width: `${(run.stats[key] / 15) * 100}%` }} /></div></div>)}</div><div className={styles.statLegend}><span><i />目前</span><span><i />潛力</span></div><div className={styles.actions}><button className={styles.quiet} onClick={onReroll}>這命太硬，重抽</button><button className={styles.primary} onClick={onContinue}>就這樣，去闖江湖 →</button></div></section></main>;
+  return <main className={styles.center}><section className={`${styles.panel} ${styles.reveal}`}><p className={styles.eyebrow}>這位少俠的命，先看一眼</p><h1>{run.name}</h1><p className={styles.lead}>你生在晚明，暫時沒有大志，主要是沒有錢。</p><div className={styles.revealCards}><article className={rarityClass(originRarity.id)}><span>出身 · {originRarity.label}</span><b>{run.origin}</b><small>{identityDetail('origin', run.origin)}</small></article><article className={rarityClass(traitRarity.id)}><span>天賦 · {traitRarity.label}</span><b>{run.trait}</b><small>{identityDetail('trait', run.trait)}</small></article><article className={rarityClass(burdenRarity.id)}><span>麻煩 · {burdenRarity.label}</span><b>{run.burden}</b><small>{identityDetail('burden', run.burden)}</small></article></div><div className={styles.statGrid}>{stats.map((key) => <div key={key} className={styles.statRow}><span>{statNames[key]}</span><div className={styles.statBar} aria-label={`${statNames[key]}：目前 ${run.stats[key]}，潛力 ${run.potential[key]}`}><i className={styles.statPotential} style={{ width: `${(run.potential[key] / 15) * 100}%` }} /><i className={styles.statCurrent} style={{ width: `${(run.stats[key] / 15) * 100}%` }} /></div></div>)}</div><div className={styles.statLegend}><span><i />目前</span><span><i />潛力</span></div><div className={styles.actions}><button className={styles.quiet} onClick={onReroll}>這命太硬，重抽</button><button className={styles.primary} onClick={onContinue}>就這樣，去闖江湖 →</button></div></section></main>;
 }
 
 function SectPick({ onChoose }: { onChoose: (sect: SectId) => void }) {
@@ -85,7 +85,7 @@ export default function DaxiaPage() {
     const saved = window.localStorage.getItem(SAVE_KEY);
     if (!saved) return;
     const timer = window.setTimeout(() => {
-      try { const parsed = JSON.parse(saved) as { screen: LifeScreen; run: LifeRun }; if (parsed.run?.version === 5 && parsed.screen !== 'start') { setRun(parsed.run); setScreen(parsed.screen); } else { window.localStorage.removeItem(SAVE_KEY); } } catch { window.localStorage.removeItem(SAVE_KEY); }
+      try { const parsed = JSON.parse(saved) as { screen: LifeScreen; run: LifeRun }; if (parsed.run?.version === 6 && parsed.screen !== 'start') { setRun(parsed.run); setScreen(parsed.screen); } else { window.localStorage.removeItem(SAVE_KEY); } } catch { window.localStorage.removeItem(SAVE_KEY); }
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
