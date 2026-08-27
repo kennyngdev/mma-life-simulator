@@ -8,8 +8,7 @@ import { describeActionEffects, type BattleOutcome } from './battle';
 
 const SAVE_KEY = 'daxia-simulator-v1';
 const LEGACY_KEY = 'daxia-simulator-legacy-v1';
-const TIMELINE_RENDER_INTERVAL_MS = 50;
-const MAX_TIMELINE_CATCHUP_MS = 150;
+const TURN_TIMELINE_MS = 180;
 type Legacy = { discoveredTraits: string[] };
 const emptyLegacy: Legacy = { discoveredTraits: [] };
 
@@ -226,13 +225,9 @@ export default function DaxiaPage() {
   const battleActive = Boolean(!characterOpen && screen === 'battle' && run?.battle && !run.battle.result && run.battle.readyActorId !== 'player');
   useEffect(() => {
     if (!battleActive) return;
-    let previousTime = window.performance.now();
     const timer = window.setInterval(() => {
-      const now = window.performance.now();
-      const elapsedMs = Math.min(MAX_TIMELINE_CATCHUP_MS, Math.max(0, now - previousTime));
-      previousTime = now;
-      setRun((previous) => previous?.battle && !previous.battle.result && previous.battle.readyActorId !== 'player' ? advance(previous, elapsedMs) : previous);
-    }, TIMELINE_RENDER_INTERVAL_MS);
+      setRun((previous) => previous?.battle && !previous.battle.result && previous.battle.readyActorId !== 'player' ? advance(previous) : previous);
+    }, TURN_TIMELINE_MS);
     return () => window.clearInterval(timer);
   }, [battleActive]);
 

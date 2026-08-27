@@ -21,7 +21,7 @@
 - Advance timelines automatically through allies and enemies. Never require a button merely to reveal the next actor.
 - After victory, resolve the battle and open the grade result immediately; do not insert a victory-confirmation button between combat and grading.
 - Timeline markers must move continuously during automatic combat instead of jumping between coarse logical ticks; pause that motion when the player must choose a target or move.
-- Timeline rendering should be capped near 20 updates per second and smoothed with CSS; simulation uses measured elapsed time so reducing React renders does not alter deterministic turn timing.
+- Timeline state updates once every 180 ms and CSS interpolates marker positions across the same interval. Do not add animation-frame React renders; the discrete tick is the deterministic combat clock.
 - Give every combat move visible impact feedback: quick attacks cut, finishers burst, recovery rises, and guards form a seal. Each sect has its own sonic material, while sound remains optional and never carries essential information.
 - Once a life has been revealed, keep a compact 人物 action in the top navigation. It opens a bounded, internally scrolling character sheet for current resources, six attributes and potential, full identity effects, and learned sect moves; opening it pauses automatic battle progress.
 - Respect reduced-motion preferences; combat effects must collapse cleanly to their static state when animation is disabled.
