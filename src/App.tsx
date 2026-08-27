@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, MOTIVES, REGION_LABELS, TECHNIQUE_NODES } from './game/content'
 import { OPENING_LABELS } from './game/fight-content'
 import { advance, createNewRun, getOpponent, getPotentialLabel, getUnlockStatus, getWeightOptions, STAGE_LABELS } from './game/engine'
+import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
 import type {
   Biography,
   Branch,
   CampAction,
+  CriticalOption,
   FighterState,
   GameCommand,
   GameState,
@@ -33,11 +35,15 @@ export default function App() {
   const [showResetConfirmation, setShowResetConfirmation] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resetError, setResetError] = useState<string>()
+  const [startupNotice, setStartupNotice] = useState<string>()
+  const [sfxEnabled, setSfxEnabled] = useState(() => localStorage.getItem('cage-life:sfx') !== 'off')
   const saveQueue = useRef<Promise<void>>(Promise.resolve())
+  const playedCue = useRef<string | undefined>(undefined)
 
   useEffect(() => {
     Promise.all([loadGame(), listBiographies()]).then(([saved, archived]) => {
-      setGame(saved)
+      setGame(saved.game)
+      if (saved.resetReason) setStartupNotice('戰鬥系統已全面更新，舊生涯無法安全轉換；生涯殿堂仍完整保留。')
       setBiographies(archived)
       setLoading(false)
     })
@@ -51,8 +57,27 @@ export default function App() {
     }
   }, [game])
 
+  useEffect(() => {
+    if (!sfxEnabled || !game?.fight) return
+    const fight = game.fight
+    const beat = fight.beatHistory.at(-1)
+    const key = beat ? `${fight.round}:${beat.step}:${beat.outcome}` : game.phase === 'critical' ? `threat:${fight.round}:${fight.sequenceStep}:${fight.opponentIntent.intentId}` : undefined
+    if (!key || playedCue.current === key) return
+    playedCue.current = key
+    if (beat && key.startsWith(`${fight.round}:${beat.step}`)) playBeatCue(beat)
+    else if (game.phase === 'critical') playThreatCue(fight.opponentIntent.threatLevel)
+  }, [game, sfxEnabled])
+
   const dispatch = (command: GameCommand) => {
+    if (sfxEnabled) unlockAudio()
     setGame((current) => current ? advance(current, command).state : current)
+  }
+
+  const toggleSfx = () => {
+    const next = !sfxEnabled
+    setSfxEnabled(next)
+    localStorage.setItem('cage-life:sfx', next ? 'on' : 'off')
+    if (next) unlockAudio()
   }
 
   const resetRun = async () => {
@@ -72,11 +97,11 @@ export default function App() {
   }
 
   if (loading) return <div className="loading-screen"><CageMark /><p>正在整理拳套與生涯紀錄……</p></div>
-  if (!game) return <StartScreen biographies={biographies} onStart={setGame} onDelete={async (id) => { await deleteBiography(id); setBiographies(await listBiographies()) }} />
+  if (!game) return <><StartScreen biographies={biographies} onStart={setGame} onDelete={async (id) => { await deleteBiography(id); setBiographies(await listBiographies()) }} />{startupNotice && <div className="startup-notice" role="status">{startupNotice}</div>}</>
 
   return (
     <main className="game-shell">
-      <GameHeader game={game} onOverlay={setOverlay} onReset={() => setShowResetConfirmation(true)} />
+      <GameHeader game={game} onOverlay={setOverlay} onReset={() => setShowResetConfirmation(true)} sfxEnabled={sfxEnabled} onToggleSfx={toggleSfx} />
       <div className="game-scroll" aria-live="polite">
         {game.lastMessage && <div className="notice"><span>最新</span>{game.lastMessage}</div>}
         <GameView game={game} dispatch={dispatch} onNew={resetRun} />
@@ -143,7 +168,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
   )
 }
 
-function GameHeader({ game, onOverlay, onReset }: { game: GameState; onOverlay: (type: 'status' | 'history') => void; onReset: () => void }) {
+function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx }: { game: GameState; onOverlay: (type: 'status' | 'history') => void; onReset: () => void; sfxEnabled: boolean; onToggleSfx: () => void }) {
   const fighter = game.fighter
   return (
     <header className="game-header">
@@ -153,6 +178,7 @@ function GameHeader({ game, onOverlay, onReset }: { game: GameState; onOverlay: 
         <small>{fighter.age} 歲 · {fighter.weightClass} · {fighter.wins}-{fighter.losses}-{fighter.draws}</small>
       </div>
       <div className="header-actions">
+        <button type="button" onClick={onToggleSfx} aria-label={sfxEnabled ? '關閉音效' : '開啟音效'} title={sfxEnabled ? '音效開啟' : '音效關閉'}>{sfxEnabled ? '聲效' : '靜音'}</button>
         <button type="button" onClick={() => onOverlay('status')} aria-label={t('status')}>狀態</button>
         <button type="button" onClick={() => onOverlay('history')} aria-label={t('history')}>歷程</button>
         <button type="button" className="reset-button" onClick={onReset}>重置</button>
@@ -452,7 +478,7 @@ function CriticalView({ game, dispatch }: ViewProps) {
   const [showAllMoves, setShowAllMoves] = useState(false)
   const [moveCategory, setMoveCategory] = useState<MoveCategory>('offense')
   const momentum = fight.initiative === 'player' ? '你掌握攻勢' : fight.initiative === 'opponent' ? '對手開始壓制' : '局勢膠著'
-  const remaining = prompt.allOptions.length - prompt.recommendedOptions.length
+  const remaining = prompt.allOptions.length - prompt.featuredOptions.length
   const categoryMoves = prompt.allOptions.filter((option) => option.category === moveCategory)
   const resolve = (optionId: string) => { setShowAllMoves(false); dispatch({ type: 'RESOLVE_CRITICAL', optionId }) }
   const outcomeLabel = fight.lastNarrative?.outcome === 'clean' ? '乾淨奏效' : fight.lastNarrative?.outcome === 'contested' ? '互有得失' : '遭到破解'
@@ -464,30 +490,47 @@ function CriticalView({ game, dispatch }: ViewProps) {
       <div className="impact-tags">{(fight.lastNarrative.impactTags ?? []).map((tag) => <b key={tag}>{tag}</b>)}</div>
     </article>}
     <p className="story-copy critical-copy">{prompt.description}</p>
-    <p className="opponent-intent"><span>對手傾向</span>{fight.opponentIntent}</p>
+    <ThreatCard game={game} />
     {fight.opponentOpenings.length > 0 && <div className="opening-strip"><span>可利用破綻</span>{fight.opponentOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
     {fight.playerOpenings.length > 0 && <div className="opening-strip danger"><span>你的防守空檔</span>{fight.playerOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
-    <div className="move-section-label"><span>推薦行動</span><small>依你的背景、局勢與破綻排序</small></div>
-    <div className="choice-list">{prompt.recommendedOptions.map((option) => <button className="choice-row critical-option" key={option.id} onClick={() => resolve(option.id)}>
-      <strong>{option.label}</strong><span>{option.description}</span>
-      <em className="execution-preview">預計：{option.executionName}</em>
-      {option.recommendation && <small className="recommendation">{option.recommendation}</small>}
-      {option.affinityLabel && <em className="affinity-tag">技術協同 ＋{option.affinityBonus}%</em>}
-      {option.safetyNet && <small className="safety-net">失衡接應：{option.safetyNet}</small>}
-      <div className="chance"><small>{option.effectSummary}{option.negatives.length ? `／${option.negatives.join('、')}` : ''}</small></div>
-    </button>)}</div>
+    <div className="move-section-label"><span>關鍵選擇</span><small>克制、招牌、轉位與安全路線</small></div>
+    <div className="choice-list">{prompt.featuredOptions.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} />)}</div>
     {remaining > 0 && <button className="more-moves-button" onClick={() => setShowAllMoves(true)}>查看其餘 {remaining} 種招式 <span>進攻、轉位與防守</span></button>}
     {showAllMoves && <div className="sheet-backdrop move-sheet-backdrop" role="presentation" onClick={() => setShowAllMoves(false)}>
       <section className="detail-sheet move-sheet" role="dialog" aria-modal="true" aria-labelledby="move-sheet-title" onClick={(event) => event.stopPropagation()}>
         <header className="sheet-head"><div><span>完整招式庫</span><h2 id="move-sheet-title">{prompt.title}</h2></div><button onClick={() => setShowAllMoves(false)} aria-label="關閉完整招式庫">×</button></header>
         <nav className="move-tabs" aria-label="招式分類">{([['offense', '進攻'], ['transition', '轉位'], ['defense', '防守']] as Array<[MoveCategory, string]>).map(([id, label]) => <button className={moveCategory === id ? 'active' : ''} key={id} onClick={() => setMoveCategory(id)}>{label}<small>{prompt.allOptions.filter((option) => option.category === id).length}</small></button>)}</nav>
-        <div className="sheet-scroll move-sheet-list">{categoryMoves.map((option) => <button className="choice-row critical-option" key={option.id} onClick={() => resolve(option.id)}>
-          <strong>{option.label}</strong><em className="execution-preview">預計：{option.executionName}</em><span>{option.effectSummary}</span>
-          {option.usesOpenings?.length ? <small className="opening-use">利用：{option.usesOpenings.map((key) => OPENING_LABELS[key]).join('、')}</small> : null}
-        </button>)}</div>
+        <div className="sheet-scroll move-sheet-list">{categoryMoves.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} compact />)}</div>
       </section>
     </div>}
   </Screen>
+}
+
+function ThreatCard({ game }: { game: GameState }) {
+  const threat = game.fight!.opponentIntent
+  const target = threat.target === 'head' ? '頭部' : threat.target === 'body' ? '軀幹' : threat.target === 'leg' ? '腿部' : '位置'
+  const category = threat.category === 'offense' ? '進攻' : threat.category === 'transition' ? '轉位' : '防守反制'
+  return <article className={`threat-card ${threat.threatLevel}`} aria-label={`對手威脅：${threat.executionName}`}>
+    <header><span>對手下一步 · {category}</span><b>{threat.threatLevel === 'critical' ? '致命威脅' : threat.threatLevel === 'danger' ? '高威脅' : '注意'}</b></header>
+    <strong>{threat.executionName}</strong>
+    <p>{threat.effectSummary}{threat.target ? `，瞄準${target}` : ''}。</p>
+    {threat.exploitsOpenings.length > 0 && <small>正在利用你的{threat.exploitsOpenings.map((key) => OPENING_LABELS[key]).join('、')}</small>}
+  </article>
+}
+
+function CombatOption({ option, onChoose, compact = false }: { option: CriticalOption; onChoose: (id: string) => void; compact?: boolean }) {
+  const matchupLabel = option.matchup === 'favored' ? '克制' : option.matchup === 'exposed' ? '受制' : '中性'
+  return <button className={`choice-row critical-option matchup-${option.matchup}`} onClick={() => onChoose(option.id)}>
+    <div className="option-head"><strong>{option.label}</strong><b>{matchupLabel}</b></div>
+    {!compact && <span>{option.description}</span>}
+    <em className="execution-preview">執行：{option.executionName}</em>
+    <div className="outcome-bands" aria-label={`乾淨奏效 ${Math.round(option.odds.clean)}%，互有得失 ${Math.round(option.odds.contested)}%，遭到反制 ${Math.round(option.odds.countered)}%`}>
+      <i className="clean" style={{ flex: option.odds.clean }} /><i className="contested" style={{ flex: option.odds.contested }} /><i className="countered" style={{ flex: option.odds.countered }} />
+    </div>
+    <div className="causal-tags"><small>{option.matchupReason}</small>{option.recommendation && <small>{option.recommendation}</small>}{option.finishRoute && <small className="finish-route">{option.finishRoute}</small>}</div>
+    <span className="option-effect">{option.effectSummary}{option.negatives.length ? `／${option.negatives.join('、')}` : ''}</span>
+    <span className="exact-odds">詳細機率：{Math.round(option.odds.clean)} / {Math.round(option.odds.contested)} / {Math.round(option.odds.countered)}</span>
+  </button>
 }
 
 function FinishMinigameView({ game, dispatch }: ViewProps) {
@@ -677,7 +720,13 @@ function RoundResultView({ game, dispatch }: ViewProps) {
   return <Screen title={`第 ${score.round} 回合結束`} kicker={`場邊暫估 ${score.player}–${score.opponent}`}>
     <FightArena game={game} />
     <div className="result-explain"><strong>{score.note}</strong><p>這是場邊根據有效打擊和纏鬥表現做出的估分，正式裁判的看法可能不同。</p></div>
-    <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_ROUND' })}>{fight.round >= fight.totalRounds ? '交給裁判，公布結果' : '回到場邊，準備下一回合'}</button></ActionDock>
+    {fight.round < fight.totalRounds && <><SectionTitle title="場角調整" subtitle="選一項，只影響下一回合。" />
+      <div className="corner-grid">
+        <button className={fight.cornerAdjustment === 'protect' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'protect' })}><strong>保護傷處</strong><span>該部位承傷 -30%，計畫效果略降</span></button>
+        <button className={fight.cornerAdjustment === 'recover' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })}><strong>深呼吸</strong><span>恢復 15 體力，但讓出更多主動</span></button>
+        <button className={fight.cornerAdjustment === 'press' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'press' })}><strong>追打傷處</strong><span>命中率 +8，每次行動多耗 2 體力</span></button>
+      </div></>}
+    <ActionDock><button className="primary-action" disabled={fight.round < fight.totalRounds && !fight.cornerAdjustment} onClick={() => dispatch({ type: 'CONTINUE_ROUND' })}>{fight.round >= fight.totalRounds ? '交給裁判，公布結果' : fight.cornerAdjustment ? '帶著調整進入下一回合' : '先選擇場角調整'}</button></ActionDock>
   </Screen>
 }
 
@@ -729,8 +778,15 @@ function FightArena({ game, compact = false }: { game: GameState; compact?: bool
   const opponent = getOpponent(game)!
   const positions: Record<string, [number, number]> = { range: [28, 72], pocket: [43, 57], clinch: [48, 52], cage: [17, 10], top: [48, 52], bottom: [52, 48], scramble: [44, 56] }
   const [playerX, opponentX] = positions[fight.position]
-  return <section className={`fight-arena ${compact ? 'compact' : ''}`}>
-    <div className="fight-bars"><StatusBar label={game.fighter.name} value={fight.playerStamina} tone="player" /><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /></div>
+  const lastBeat = fight.beatHistory.at(-1)
+  const playerHit = lastBeat?.damageEvents.find((event) => event.side === 'player')
+  const opponentHit = lastBeat?.damageEvents.find((event) => event.side === 'opponent')
+  const critical = [...Object.values(fight.playerDamageByPart), ...Object.values(fight.opponentDamageByPart)].some((value) => value >= 75)
+  return <section key={`${fight.round}-${fight.sequenceStep}-${lastBeat?.outcome ?? 'ready'}`} className={`fight-arena ${compact ? 'compact' : ''} ${lastBeat ? `impact-${lastBeat.outcome}` : ''} ${playerHit ? `player-hit-${playerHit.part}` : ''} ${opponentHit ? `opponent-hit-${opponentHit.part}` : ''} ${critical ? 'critical-vignette' : ''}`}>
+    <div className="fight-bars">
+      <div><StatusBar label={game.fighter.name} value={fight.playerStamina} tone="player" /><DamageRibbon damage={fight.playerDamageByPart} /></div>
+      <div><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /><DamageRibbon damage={fight.opponentDamageByPart} opponent /></div>
+    </div>
     <svg viewBox="0 0 100 54" role="img" aria-label={`目前位置：${positionLabel(fight.position)}`}>
       <defs><pattern id="mesh" width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 0 7 7M7 0 0 7" stroke="currentColor" strokeWidth=".25" opacity=".28" /></pattern></defs>
       <path d="M8 8h84v37H8z" fill="url(#mesh)" stroke="currentColor" strokeWidth="1" />
@@ -740,6 +796,16 @@ function FightArena({ game, compact = false }: { game: GameState; compact?: bool
     </svg>
     <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>
   </section>
+}
+
+function DamageRibbon({ damage, opponent = false }: { damage: { head: number; body: number; leg: number }; opponent?: boolean }) {
+  return <div className={`damage-ribbon ${opponent ? 'opponent' : ''}`} aria-label={`${opponent ? '對手' : '我方'}傷勢：頭部 ${damage.head}、軀幹 ${damage.body}、腿部 ${damage.leg}`}>
+    {(['head', 'body', 'leg'] as const).map((part) => {
+      const value = damage[part]
+      const severity = value >= 75 ? 'critical' : value >= 50 ? 'compromised' : value >= 25 ? 'hurt' : 'healthy'
+      return <span className={severity} key={part}><b>{part === 'head' ? '頭' : part === 'body' ? '軀' : '腿'}</b><i><em style={{ width: `${value}%` }} /></i><small>{value}</small></span>
+    })}
+  </div>
 }
 
 function positionLabel(position: string) {

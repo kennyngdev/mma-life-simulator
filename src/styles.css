@@ -74,6 +74,7 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .text-button { display: block; min-height: 44px; margin: 8px auto 0; padding: 8px 14px; border: 0; color: var(--muted); background: transparent; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; }
 .danger-text { color: #dc8b7d; }
 .source-note { padding: 24px 8px 0; text-align: center; color: var(--dim); font-size: 11px; }
+.startup-notice { position: fixed; z-index: 20; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); width: min(calc(100% - 32px), 620px); translate: -50% 0; padding: 12px 14px; border: 1px solid var(--gold); border-radius: 10px; color: #efe1c8; background: #2b2419; box-shadow: var(--shadow); font-size: 12px; line-height: 1.55; }
 
 .game-shell { width: min(100%, 720px); height: 100dvh; margin: 0 auto; display: grid; grid-template-rows: auto minmax(0, 1fr); border-inline: 1px solid rgb(255 255 255 / .04); background: rgb(13 12 11 / .72); box-shadow: 0 0 70px rgb(0 0 0 / .38); }
 .game-header { position: relative; z-index: 8; min-height: 72px; padding: max(10px, env(safe-area-inset-top)) 14px 10px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); background: rgb(19 17 14 / .97); }
@@ -230,6 +231,16 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .status-bar > i { height: 5px; margin-top: 4px; display: block; overflow: hidden; border-radius: 4px; background: var(--surface-3); }
 .status-bar > i > span { height: 100%; display: block; background: var(--accent); }
 .status-bar.opponent > i > span { background: #7186a5; }
+.damage-ribbon { margin-top: 6px; display: grid; gap: 3px; }
+.damage-ribbon > span { display: grid; grid-template-columns: 13px minmax(0, 1fr) 18px; align-items: center; gap: 3px; color: var(--dim); font-size: 8px; }
+.damage-ribbon b, .damage-ribbon small { font-size: 8px; font-weight: 800; }
+.damage-ribbon small { text-align: right; }
+.damage-ribbon i { height: 3px; overflow: hidden; border-radius: 3px; background: var(--surface-3); }
+.damage-ribbon em { height: 100%; display: block; background: #6b796e; }
+.damage-ribbon .hurt em { background: var(--warning); }
+.damage-ribbon .compromised em { background: #e07543; box-shadow: 0 0 7px rgb(224 117 67 / .5); }
+.damage-ribbon .critical { color: #ff9c88; }
+.damage-ribbon .critical em { background: var(--danger); box-shadow: 0 0 9px rgb(219 82 62 / .7); }
 .fight-arena svg { width: 100%; max-height: 260px; margin: 8px 0; }
 .fight-arena svg text { fill: var(--muted); font: 500 4px "Noto Sans TC", sans-serif; }
 .fighter-dot { stroke: #0d0c0b; stroke-width: 1.5; }
@@ -241,6 +252,15 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .critical-copy { margin: 13px 0; font-size: 15px; }
 .opponent-intent { margin: -4px 0 13px; padding: 8px 10px; border-left: 2px solid #7186a5; color: var(--muted); background: rgb(113 134 165 / .08); font-size: 11px; }
 .opponent-intent span { margin-right: 7px; color: #a9c2e5; font-weight: 800; }
+.threat-card { margin: -3px 0 13px; padding: 12px 13px; border: 1px solid rgb(113 134 165 / .35); border-left: 4px solid #7186a5; border-radius: 10px; background: linear-gradient(135deg, rgb(113 134 165 / .15), var(--surface)); animation: threat-pulse .42s ease-out; }
+.threat-card.danger { border-left-color: var(--warning); background: linear-gradient(135deg, rgb(214 147 53 / .16), var(--surface)); }
+.threat-card.critical { border-left-color: var(--danger); background: linear-gradient(135deg, rgb(219 82 62 / .23), var(--surface)); box-shadow: 0 0 25px rgb(219 82 62 / .1); }
+.threat-card header { display: flex; justify-content: space-between; gap: 12px; color: #a9c2e5; font-size: 9px; font-weight: 800; letter-spacing: .05em; }
+.threat-card header b { color: var(--warning); }
+.threat-card.critical header b { color: #ff9c88; }
+.threat-card > strong { margin-top: 5px; display: block; font-size: 18px; }
+.threat-card p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.threat-card > small { margin-top: 8px; display: block; color: #f0b09e; font-size: 10px; }
 .narrative-beat { margin: 0 0 13px; padding: 13px 14px; border: 1px solid var(--line); border-left: 3px solid var(--good); border-radius: 11px; background: linear-gradient(135deg, rgb(98 169 123 / .09), var(--surface)); }
 .narrative-beat.contested { border-left-color: var(--gold); background: linear-gradient(135deg, rgb(215 189 131 / .08), var(--surface)); }
 .narrative-beat.countered { border-left-color: var(--danger); background: linear-gradient(135deg, rgb(219 82 62 / .09), var(--surface)); }
@@ -257,6 +277,22 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .move-section-label span { font-weight: 800; }
 .move-section-label small { color: var(--muted); font-size: 9px; }
 .execution-preview { margin-top: 7px; display: block; color: #f0d4bd; font-size: 11px; font-style: normal; font-weight: 700; }
+.option-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.option-head > b { padding: 3px 6px; border-radius: 999px; color: var(--muted); background: var(--surface-3); font-size: 9px; }
+.matchup-favored { border-left: 3px solid var(--good); }
+.matchup-favored .option-head > b { color: #b8e0c4; background: rgb(98 169 123 / .14); }
+.matchup-exposed { border-left: 3px solid var(--danger); }
+.matchup-exposed .option-head > b { color: #f1a093; background: rgb(219 82 62 / .14); }
+.outcome-bands { height: 6px; margin-top: 10px; display: flex; overflow: hidden; gap: 2px; border-radius: 6px; background: #0d0c0b; }
+.outcome-bands i { min-width: 2px; }
+.outcome-bands .clean { background: var(--good); }
+.outcome-bands .contested { background: var(--gold); }
+.outcome-bands .countered { background: var(--danger); }
+.causal-tags { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; }
+.causal-tags small { padding: 3px 6px; border-radius: 999px; color: #c9bdad; background: rgb(255 255 255 / .055); font-size: 9px; }
+.causal-tags .finish-route { color: #f1c77d; background: rgb(214 147 53 / .14); }
+.option-effect { font-size: 10px !important; }
+.exact-odds { height: 1px; width: 1px; position: absolute; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .recommendation { margin-top: 5px; display: block; color: #b8e0d4; font-size: 10px; }
 .more-moves-button { width: 100%; min-height: 52px; margin-top: 9px; padding: 9px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px dashed var(--line-bright); border-radius: 12px; color: var(--ink); background: transparent; font-weight: 800; }
 .more-moves-button span { color: var(--muted); font-size: 10px; font-weight: 500; }
@@ -315,6 +351,20 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .result-explain { margin: 15px 0; padding: 15px; border: 1px solid var(--line); border-left: 3px solid var(--gold); background: var(--surface); }
 .result-explain strong { font-size: 14px; }
 .result-explain p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.corner-grid { display: grid; gap: 7px; }
+.corner-grid button { min-height: 64px; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: var(--surface); }
+.corner-grid button.selected { border-color: var(--gold); background: rgb(215 189 131 / .11); box-shadow: inset 3px 0 var(--gold); }
+.corner-grid strong, .corner-grid span { display: block; }
+.corner-grid span { margin-top: 3px; color: var(--muted); font-size: 11px; }
+
+@keyframes threat-pulse { 0% { transform: scale(.985); filter: brightness(1.45); } 100% { transform: scale(1); filter: brightness(1); } }
+@keyframes head-impact { 35% { transform: translateX(-4px) rotate(-.5deg); } 70% { transform: translateX(3px); } }
+@keyframes body-impact { 40% { transform: scale(.982, .955); filter: brightness(1.3); } }
+@keyframes leg-impact { 35% { transform: translateY(3px) skewX(-1deg); } }
+.fight-arena.player-hit-head, .fight-arena.opponent-hit-head { animation: head-impact .28s ease-out; }
+.fight-arena.player-hit-body, .fight-arena.opponent-hit-body { animation: body-impact .3s ease-out; }
+.fight-arena.player-hit-leg, .fight-arena.opponent-hit-leg { animation: leg-impact .3s ease-out; }
+.fight-arena.critical-vignette { box-shadow: inset 0 0 34px rgb(219 82 62 / .13), 0 0 18px rgb(219 82 62 / .07); }
 .verdict { display: flex; gap: 14px; align-items: center; padding: 17px; border: 1px solid var(--line); border-left: 4px solid var(--good); background: var(--surface-2); }
 .verdict.loss { border-left-color: var(--danger); }
 .verdict.draw { border-left-color: var(--gold); }

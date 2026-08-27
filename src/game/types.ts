@@ -12,6 +12,11 @@ export type Position = 'range' | 'pocket' | 'clinch' | 'cage' | 'top' | 'bottom'
 export type FightStageName = 'contact' | 'exchange' | 'turn' | 'finish'
 export type MoveCategory = 'offense' | 'transition' | 'defense'
 export type FightOutcome = 'clean' | 'contested' | 'countered'
+export type FightDamagePart = 'head' | 'body' | 'leg'
+export type DamageSeverity = 'healthy' | 'hurt' | 'compromised' | 'critical'
+export type TacticalMatchup = 'favored' | 'neutral' | 'exposed'
+export type ThreatLevel = 'watch' | 'danger' | 'critical'
+export type CornerAdjustment = 'protect' | 'recover' | 'press'
 export type OpeningKey =
   | 'high-guard' | 'tight-elbows' | 'weight-forward' | 'lead-leg-heavy' | 'expects-shot'
   | 'backed-to-cage' | 'off-balance' | 'neck-exposed' | 'arm-isolated' | 'hips-flat'
@@ -185,6 +190,36 @@ export interface CriticalOption {
   effectSummary?: string
   usesOpenings?: OpeningKey[]
   recommendation?: string
+  finishRoute?: string
+  odds: ExchangeOdds
+  matchup: TacticalMatchup
+  matchupReason: string
+}
+
+export interface ExchangeOdds {
+  clean: number
+  contested: number
+  countered: number
+}
+
+export interface OpponentIntent {
+  intentId: string
+  executionName: string
+  branch: Branch
+  category: MoveCategory
+  target?: FightDamagePart
+  predictedPosition?: Position
+  effectSummary: string
+  exploitsOpenings: OpeningKey[]
+  threatLevel: ThreatLevel
+}
+
+export interface DamageEvent {
+  side: 'player' | 'opponent'
+  part: FightDamagePart
+  amount: number
+  severityBefore: DamageSeverity
+  severityAfter: DamageSeverity
 }
 
 export interface FightEffectVector {
@@ -252,7 +287,7 @@ export interface DecisionPrompt {
   description: string
   position: Position
   options: CriticalOption[]
-  recommendedOptions: CriticalOption[]
+  featuredOptions: CriticalOption[]
   allOptions: CriticalOption[]
 }
 
@@ -265,10 +300,14 @@ export interface FightBeat {
   position: Position
   initiative: Initiative
   action: string
+  opponentAction: string
+  opponentIntent: OpponentIntent
+  matchup: TacticalMatchup
   success: boolean
   outcome: FightOutcome
   summary: string
   narrative: NarrativeBeat
+  damageEvents: DamageEvent[]
   finishWindow?: FinishKind
 }
 
@@ -323,16 +362,20 @@ export interface FightState {
   sequenceStep: 1 | 2 | 3 | 4
   initiative: Initiative
   momentum: number
-  opponentIntent: string
+  opponentIntent: OpponentIntent
   stageName: FightStageName
   playerOpenings: TimedOpening[]
   opponentOpenings: TimedOpening[]
   opponentAdaptation: Record<string, number>
+  opponentMoveHistory: Record<string, number>
   playerDamageByPart: { head: number; body: number; leg: number }
   opponentDamageByPart: { head: number; body: number; leg: number }
   playerControl: number
   opponentControl: number
   finishPressure: number
+  cornerAdjustment?: CornerAdjustment
+  cornerTarget?: FightDamagePart
+  techniqueTriggersThisRound: string[]
   lastNarrative?: NarrativeBeat
   beatHistory: FightBeat[]
   activeFinishWindow?: FinishWindow
@@ -385,9 +428,9 @@ export interface RngStreams {
 }
 
 export interface GameState {
-  saveVersion: 7
-  rulesVersion: '0.4.0'
-  contentVersion: '0.7.0'
+  saveVersion: 8
+  rulesVersion: '0.5.0'
+  contentVersion: '0.8.0'
   seed: string
   phase: GamePhase
   stage: Stage
@@ -420,6 +463,7 @@ export type GameCommand =
   | { type: 'RESOLVE_CRITICAL'; optionId: string }
   | { type: 'RESOLVE_FINISH_MINIGAME'; result: FinishMinigameResult }
   | { type: 'CONTINUE_ROUND' }
+  | { type: 'SET_CORNER_ADJUSTMENT'; adjustment: CornerAdjustment }
   | { type: 'ACK_FIGHT_RESULT' }
   | { type: 'RETIRE' }
 
@@ -436,9 +480,14 @@ export interface NewRunInput {
 }
 
 export interface SaveEnvelope {
-  saveVersion: 7
+  saveVersion: number
   rulesVersion: string
   contentVersion: string
   savedAt: number
   game: GameState
+}
+
+export interface LoadGameResult {
+  game?: GameState
+  resetReason?: 'combat-rules-upgrade'
 }

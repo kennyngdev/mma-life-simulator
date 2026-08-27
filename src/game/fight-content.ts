@@ -119,33 +119,35 @@ export const EXECUTION_VARIANTS: ExecutionVariant[] = [
 ]
 
 /** Explicit consumption map: every tech unlock key affects a variant, intent, or passive recommendation/effect rule. */
-export const TECHNIQUE_COMBAT_RULES: Record<string, { intents: string[]; bonus: number; note: string }> = {
-  'jab-exit': { intents: ['probe-range', 'angle-away'], bonus: 7, note: '刺拳後切角更穩定' },
-  'body-work': { intents: ['attack-body'], bonus: 9, note: '軀幹攻擊效果提升' },
+export type TechniqueRuleEffect = 'jab-exit' | 'body-work' | 'safe-low-kick' | 'clinch-knee' | 'chain-wrestle' | 'closed-guard'
+
+export const TECHNIQUE_COMBAT_RULES: Record<string, { intents: string[]; bonus: number; note: string; effect?: TechniqueRuleEffect }> = {
+  'jab-exit': { intents: ['probe-range', 'angle-away'], bonus: 7, note: '刺拳後安全回到遠距並收好重心', effect: 'jab-exit' },
+  'body-work': { intents: ['attack-body'], bonus: 9, note: '命中軀幹會直接削減對手體力', effect: 'body-work' },
   'cross-counter': { intents: ['counter-pressure'], bonus: 9, note: '迎擊效率提升' },
   'cage-combo': { intents: ['cage-barrage', 'drive-back'], bonus: 9, note: '籠邊連打延長攻勢' },
   haymaker: { intents: ['risky-power', 'head-power'], bonus: 8, note: '解鎖重擺拳' },
   'volume-trap': { intents: ['quick-combination', 'drive-back'], bonus: 8, note: '重複拳路較不易被適應' },
-  'low-kick': { intents: ['damage-base', 'low-kick-pocket'], bonus: 8, note: '低掃失衡風險降低' },
+  'low-kick': { intents: ['damage-base', 'low-kick-pocket'], bonus: 8, note: '低掃加重腿傷，失手時也不再倒地', effect: 'safe-low-kick' },
   'front-kick': { intents: ['angle-away', 'steady-output'], bonus: 7, note: '前踢控距更省力' },
   'body-kick': { intents: ['attack-body'], bonus: 8, note: '重踢軀幹' },
   'superman-punch': { intents: ['risky-power', 'quick-entry'], bonus: 8, note: '解鎖超人拳' },
   'high-kick': { intents: ['head-power'], bonus: 9, note: '軀幹受創後可高踢收尾' },
   'kick-flow': { intents: ['damage-base', 'steady-output'], bonus: 8, note: '踢擊變線降低適應' },
   'clinch-frame': { intents: ['frame-space'], bonus: 9, note: '框架防守提升' },
-  'clinch-knee': { intents: ['clinch-knees'], bonus: 8, note: '膝擊軀幹提升' },
+  'clinch-knee': { intents: ['clinch-knees'], bonus: 8, note: '乾淨膝擊會削減體力並延長收肘反應', effect: 'clinch-knee' },
   underhook: { intents: ['inside-position', 'turn-off-cage'], bonus: 9, note: '內勾爭位提升' },
   'short-elbow': { intents: ['short-elbows'], bonus: 9, note: '短肘終結壓力提升' },
   'clinch-trip': { intents: ['clinch-throw'], bonus: 9, note: '貼身絆摔提升' },
   'clinch-grind': { intents: ['body-lock-control', 'head-control'], bonus: 8, note: '控制額外消耗對手體力' },
   sprawl: { intents: ['anti-shot-uppercut', 'base-balance'], bonus: 8, note: '防摔反應提升' },
   'double-leg': { intents: ['shot-entry'], bonus: 9, note: '雙腿抱摔提升' },
-  'chain-wrestle': { intents: ['shot-entry', 'scramble-top'], bonus: 9, note: '摔法遭擋後可連鎖' },
+  'chain-wrestle': { intents: ['shot-entry', 'scramble-top'], bonus: 9, note: '每回合一次，把被反制的進腿接成纏抱', effect: 'chain-wrestle' },
   'wall-takedown': { intents: ['wall-takedown'], bonus: 9, note: '籠邊抱摔提升' },
   'mat-return': { intents: ['deny-stand'], bonus: 9, note: '阻止起身提升' },
   'wrestle-pressure': { intents: ['shot-entry', 'quick-entry'], bonus: 8, note: '連續進腿的重複懲罰降低' },
   'top-posture': { intents: ['top-control', 'ground-strikes'], bonus: 8, note: '上位更穩定' },
-  'closed-guard': { intents: ['rebuild-guard', 'pull-guard'], bonus: 8, note: '防守架更加穩定' },
+  'closed-guard': { intents: ['rebuild-guard', 'pull-guard'], bonus: 8, note: '被反制時限制傷害並守住下位防守架', effect: 'closed-guard' },
   'wall-walk': { intents: ['wall-walk', 'scramble-wall'], bonus: 9, note: '貼籠起身提升' },
   crucifix: { intents: ['ground-strikes', 'isolate-arm'], bonus: 9, note: '解鎖十字架控制' },
   'bottom-submission': { intents: ['bottom-submission'], bonus: 10, note: '下位降服提升' },

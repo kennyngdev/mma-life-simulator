@@ -26,10 +26,10 @@ function gameAtFinishMinigame(kind: FinishKind): GameState {
     offer, opponentId: offer.opponentId, round: 2, totalRounds: 3, position: kind === 'submission' ? 'bottom' : 'pocket',
     playerStamina: 62, opponentStamina: 48, playerDamage: 30, opponentDamage: 68,
     playerEffective: 26, opponentEffective: 18, plan: 'pressure', criticalCount: 3, sequenceStep: 3,
-    initiative: 'player', momentum: 24, opponentIntent: '正在掙扎求生', stageName: 'turn',
-    playerOpenings: [], opponentOpenings: [], opponentAdaptation: {},
+    initiative: 'player', momentum: 24, opponentIntent: { intentId: 'safe-bottom', executionName: '保守防守', branch: 'ground', category: 'defense', effectSummary: '正在掙扎求生', exploitsOpenings: [], threatLevel: 'watch' }, stageName: 'turn',
+    playerOpenings: [], opponentOpenings: [], opponentAdaptation: {}, opponentMoveHistory: {},
     playerDamageByPart: { head: 12, body: 10, leg: 8 }, opponentDamageByPart: { head: 30, body: 24, leg: 14 },
-    playerControl: 8, opponentControl: 3, finishPressure: 36, beatHistory: [], finishWindowsUsed: 1,
+    playerControl: 8, opponentControl: 3, finishPressure: 36, beatHistory: [], finishWindowsUsed: 1, techniqueTriggersThisRound: [],
     activeFinishWindow: {
       attacker: 'player', kind, opportunity: 72, threat: '明顯機會', sourceAction: kind === 'submission' ? '十字架控制' : '重擺拳', sourceStep: 3,
       difficulty: { aimTolerance: .24, timingTolerance: .25, cycleMs: 1300, submissionStart: .5, submissionResistance: .1, submissionDurationMs: 3600, targetX: .52, targetY: .3 },
@@ -43,7 +43,7 @@ describe('生涯重置', () => {
   afterEach(() => cleanup())
   beforeEach(() => {
     vi.clearAllMocks()
-    storage.loadGame.mockResolvedValue(createNewRun(input))
+    storage.loadGame.mockResolvedValue({ game: createNewRun(input) })
     storage.listBiographies.mockResolvedValue([])
     storage.saveGame.mockResolvedValue(undefined)
     storage.clearActiveGame.mockResolvedValue(undefined)
@@ -74,7 +74,7 @@ describe('生涯重置', () => {
 
   it('在命運揭曉顯示預期量級區間', async () => {
     const game = createNewRun(input)
-    storage.loadGame.mockResolvedValue(game)
+    storage.loadGame.mockResolvedValue({ game })
     const options = [...getWeightOptions(game.fighter.naturalWeight)].sort((a, b) => a.limit - b.limit)
     const expectedRange = options[0].name === options.at(-1)!.name
       ? options[0].name
@@ -92,7 +92,7 @@ describe('生涯重置', () => {
     game.phase = 'growth'
     game.fighter.insight = 0
     game.growthDestination = 'offer'
-    storage.loadGame.mockResolvedValue(game)
+    storage.loadGame.mockResolvedValue({ game })
 
     render(<App />)
 
@@ -109,7 +109,7 @@ describe('生涯重置', () => {
       game.fighter.unlockedNodes.push('box-foot-jab')
       game.fighter.mastery['box-foot-jab'] = { value: 18, gainedThisFight: 0 }
     }
-    storage.loadGame.mockResolvedValue(game)
+    storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: '拳手狀態' }))
@@ -125,7 +125,7 @@ describe('生涯重置', () => {
     const game = createNewRun(input)
     game.phase = 'offer'
     game.fighter.insight = 0
-    storage.loadGame.mockResolvedValue(game)
+    storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: '拳手狀態' }))
@@ -136,7 +136,7 @@ describe('生涯重置', () => {
   it('只把技術相關訓練放在技術焦點內', async () => {
     const game = createNewRun(input)
     game.phase = 'camp'
-    storage.loadGame.mockResolvedValue(game)
+    storage.loadGame.mockResolvedValue({ game })
 
     render(<App />)
 
@@ -152,7 +152,7 @@ describe('生涯重置', () => {
   it('用教練口吻交代每名邀約對手的強項與弱點', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
-    storage.loadGame.mockResolvedValue(game)
+    storage.loadGame.mockResolvedValue({ game })
 
     render(<App />)
 
@@ -163,7 +163,7 @@ describe('生涯重置', () => {
   })
 
   it('在擊倒窗口顯示單指拖曳瞄準與時機操作', async () => {
-    storage.loadGame.mockResolvedValue(gameAtFinishMinigame('strike'))
+    storage.loadGame.mockResolvedValue({ game: gameAtFinishMinigame('strike') })
     render(<App />)
 
     expect(await screen.findByText('終結一擊')).toBeInTheDocument()
@@ -172,7 +172,7 @@ describe('生涯重置', () => {
   })
 
   it('降服窗口提供連點與節奏長按兩種操作', async () => {
-    storage.loadGame.mockResolvedValue(gameAtFinishMinigame('submission'))
+    storage.loadGame.mockResolvedValue({ game: gameAtFinishMinigame('submission') })
     render(<App />)
 
     expect(await screen.findByLabelText('降服進攻小遊戲')).toBeInTheDocument()

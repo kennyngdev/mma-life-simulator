@@ -146,14 +146,14 @@ function makeNode(
 }
 
 export const TECHNIQUE_NODES: TechniqueNode[] = [
-  makeNode('box-foot-jab', '刺拳切角', 'boxing', 1, 'foundation', '反覆練習刺拳與橫移，讓自己打中後能迅速離開正面。', '刺拳後切角更容易成功，失手時也較能保持距離。', [], 'jab-exit'),
+  makeNode('box-foot-jab', '刺拳切角', 'boxing', 1, 'foundation', '反覆練習刺拳與橫移，讓自己打中後能迅速離開正面。', '試探或切角沒有被破解時回到遠距，並收掉前傾空檔。', [], 'jab-exit'),
   makeNode('box-body-work', '重擊軀幹', 'boxing', 1, 'chain', '把拳頭送進對手的腹部與肋部，削弱後半場的體力。', '打中時會額外消耗對手體力。', ['box-foot-jab'], 'body-work'),
   makeNode('box-cross-counter', '後手迎擊', 'boxing', 2, 'response', '抓準對手逼近的時機，用後手重拳迎面截擊。', '受壓迫時可以反擊，趁機拉開距離。', ['box-foot-jab'], 'cross-counter', { evidence: { key: 'fights', amount: 2, label: '完成 2 場比賽' } }),
   makeNode('box-cage-combo', '籠邊連擊', 'boxing', 2, 'chain', '對手背靠鐵網時連續出拳，不給他喘息或逃走的機會。', '在籠邊打中後，可以繼續壓制對手。', ['box-body-work'], 'cage-combo'),
   makeNode('box-pull-counter', '重擺拳', 'boxing', 3, 'response', '放棄一部分防守，把全身重量集中到弧線重拳。', '解鎖高傷害、高耗能的重擺拳。', ['box-cross-counter'], 'haymaker', { evidence: { key: 'knockdowns', amount: 1, label: '生涯擊倒對手 1 次' }, tradeoff: '揮空會大量消耗體力，也會暴露反擊空間。' }),
   makeNode('box-volume-trap', '節奏變化', 'boxing', 3, 'style', '用固定節奏誘使對手習慣，再突然改變連擊的收尾。', '以拳擊為主攻時更加穩定，打滿回合也比較省力。', ['box-cage-combo', 'box-pull-counter'], 'volume-trap', { tradeoff: '出拳量增加，雙手也更容易受傷。' }),
 
-  makeNode('kick-low', '低掃牽制', 'kicking', 1, 'foundation', '練好低掃的時機與重心，出腳時不再輕易失去平衡。', '低掃更容易命中，也較不會因此遭到反擊或抱摔。', [], 'low-kick'),
+  makeNode('kick-low', '低掃牽制', 'kicking', 1, 'foundation', '練好低掃的時機與重心，出腳時不再輕易失去平衡。', '乾淨低掃追加腿傷；近身低掃被破解時仍能站穩。', [], 'low-kick'),
   makeNode('kick-front', '前踢控距', 'kicking', 1, 'response', '反覆練習出腳時機，確保踢完後能穩穩站住。', '用前踢拉開距離時更加穩定，也比較省力。', ['kick-low'], 'front-kick'),
   makeNode('kick-body', '重踢軀幹', 'kicking', 2, 'chain', '先用拳吸引防守，再重踢對手的軀幹。', '軀幹傷害更高，後半場也更容易取得體力優勢。', ['kick-low'], 'body-kick', { evidence: { key: 'fights', amount: 2, label: '完成 2 場比賽' } }),
   makeNode('kick-catch-counter', '超人拳', 'kicking', 2, 'response', '用抬膝假動作讓對手預判踢擊，再突然躍進出拳。', '解鎖跨越遠距的超人拳，成功時能造成顯著傷害。', ['kick-front'], 'superman-punch'),
@@ -161,7 +161,7 @@ export const TECHNIQUE_NODES: TechniqueNode[] = [
   makeNode('kick-flow', '三路踢擊', 'kicking', 3, 'style', '在低、中、高三個位置之間靈活變換攻擊。', '對手更難只靠一種防守化解你的踢擊。', ['kick-catch-counter', 'kick-high-setup'], 'kick-flow', { tradeoff: '大量踢擊會加重膝腿負擔。' }),
 
   makeNode('clinch-frame', '框架防守', 'clinch', 1, 'foundation', '練好頭位與前臂支撐，在纏抱中替自己撐出空間。', '更容易撐開對手，從纏抱中脫身。', [], 'clinch-frame'),
-  makeNode('clinch-knee', '近身膝擊', 'clinch', 1, 'chain', '控制住對手的頭位後，以膝擊持續傷害軀幹。', '取得纏抱優勢時，可以用膝擊造成傷害。', ['clinch-frame'], 'clinch-knee'),
+  makeNode('clinch-knee', '近身膝擊', 'clinch', 1, 'chain', '控制住對手的頭位後，以膝擊持續傷害軀幹。', '乾淨命中額外削減體力，並延長對手收肘形成的空檔。', ['clinch-frame'], 'clinch-knee'),
   makeNode('clinch-underhook', '內勾爭位', 'clinch', 2, 'response', '用內勾配合頭位，重新奪回纏抱中的控制權。', '更容易搶到內勾，也更容易在籠邊與對手交換位置。', ['clinch-frame'], 'underhook', { evidence: { key: 'cageMinutes', amount: 2, label: '累積 2 分鐘籠邊控制' } }),
   makeNode('clinch-elbow', '近身短肘', 'clinch', 2, 'chain', '在狹窄空間用短肘切開防守，也可能劃傷對手。', '近身擊中時更有機會迫使裁判終止比賽。', ['clinch-knee'], 'short-elbow'),
   makeNode('clinch-trip', '內圍絆摔', 'clinch', 3, 'chain', '控制住對手的上半身，再看準時機絆開他的支撐腳。', '貼身絆摔更容易成功，摔倒對手後也能守穩上位。', ['clinch-underhook'], 'clinch-trip', { evidence: { key: 'takedowns', amount: 3, label: '完成 3 次抱摔' } }),
@@ -169,13 +169,13 @@ export const TECHNIQUE_NODES: TechniqueNode[] = [
 
   makeNode('wrestle-sprawl', '下壓防摔', 'wrestling', 1, 'response', '反覆練習髖部後撤與重心下壓，讓防摔成為本能反應。', '更容易擋住抱摔，成功後也能迅速拉開距離。', [], 'sprawl'),
   makeNode('wrestle-double', '雙腿抱摔', 'wrestling', 1, 'foundation', '改善壓低身體、切入的角度，以及抱住雙腿後的收尾。', '雙腿抱摔更容易成功，失敗時也比較不耗體力。', ['wrestle-sprawl'], 'double-leg'),
-  makeNode('wrestle-chain', '連鎖摔法', 'wrestling', 2, 'chain', '第一個摔法被擋住後，立刻換方向接上另一招。', '抱摔失敗時，可以馬上換招再試一次。', ['wrestle-double'], 'chain-wrestle', { evidence: { key: 'takedowns', amount: 2, label: '完成 2 次抱摔' } }),
+  makeNode('wrestle-chain', '連鎖摔法', 'wrestling', 2, 'chain', '第一個摔法被擋住後，立刻換方向接上另一招。', '每回合一次，把被破解的進腿接成纏抱，額外消耗 3 體力。', ['wrestle-double'], 'chain-wrestle', { evidence: { key: 'takedowns', amount: 2, label: '完成 2 次抱摔' } }),
   makeNode('wrestle-wall', '籠邊抱摔', 'wrestling', 2, 'chain', '用頭位和腰控壓住對手，再突然換方向將他摔倒。', '籠邊抱摔更容易成功，摔倒對手後也能守穩上位。', ['wrestle-double'], 'wall-takedown'),
   makeNode('wrestle-mat-return', '抱腰回摔', 'wrestling', 3, 'response', '對手試圖起身時繼續抱住腰部，再次將他摔回地面。', '更不容易失去上位控制。', ['wrestle-chain'], 'mat-return', { evidence: { key: 'takedowns', amount: 5, label: '完成 5 次抱摔' } }),
   makeNode('wrestle-pressure', '連續進腿', 'wrestling', 3, 'style', '一次又一次切入抱摔，逼得對手只能忙著防守。', '以摔法為主攻時，可以更頻繁地變換招式。', ['wrestle-wall', 'wrestle-mat-return'], 'wrestle-pressure', { tradeoff: '進腿一旦失敗，會消耗大量體力。' }),
 
   makeNode('ground-posture', '穩住上位', 'ground', 1, 'foundation', '練好髖部、頭位和平衡，在上位不再輕易被對手掀翻。', '上位控制更加穩定，也能更安全地出拳。', [], 'top-posture'),
-  makeNode('ground-guard', '封閉式防守', 'ground', 1, 'response', '改善下位的防守架與腿部控制，必要時也能主動把對手拉進防守架。', '封閉式防守更加穩定，主動拉防守失敗時的代價也會降低。', ['ground-posture'], 'closed-guard'),
+  makeNode('ground-guard', '封閉式防守', 'ground', 1, 'response', '改善下位的防守架與腿部控制，必要時也能主動把對手拉進防守架。', '重建或拉防守被破解時，承傷最多 3 並留在下位。', ['ground-posture'], 'closed-guard'),
   makeNode('ground-escape', '籠邊起身', 'ground', 2, 'response', '反覆練習背靠鐵網起身，同時護住頭部避免挨打。', '貼籠起身更容易成功，過程中受到的傷害也會降低。', ['ground-guard'], 'wall-walk', { evidence: { key: 'bottomEscapes', amount: 1, label: '從下位脫困 1 次' } }),
   makeNode('ground-arm', '十字架控制', 'ground', 2, 'chain', '用腿固定一側手臂，再以手臂控制頭部，形成十字架上位。', '學會十字架控制後，可以持續打擊對手，甚至迫使裁判終止比賽。', ['ground-posture'], 'crucifix'),
   makeNode('ground-submission', '下位降服', 'ground', 3, 'response', '被壓制時，以三角鎖或十字固突然反攻。', '從下位嘗試降服時更容易成功，並能累積這項技術的精通。', ['ground-escape'], 'bottom-submission', { evidence: { key: 'bottomEscapes', amount: 2, label: '從下位脫困 2 次' }, tradeoff: '失敗時可能連防守位置都保不住。' }),

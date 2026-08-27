@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, TECHNIQUE_NODES } from '../src/game/content'
-import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES } from '../src/game/fight-content'
-import { advance, createNewRun, finishDifficultyFor, getTechniqueAffinity, getUnlockStatus, riskLabelForGap } from '../src/game/engine'
+import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
+import { advance, createNewRun, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, getUnlockStatus, riskLabelForGap } from '../src/game/engine'
 import type { GameCommand, GameState } from '../src/game/types'
 
 const input = { name: '林致遠', region: 'taiwan' as const, motive: 'prove' as const, seed: 'TESTCAGE01' }
@@ -11,7 +11,7 @@ function apply(state: GameState, command: GameCommand): GameState {
 }
 
 function safestMove(state: GameState) {
-  return state.fight!.prompt!.allOptions.find((option) => option.conservative) ?? state.fight!.prompt!.recommendedOptions[0]
+  return state.fight!.prompt!.allOptions.find((option) => option.conservative) ?? state.fight!.prompt!.featuredOptions[0]
 }
 
 function resolveMinigame(state: GameState): GameState {
@@ -38,7 +38,10 @@ function completeCareer(initial: GameState): GameState {
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: safestMove(state).id })
     } else if (state.phase === 'finish-minigame') {
       state = resolveMinigame(state)
-    } else if (state.phase === 'round-result') state = apply(state, { type: 'CONTINUE_ROUND' })
+    } else if (state.phase === 'round-result') {
+      if (state.fight!.round < state.fight!.totalRounds) state = apply(state, { type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })
+      state = apply(state, { type: 'CONTINUE_ROUND' })
+    }
     else if (state.phase === 'fight-result') state = apply(state, { type: 'ACK_FIGHT_RESULT' })
   }
   expect(guard).toBeLessThan(1_500)
@@ -60,7 +63,10 @@ function reachFirstFightResult(initial: GameState): GameState {
     else if (state.phase === 'round-plan') state = apply(state, { type: 'SET_ROUND_PLAN', plan: 'distance' })
     else if (state.phase === 'critical') state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: safestMove(state).id })
     else if (state.phase === 'finish-minigame') state = resolveMinigame(state)
-    else if (state.phase === 'round-result') state = apply(state, { type: 'CONTINUE_ROUND' })
+    else if (state.phase === 'round-result') {
+      if (state.fight!.round < state.fight!.totalRounds) state = apply(state, { type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })
+      state = apply(state, { type: 'CONTINUE_ROUND' })
+    }
   }
   expect(guard).toBeLessThan(100)
   return state
@@ -140,6 +146,12 @@ describe('拳途人生模擬核心', () => {
     expect(state.fighter.frame).toMatch(/骨架$/)
     expect(Math.abs(state.fighter.reachCm - state.fighter.heightCm)).toBeLessThanOrEqual(10)
     expect(state.fighter.heightCm).toBeGreaterThan(160)
+  })
+
+  it('雙方都以滿體力開始比賽', () => {
+    const state = reachFirstRoundPlan(createNewRun(input))
+    expect(state.fight!.playerStamina).toBe(100)
+    expect(state.fight!.opponentStamina).toBe(100)
   })
 
   it('連續拒賽會在三十八歲結束生涯，不能無限老化', () => {
@@ -273,7 +285,7 @@ describe('拳途人生模擬核心', () => {
       if (!doubleLeg) continue
 
       doubleLeg.chance = { min: 100, max: 100 }
-      state.fight!.finishWindowsUsed = 2
+      state.fight!.finishWindowsUsed = 4
       const takedownsBefore = state.fighter.evidence.takedowns
       const resolved = apply(state, { type: 'RESOLVE_CRITICAL', optionId: doubleLeg.id })
       if (resolved.phase !== 'critical') continue
@@ -300,8 +312,8 @@ describe('拳途人生模擬核心', () => {
     expect(state.fight!.prompt!.position).toBe('pocket')
     const boxingIds = new Set(['quick-combination', 'attack-body', 'counter-pressure', 'drive-back', 'head-power', 'anti-shot-uppercut', 'angle-away', 'risky-power'])
     expect(state.fight!.prompt!.allOptions.filter((option) => boxingIds.has(option.intentId!)).length).toBeGreaterThanOrEqual(4)
-    expect(state.fight!.prompt!.recommendedOptions.filter((option) => option.branch === 'boxing').length).toBeGreaterThanOrEqual(2)
-    expect(state.fight!.prompt!.recommendedOptions.some((option) => option.executionName?.includes('刺拳') || option.executionName?.includes('直拳'))).toBe(true)
+    expect(state.fight!.prompt!.featuredOptions.filter((option) => option.branch === 'boxing').length).toBeGreaterThanOrEqual(2)
+    expect(state.fight!.prompt!.featuredOptions.some((option) => option.executionName?.includes('刺拳') || option.executionName?.includes('直拳'))).toBe(true)
   })
 
   it('所有科技節點都有實際戰鬥消費規則', () => {
@@ -319,7 +331,7 @@ describe('拳途人生模擬核心', () => {
     state = apply(reachFirstRoundPlan(state), { type: 'SET_ROUND_PLAN', plan: 'distance' })
     const probe = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'probe-range')!
     probe.chance = { min: 100, max: 100 }
-    state.fight!.finishWindowsUsed = 2
+    state.fight!.finishWindowsUsed = 4
     const executionId = probe.executionId
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: probe.id })
     const beat = state.fight!.beatHistory.at(-1)!
@@ -332,12 +344,30 @@ describe('拳途人生模擬核心', () => {
     expect(body.recommendation).toContain('防守抬高')
   })
 
+  it('每次攻防都會消耗對手體力，軀幹攻擊會造成額外消耗', () => {
+    const resolveClean = (intentId: string) => {
+      let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `STAMINA-${intentId}` })), { type: 'SET_ROUND_PLAN', plan: 'distance' })
+      state.fight!.finishWindowsUsed = 4
+      const option = state.fight!.prompt!.allOptions.find((item) => item.intentId === intentId)!
+      option.chance = { min: 100, max: 100 }
+      const staminaBefore = state.fight!.opponentStamina
+      state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: option.id })
+      return { drain: staminaBefore - state.fight!.opponentStamina, state }
+    }
+
+    const probe = resolveClean('probe-range')
+    const bodyAttack = resolveClean('attack-body')
+    expect(probe.drain).toBeGreaterThan(0)
+    expect(bodyAttack.drain).toBeGreaterThan(probe.drain)
+    expect(bodyAttack.state.fight!.beatHistory[0].narrative.impactTags).toContain(`對手體力 -${bodyAttack.drain}`)
+  })
+
   it('四個階段有不同名稱與目的，重複行動會在轉折階段被適應', () => {
     let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'STAGE-DIFFERENCE' })), { type: 'SET_ROUND_PLAN', plan: 'distance' })
     const titles: string[] = []
     for (let step = 1; step <= 4; step += 1) {
       titles.push(state.fight!.prompt!.title.split('｜')[0])
-      state.fight!.finishWindowsUsed = 2
+      state.fight!.finishWindowsUsed = 4
       const choice = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'steady-output') ?? safestMove(state)
       choice.chance = { min: 100, max: 100 }
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: choice.id })
@@ -350,8 +380,8 @@ describe('拳途人生模擬核心', () => {
     const outcomes = new Set<string>()
     for (let index = 0; index < 80 && outcomes.size < 3; index += 1) {
       let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `OUTCOME-${index}` })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
-      state.fight!.finishWindowsUsed = 2
-      const option = state.fight!.prompt!.recommendedOptions[0]
+      state.fight!.finishWindowsUsed = 4
+      const option = state.fight!.prompt!.featuredOptions[0]
       option.chance = index % 3 === 0 ? { min: 100, max: 100 } : index % 3 === 1 ? { min: 0, max: 0 } : { min: 45, max: 55 }
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: option.id })
       const beat = state.fight!.beatHistory[0]
@@ -375,7 +405,7 @@ describe('拳途人生模擬核心', () => {
     expect(state.fight!.sequenceStep).toBe(1)
     for (let step = 1; step <= 4; step += 1) {
       expect(state.phase).toBe('critical')
-      expect(state.fight!.prompt!.recommendedOptions).toHaveLength(4)
+      expect(state.fight!.prompt!.featuredOptions).toHaveLength(4)
       const safe = safestMove(state)
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: safe.id })
       if (step < 4) expect(state.fight!.sequenceStep).toBe(step + 1)
@@ -421,5 +451,103 @@ describe('拳途人生模擬核心', () => {
     expect(state.fight!.finished).toBe(false)
     expect(state.fight!.sequenceStep).toBe(2)
     expect(state.fight!.activeFinishWindow).toBeUndefined()
+  })
+
+  it('每一段都公開合法的精確威脅，並提供完整三段結果機率', () => {
+    const state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'VISIBLE-THREAT' })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
+    const threat = state.fight!.opponentIntent
+    const move = FIGHT_INTENTS.find((item) => item.id === threat.intentId)
+    const opponentPosition = state.fight!.position === 'top' ? 'bottom' : state.fight!.position === 'bottom' ? 'top' : state.fight!.position
+    expect(move?.positions).toContain(opponentPosition)
+    expect(threat.executionName.length).toBeGreaterThan(1)
+    for (const option of state.fight!.prompt!.allOptions) {
+      expect(option.odds.clean + option.odds.contested + option.odds.countered).toBeCloseTo(100)
+      expect(['favored', 'neutral', 'exposed']).toContain(option.matchup)
+    }
+  })
+
+  it('攻防紀錄同時保存雙方招式、戰術關係與局部傷害事件', () => {
+    let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'BILATERAL-BEAT' })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
+    state.fight!.finishWindowsUsed = 4
+    const option = state.fight!.prompt!.featuredOptions[0]
+    state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: option.id })
+    const beat = state.fight!.beatHistory[0]
+    expect(beat.action).toBe(option.executionName)
+    expect(beat.opponentAction.length).toBeGreaterThan(1)
+    expect(beat.opponentIntent.intentId.length).toBeGreaterThan(1)
+    expect(['favored', 'neutral', 'exposed']).toContain(beat.matchup)
+    expect(beat.damageEvents.every((event) => event.amount > 0)).toBe(true)
+  })
+
+  it('回合之間必須選擇場角調整，恢復策略會在下一回合生效', () => {
+    let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'CORNER-CHOICE' })), { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    state.fight!.finishWindowsUsed = 4
+    for (let step = 0; step < 4; step += 1) state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: safestMove(state).id })
+    expect(state.phase).toBe('round-result')
+    state.fight!.playerStamina = 40
+    const blocked = apply(state, { type: 'CONTINUE_ROUND' })
+    expect(blocked.phase).toBe('round-result')
+    expect(blocked.lastMessage).toContain('場角調整')
+    state = apply(state, { type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })
+    expect(state.fight!.cornerAdjustment).toBe('recover')
+    state = apply(state, { type: 'CONTINUE_ROUND' })
+    const bodyTier = state.fight!.playerDamageByPart.body >= 75 ? 3 : state.fight!.playerDamageByPart.body >= 50 ? 2 : state.fight!.playerDamageByPart.body >= 25 ? 1 : 0
+    expect(state.phase).toBe('round-plan')
+    expect(state.fight!.playerStamina).toBe(55 - [0, 2, 4, 6][bodyTier])
+  })
+
+  it('降服機會會實際讀取終結壓力、控制優勢與已製造的破綻', () => {
+    const state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'SUBMISSION-ACCESS' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    const fight = state.fight!
+    const option = { ...fight.prompt!.allOptions[0], actionKey: 'seek-choke', branch: 'ground' as const, conservative: false, usesOpenings: ['neck-exposed' as const] }
+    fight.position = 'top'
+    fight.playerStamina = 74
+    fight.opponentStamina = 50
+    fight.opponentDamage = 18
+    fight.momentum = 18
+    fight.playerControl = 32
+    fight.opponentControl = 5
+    fight.finishPressure = 0
+    const withoutSetup = finishOpportunity(state, fight, option, 'player', 'submission')
+    fight.finishPressure = 24
+    const earned = finishOpportunity(state, fight, option, 'player', 'submission')
+    expect(earned).toBeGreaterThanOrEqual(64)
+    expect(earned - withoutSetup).toBeGreaterThanOrEqual(16)
+  })
+
+  it('重創與累積壓力能把打擊路線推進到可靠的 TKO 窗口', () => {
+    const state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'TKO-ACCESS' })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
+    const fight = state.fight!
+    const option = { ...fight.prompt!.allOptions[0], actionKey: 'risky-power', branch: 'boxing' as const, conservative: false, usesOpenings: ['high-guard' as const] }
+    fight.position = 'pocket'
+    fight.playerStamina = 76
+    fight.opponentStamina = 47
+    fight.opponentDamage = 44
+    fight.opponentDamageByPart.head = 52
+    fight.momentum = 24
+    fight.finishPressure = 28
+    expect(finishOpportunity(state, fight, option, 'player', 'strike')).toBeGreaterThanOrEqual(76)
+  })
+
+  it('充分建立的打擊與降服優勢會真正進入相應終結階段', () => {
+    let strikeState = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'TKO-WINDOW' })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
+    const strikeOption = strikeState.fight!.prompt!.allOptions.find((option) => !option.conservative && option.category === 'offense')!
+    strikeOption.chance = { min: 100, max: 100 }
+    Object.assign(strikeState.fight!, { playerStamina: 100, opponentStamina: 10, opponentDamage: 90, momentum: 40, finishPressure: 100, initiative: 'player', finishWindowsUsed: 0 })
+    strikeState.fight!.opponentDamageByPart.head = 80
+    strikeState = apply(strikeState, { type: 'RESOLVE_CRITICAL', optionId: strikeOption.id })
+    expect(strikeState.phase).toBe('finish-minigame')
+    expect(strikeState.fight!.activeFinishWindow?.kind).toBe('strike')
+
+    let submissionState = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'SUB-WINDOW' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    const execution = variantsForIntent('seek-choke')[0]
+    const template = submissionState.fight!.prompt!.allOptions[0]
+    const submissionOption = { ...template, id: 'test-seek-choke', label: '尋找絞技', actionKey: 'seek-choke', branch: 'ground' as const, intentId: 'seek-choke', executionId: execution.id, executionName: execution.name, category: 'offense' as const, conservative: false, usesOpenings: ['neck-exposed' as const], chance: { min: 100, max: 100 } }
+    submissionState.fight!.prompt!.allOptions = [submissionOption]
+    submissionState.fight!.position = 'top'
+    Object.assign(submissionState.fight!, { playerStamina: 100, opponentStamina: 10, opponentDamage: 70, momentum: 40, finishPressure: 100, playerControl: 50, opponentControl: 0, initiative: 'player', finishWindowsUsed: 0 })
+    submissionState = apply(submissionState, { type: 'RESOLVE_CRITICAL', optionId: submissionOption.id })
+    expect(submissionState.phase).toBe('finish-minigame')
+    expect(submissionState.fight!.activeFinishWindow?.kind).toBe('submission')
   })
 })
