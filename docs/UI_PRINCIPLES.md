@@ -14,12 +14,14 @@
 - The start screen presents 前世見聞 as one compact inherited-talent selector with an explicit 不帶前世天賦 option and the selected talent's full effect text. The reveal and in-life summary distinguish the seeded 今生天賦 from the chosen 前世天賦, and omit inherited-talent UI when the player takes none.
 - Enemy cards occupy the upper battle lane and allies the lower lane. Living enemies are selectable only on the player's turn; selected and defeated states must be obvious.
 - Keep the timeline above the arena, repeat the current target near actions, and anchor moves at the bottom. Keep every move visible throughout battle; disable and visibly mute the controls outside the player's turn instead of removing them.
+- Never compress fighter cards below their content height. On phone browsers, the battle frame may scroll internally as one surface so intents, statuses, and all move controls remain reachable without text escaping its card.
 - Health and inner power rely on bars as well as numbers. Do not communicate combat state through tiny text alone.
 - Active guard remains numerically visible on each fighter card, and the latest action names its damage, healing, and guard changes. The battle variety meter counts distinct moves because that is what the result grade rewards.
 - Each move keeps its authored description and adds a mechanically derived line naming recipients and exact non-random effects. Each living enemy card shows its committed next action, exact target, and non-random effects; damage totals remain uncertain. Action feedback names every affected fighter and reports actual healing, guard gain, guard absorption, damage, inner-power recovery, counters, and status changes.
 - Advance timelines automatically through allies and enemies. Never require a button merely to reveal the next actor.
 - After victory, resolve the battle and open the grade result immediately; do not insert a victory-confirmation button between combat and grading.
 - Timeline markers must move continuously during automatic combat instead of jumping between coarse logical ticks; pause that motion when the player must choose a target or move.
+- Timeline rendering should be capped near 20 updates per second and smoothed with CSS; simulation uses measured elapsed time so reducing React renders does not alter deterministic turn timing.
 - Give every combat move visible impact feedback: quick attacks cut, finishers burst, recovery rises, and guards form a seal. Each sect has its own sonic material, while sound remains optional and never carries essential information.
 - Once a life has been revealed, keep a compact 人物 action in the top navigation. It opens a bounded, internally scrolling character sheet for current resources, six attributes and potential, full identity effects, and learned sect moves; opening it pauses automatic battle progress.
 - Respect reduced-motion preferences; combat effects must collapse cleanly to their static state when animation is disabled.

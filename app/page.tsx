@@ -8,7 +8,8 @@ import { describeActionEffects, type BattleOutcome } from './battle';
 
 const SAVE_KEY = 'daxia-simulator-v1';
 const LEGACY_KEY = 'daxia-simulator-legacy-v1';
-const TIMELINE_FRAME_MS = 1000 / 60;
+const TIMELINE_RENDER_INTERVAL_MS = 50;
+const MAX_TIMELINE_CATCHUP_MS = 150;
 type Legacy = { discoveredTraits: string[] };
 const emptyLegacy: Legacy = { discoveredTraits: [] };
 
@@ -225,10 +226,14 @@ export default function DaxiaPage() {
   const battleActive = Boolean(!characterOpen && screen === 'battle' && run?.battle && !run.battle.result && run.battle.readyActorId !== 'player');
   useEffect(() => {
     if (!battleActive) return;
-    let frame = 0; let previousTime = window.performance.now(); let accumulatedMs = 0;
-    const update = (now: number) => { accumulatedMs += Math.min(50, Math.max(0, now - previousTime)); previousTime = now; while (accumulatedMs >= TIMELINE_FRAME_MS) { setRun((previous) => previous?.battle && !previous.battle.result && previous.battle.readyActorId !== 'player' ? advance(previous, TIMELINE_FRAME_MS) : previous); accumulatedMs -= TIMELINE_FRAME_MS; } frame = window.requestAnimationFrame(update); };
-    frame = window.requestAnimationFrame(update);
-    return () => window.cancelAnimationFrame(frame);
+    let previousTime = window.performance.now();
+    const timer = window.setInterval(() => {
+      const now = window.performance.now();
+      const elapsedMs = Math.min(MAX_TIMELINE_CATCHUP_MS, Math.max(0, now - previousTime));
+      previousTime = now;
+      setRun((previous) => previous?.battle && !previous.battle.result && previous.battle.readyActorId !== 'player' ? advance(previous, elapsedMs) : previous);
+    }, TIMELINE_RENDER_INTERVAL_MS);
+    return () => window.clearInterval(timer);
   }, [battleActive]);
 
   const restart = () => { const learnedTrait = screen === 'ending' ? run?.trait ?? null : null; if (learnedTrait) { setLegacy((previous) => previous.discoveredTraits.includes(learnedTrait) ? previous : { discoveredTraits: [...previous.discoveredTraits, learnedTrait] }); setInheritedTrait(learnedTrait); sound('win'); } window.localStorage.removeItem(SAVE_KEY); setCharacterOpen(false); setRun(null); setScreen('start'); setSeed(''); };
