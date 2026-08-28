@@ -129,7 +129,6 @@ export default function App() {
     <main className="game-shell">
       <GameHeader game={game} onOverlay={setOverlay} onReset={() => setShowResetConfirmation(true)} sfxEnabled={sfxEnabled} onToggleSfx={toggleSfx} relaxedDrills={relaxedDrills} onToggleRelaxedDrills={toggleRelaxedDrills} />
       <div ref={gameScroll} className="game-scroll" aria-live="polite">
-        {game.lastMessage && <div className="notice"><span>最新</span>{game.lastMessage}</div>}
         <GameView game={game} dispatch={dispatch} onNew={resetRun} relaxedDrills={relaxedDrills} />
       </div>
       {overlay && <InfoOverlay game={game} type={overlay} dispatch={dispatch} onClose={() => setOverlay(undefined)} />}

@@ -97,8 +97,6 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .screen { min-height: 100%; padding: 21px 16px max(24px, env(safe-area-inset-bottom)); }
 .screen-title { margin-bottom: 18px; }
 .screen-title h1 { margin: 0; font-size: clamp(25px, 7vw, 34px); line-height: 1.16; letter-spacing: .01em; }
-.notice { display: flex; gap: 8px; padding: 9px 16px; border-bottom: 1px solid rgb(226 83 53 / .2); color: #d5c8b7; background: rgb(111 45 29 / .18); font-size: 12px; line-height: 1.5; }
-.notice span { color: var(--accent); font-weight: 800; }
 .lead { margin: 0 0 16px; color: #c9beae; font-size: 14px; line-height: 1.7; }
 .action-dock { position: sticky; z-index: 6; bottom: calc(-1 * max(24px, env(safe-area-inset-bottom))); margin: 22px -16px calc(-1 * max(24px, env(safe-area-inset-bottom))); padding: 10px 16px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: linear-gradient(180deg, rgb(13 12 11 / .92), #0d0c0b 32%); }
 .action-dock .primary-action { margin-top: 0; }
@@ -634,8 +632,8 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .move-learning-card strong { display: flex; justify-content: space-between; gap: 12px; }
 .move-learning-card strong small { color: var(--gold); font-size: 9px; }
 .opponent-traits { margin: 10px 0; display: grid; gap: 5px; }
-.opponent-traits > span { color: var(--dim); font-size: 9px; font-weight: 900; letter-spacing: .07em; }
-.opponent-traits small { padding: 7px 8px; border-left: 2px solid var(--rarity, #918879); color: var(--muted); background: rgb(255 255 255 / .025); font-size: 9px; line-height: 1.45; }
+.opponent-traits > span { color: var(--muted); font-size: 11px; font-weight: 900; letter-spacing: .06em; }
+.opponent-traits small { padding: 9px 10px; border-left: 2px solid var(--rarity, #918879); color: #c8bdae; background: rgb(255 255 255 / .035); font-size: 12px; line-height: 1.55; }
 .fight-trait-strip { margin: 8px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fight-trait-strip span { color: var(--dim); font-size: 9px; font-weight: 900; }
 .fight-trait-strip b { padding: 5px 7px; border: 1px solid var(--rarity, var(--line)); border-radius: 99px; color: var(--rarity, var(--muted)); font-size: 8px; }
