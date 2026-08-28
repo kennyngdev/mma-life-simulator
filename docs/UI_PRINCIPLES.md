@@ -1,28 +1,20 @@
 # UI principles
 
-- Use one mobile-first vertical frame capped at 720px on wider screens; do not turn the game into a desktop dashboard.
-- Fit each play state within `100dvh` without page scrolling. A clearly bounded internal reading panel may scroll when a biography is dense.
-- Treat mobile browser chrome as occupied space: use the small viewport and safe-area insets for the game frame. Any non-battle screen taller than the visible area must scroll internally so its primary action can always be reached without installing the game as a PWA.
-- Keep player-facing type at 14px minimum, with normal story text at 15px or larger. Reduce secondary detail before shrinking text.
-- Use available space purposefully. Primary actions stay obvious and reachable by touch and keyboard.
-- The life-event screen keeps persistent identity and relationship detail out of the lower chrome; that information belongs in 人物. Each preparation card instead shows its event-specific action, success rate, contributing stats and talents, guaranteed cost, full success effect, and explicit failure fallback before commitment. A contextual third option names why it exists, such as a sect, friend, rival, injury, or available money; unavailable options are replaced rather than disabled.
-- On narrow or short phones, the life-event screen compacts spacing and may omit each preparation card's flavor description before reducing critical text; chance, contributing stats and talents, success, and failure remain visible. Keep internal scrolling only as a fallback for unusually small viewports or enlarged system text.
-- After committing a preparation choice, show one compact modal over the frozen event screen: outcome and exact effect first, then a concise causal reason the fight still happens, followed by one explicit combat button. It must be keyboard-focusable, block background controls, fit mobile heights through internal scrolling, and respect reduced motion.
-- Show 門派造詣 as current progress toward the next 35/85/145 threshold. When a threshold is crossed, the result leads to a dedicated two-card insight choice before the next event or ending; each card names the affected move, exact permanent change, and lack of respec. The character sheet lists chosen insights and presents resolved move effects rather than base values.
-- Represent bounded attributes with labeled horizontal bars. When growth has a cap, show current and potential fills together, include a visual key, and retain exact values in accessible labels.
-- Identity cards must show their actual rarity from game state, use distinct 普通／稀有／傳說 treatments, and state every mechanical benefit and cost beside the identity. Do not place a separate probability or rarity-explanation sentence beneath the cards.
-- The start screen presents 前世見聞 as one compact inherited-talent selector with an explicit 不帶前世天賦 option and the selected talent's full effect text. The reveal and in-life summary distinguish the seeded 今生天賦 from the chosen 前世天賦, and omit inherited-talent UI when the player takes none.
-- Enemy cards occupy the upper battle lane and allies the lower lane. Living enemies are selectable only on the player's turn; selected and defeated states must be obvious.
-- Begin battle directly with the timeline above the arena; do not repeat the already acknowledged encounter title, cause, or stakes in a separate opening panel. Repeat the current target near actions, and anchor moves at the bottom. Keep every move visible throughout battle; disable and visibly mute the controls outside the player's turn instead of removing them.
-- Never compress fighter cards below their content height. On phone browsers, the battle frame may scroll internally as one surface so intents, statuses, and all move controls remain reachable without text escaping its card.
-- Health and inner power rely on bars as well as numbers. Do not communicate combat state through tiny text alone.
-- Active guard remains numerically visible on each fighter card, and the latest action names its damage, healing, and guard changes. The battle variety meter counts distinct moves because that is what the result grade rewards.
-- Each move keeps its authored description and adds a mechanically derived line naming recipients and exact non-random effects. Each living enemy card shows its committed next action, exact target, and non-random effects; damage totals remain uncertain. Action feedback names every affected fighter and reports actual healing, guard gain, guard absorption, damage, inner-power recovery, counters, and status changes.
-- Advance timelines automatically through allies and enemies. Never require a button merely to reveal the next actor.
-- After victory, resolve the battle and open the grade result immediately; do not insert a victory-confirmation button between combat and grading.
-- The victory result leads to a dedicated three-card permanent-upgrade choice before any insight, next event, or ending. Each card names 普通／稀有／傳說 rarity, the exact lasting effect, and that the choice cannot be rerolled; rarity uses color and border treatment but never color alone. On narrow phones the cards stack in the same internally scrolling frame.
-- Timeline markers must move continuously during automatic combat instead of jumping between coarse logical ticks; pause that motion when the player must choose a target or move.
-- Timeline state updates once every 180 ms and CSS interpolates marker positions across the same interval. Do not add animation-frame React renders; the discrete tick is the deterministic combat clock.
-- Give every combat move visible impact feedback: quick attacks cut, finishers burst, recovery rises, and guards form a seal. Each sect has its own sonic material, while sound remains optional and never carries essential information.
-- Once a life has been revealed, keep a compact 人物 action in the top navigation. It opens a bounded, internally scrolling character sheet for current resources, six attributes and potential, full identity effects, and learned sect moves; opening it pauses automatic battle progress.
-- Respect reduced-motion preferences; combat effects must collapse cleanly to their static state when animation is disabled.
+- Use one mobile-first vertical frame capped at 720px. Fit each play state within `100dvh`; dense panels may scroll internally so primary actions remain reachable.
+- Keep story text at 15px or larger and player-facing mechanics at 14px or larger. Remove secondary flavor before shrinking critical information.
+- The start screen shows available death points, discovered death count, and permanent talent count, with direct access to the talent shop and death journal.
+- Sect selection must say it is an aspiration. The reveal and character sheet keep `志願` visibly distinct from formal membership until the admission scene after round 3.
+- During youth, the character sheet and move grid show only the three novice moves. The admission scene explicitly presents the four newly earned sect moves.
+- The event HUD shows all three path scores and marks the current dominant direction. Every choice is labeled 問劍、行契、or 守人 and previews its actual money cost, objective, path gain, and failure condition.
+- Keep money spending inside event choices. Do not show a phase shop or post-battle flat-upgrade screen.
+- Before combat, acknowledge the selected preparation and repeat the actual victory rule. The battle screen then places a structured objective panel above the arena with victory condition, current progress, and failure condition.
+- For `progress`, place the objective action above the move grid. State that it adds one progress, consumes the turn, and performs no move. Disable it when the player is not ready.
+- Mark leaders and protected actors directly on fighter cards. Protected-character and deadline failures must be as legible as player health.
+- Enemy cards occupy the upper lane, allies the lower lane. Health and inner power always use labels and numbers. Move controls remain visible and disabled outside the player turn.
+- Combat feedback may animate cuts, bursts, recovery, and guards, but sound and motion never carry essential state. Respect reduced-motion preferences.
+- The result card leads directly to the next required state: admission, technique mutation, ending, or—after death—the talent shop.
+- Death presentation states the concrete loss first, then the actionable hint, then the epitaph. It shows whether the death awarded `+1` or `+0` points.
+- The talent shop shows price, full benefit, full drawback, ownership, and insufficient balance. Permanent talents are always active, non-refundable, and non-toggleable.
+- The death journal shows all 46 slots without leaking undiscovered titles.
+- Technique milestone cards appear after rounds 7, 11, and 14. They name the affected move and behavioral change; proficiency is biography context, not a progress gate.
+- The character sheet shows path bars, aspiring/admitted sect state, current and permanent talents with drawbacks, resources, resolved moves, and learned mutations.

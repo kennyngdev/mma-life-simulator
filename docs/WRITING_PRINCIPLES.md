@@ -2,37 +2,38 @@
 
 ## Experience promise
 
-The player is an ordinary person who is not chosen, secretly invincible, or guaranteed greatness. They leave a mark through observation, practice, compromise, care, and decisions.
+The protagonist is an ordinary person, not a hidden chosen one. Repeated choices create a recognizable life: challenger, contractor, protector, or an uneasy mixture.
 
 ## Voice
 
-- Write player-facing prose in readable Traditional Chinese and second person.
-- Use a close, limited view: describe what the player can currently notice, infer, misunderstand, or remember.
-- Mix accessible modern narration with restrained wuxia rhythm. Concrete actions, objects, physical reactions, and practical costs come before abstract praise.
-- The tone is roughly half warm satire and half earnest wuxia. Humour comes from money, status, routine, social inconvenience, and self-awareness—not contempt for historical culture.
-- Let injury, coercion, grief, fear, and lasting consequence land seriously before returning to humour.
+- Write readable Traditional Chinese in second person and a close, limited view.
+- Mix accessible modern narration with restrained wuxia rhythm. Concrete people, objects, actions, money, paperwork, and physical costs precede abstractions.
+- Humour targets bureaucracy, wages, status, institutional failure, and the protagonist’s overconfidence—not victims, protected people, injury, or grief.
+- When someone dies, state the loss seriously first. Give a useful counterfactual second. Only then land one short epitaph.
 
-## Scenes and choices
+## Events and choices
 
-- A useful scene has a concrete landing point, a disturbance, a deeper pressure, a choice between methods and costs, and a visible aftermath.
-- Each event should advance at least two of: a practical problem, a relationship, or a costly action.
-- Choice titles say what the player does; descriptions explain how and what it risks. No option should be the disguised correct answer.
-- Each event authors two methods from its concrete objects, people, and pressure. The third method may come from the current sect, relationship, injury, burden, or resources, and must explicitly name that causal source instead of disguising a generic choice with new wording.
-- Copy must not promise an effect the engine does not implement. Preview the actual reward and record the actual consequence.
-- Combat needs a clear reason to happen now and a remembered consequence afterward.
-- The brief transition into combat must name both the preparation outcome and the immediate reason it cannot prevent the fight. It may land one warm-satirical punchline about status, work, money, or social inconvenience, but never makes injury or death the joke.
+- Each event has a concrete place, immediate pressure, and one authored method for each path.
+- 問劍 turns pressure into a named contest, leadership challenge, reputation question, or succession problem.
+- 行契 turns pressure into delivery, liability, wages, information, routes, clients, or accumulated obligations.
+- 守人 turns pressure into evacuation, institutional abuse, refugees, public responsibility, or care for a particular person.
+- Choice titles say what the player does. Descriptions name the method and mechanically enforced objective. No copy may promise an effect the engine does not implement.
+- Adjacent events should not reuse the same choice wording or the same three mechanical bundles.
+- Money solutions are concrete: pay an informant, hire help, secure a route, reduce required work, or buy a peaceful settlement. Never call a flat stat purchase a life choice.
+- Created turning points return in later scenes or the ending. Recurring friends and rivals change access, costs, or battle composition rather than exist as labels.
 
-## Characters and endings
+## Combat, deaths, and endings
 
-- Recurring people need something to protect, a weakness, a recognizable habit, and the ability to change the player's costs or options.
-- Show affection and rivalry through actions and shared history, not labels alone.
-- Martial arts reveal character and circumstance: show who moves, how the situation changes, and what the action costs.
-- Post-battle upgrades are named as habits, techniques, or bodily understanding earned from the fight. Their copy states the exact permanent effect without claiming destiny, bloodline, or divine selection.
-- Endings should answer what kind of person this life became while preserving unresolved possibilities and relationships.
+- Every battle introduction names why conflict still happens and what success and failure mean now.
+- Objective copy and resolver data are one promise. `護送`, `守住`, `交付`, and `斬首` must be mechanically true, not narrative decoration.
+- Death causes are concrete and causal. Hints tell the player what to prepare, spend, target, or prioritize next time.
+- Epitaphs are concise. Good targets include missing budgets, liability clauses, rank, publicity, and bad administration. The dead body, wounded person, refugee, child, or protected victim is never the joke.
+- Technique mutations describe new timing, targeting, status, cadence, defense, or objective knowledge—not vague enlightenment or a larger number.
+- Endings answer what kind of obligations the protagonist repeatedly accepted. They combine dominant and secondary paths with mastery, community, or reputation, while preserving relationships and unresolved costs.
 
 ## Avoid
 
-- Hidden bloodline destiny, amnesia shortcuts, surprise godlike power, or a system declaring the protagonist special.
+- Hidden bloodlines, amnesia shortcuts, surprise godhood, or a system declaring the protagonist special.
 - Trauma as upgrade fuel or a punchline.
-- Generic ancient aphorisms, constant internet slang, or modern comparisons that add no insight.
-- Sudden twists without earlier causal evidence.
+- Generic aphorisms, constant internet slang, and twists without prior causal evidence.
+- Calling grinding, shopping, or arbitrary stat growth a meaningful life decision.

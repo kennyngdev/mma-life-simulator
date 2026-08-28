@@ -169,13 +169,18 @@ function reconcileIntents(state: BattleState, rules: BattleRules): BattleIntent[
   });
 }
 function finish(state: BattleState, rules: BattleRules, events: BattleEvent[]) {
-  if (!living(state, 'enemy').length) { state.result = 'victory'; events.push({ type: 'result', result: 'victory' }); return; }
   const player = actorFor(state, 'player');
-  if (!player || player.hp <= 0 || !living(state, 'ally').length) { state.result = 'defeat'; events.push({ type: 'result', result: 'defeat' }); return; }
+  const protectedLost = state.objective.protectedActorIds.some((id) => (actorFor(state, id)?.hp ?? 0) <= 0);
+  const deadlineMissed = state.objective.deadline !== undefined && state.objective.hostileActions >= state.objective.deadline && state.objective.progress < state.objective.required;
+  if (!player || player.hp <= 0 || !living(state, 'ally').length || protectedLost || deadlineMissed) { state.result = 'defeat'; events.push({ type: 'result', result: 'defeat' }); return; }
+  const leaderDown = state.objective.type === 'leader' && (actorFor(state, state.objective.leaderId)?.hp ?? 0) <= 0;
+  const progressDone = state.objective.type === 'progress' && state.objective.progress >= state.objective.required;
+  const survived = state.objective.type === 'survive' && state.objective.hostileActions >= state.objective.required;
+  if (!living(state, 'enemy').length || leaderDown || progressDone || survived) { state.result = 'victory'; events.push({ type: 'result', result: 'victory' }); return; }
   state.readyActorId = null; state.turn += 1; state.intents = reconcileIntents(state, rules);
 }
 export function createBattle(setup: BattleSetup, rules: BattleRules): BattleState {
-  const state: BattleState = { ...clone(setup), turn: 1, tick: 0, readyActorId: null, selectedTargetId: null, actionSerial: 0, tauntActorId: null, result: null, intents: [], events: [], consumedPassives: [] };
+  const state: BattleState = { ...clone(setup), objective: clone(setup.objective ?? { type: 'eliminate', label: '擊退對手', description: '打倒所有敵人。', progress: 0, required: 0, protectedActorIds: [], hostileActions: 0 }), turn: 1, tick: 0, readyActorId: null, selectedTargetId: null, actionSerial: 0, tauntActorId: null, result: null, intents: [], events: [], consumedPassives: [] };
   refreshSpeeds(state, rules);
   for (const actor of state.actors) {
     actor.progress = roll(state, 8, 70);
@@ -205,7 +210,7 @@ export function reduceBattle(previous: BattleState, command: BattleCommand, rule
         }
         if (ready.role === 'tank' && (ready.tauntCooldown ?? 0) > 0) { ready.tauntCooldown = Math.max(0, (ready.tauntCooldown ?? 0) - 1); if (state.tauntActorId === ready.id && (ready.tauntTurnsRemaining ?? 0) > 0) { ready.tauntTurnsRemaining = Math.max(0, (ready.tauntTurnsRemaining ?? 0) - 1); if (!ready.tauntTurnsRemaining) state.tauntActorId = null; } }
         const intent = state.intents.find((item) => item.actorId === ready.id); const action = intent?.actionId ? rules.actions[intent.actionId] : undefined; const target = actorFor(state, intent?.targetId);
-        if (action && target) { ready.actionsTaken += 1; ready.qi -= action.qiCost ?? 0; const result = applyEffects(state, ready, target, action, rules); events.push({ type: 'action', actorId: ready.id, actorName: ready.name, side: ready.side, actionId: action.id, targetId: target.id, targetName: target.name, ...result }); }
+        if (action && target) { ready.actionsTaken += 1; ready.qi -= action.qiCost ?? 0; const result = applyEffects(state, ready, target, action, rules); events.push({ type: 'action', actorId: ready.id, actorName: ready.name, side: ready.side, actionId: action.id, targetId: target.id, targetName: target.name, ...result }); if (ready.side === 'enemy') state.objective.hostileActions += 1; }
         state.intents = state.intents.filter((item) => item.actorId !== ready.id);
         finish(state, rules, events);
       }
@@ -215,7 +220,11 @@ export function reduceBattle(previous: BattleState, command: BattleCommand, rule
     const actor = actorFor(state, 'player'); const action = rules.actions[command.actionId]; const target = actor && action ? targetFor(state, actor, action.target, command.targetId) : undefined;
     if (actor && action && target && actor.qi >= (action.qiCost ?? 0) && conditionsMet(state, actor, target, action.conditions)) { actor.actionsTaken += 1; actor.qi -= action.qiCost ?? 0; state.selectedTargetId = target.id; const result = applyEffects(state, actor, target, action, rules); events.push({ type: 'action', actorId: actor.id, actorName: actor.name, side: actor.side, actionId: action.id, targetId: target.id, targetName: target.name, ...result }); finish(state, rules, events); }
   }
-  if (events.some((event) => event.type === 'action' || event.type === 'status')) state.events = events;
-  state.actionSerial += events.filter((event) => event.type === 'action' || event.type === 'status').length;
+  if (command.type === 'advance-objective' && state.readyActorId === 'player' && state.objective.type === 'progress') {
+    const actor = actorFor(state, 'player');
+    if (actor) { actor.actionsTaken += 1; state.objective.progress = Math.min(state.objective.required, state.objective.progress + 1); events.push({ type: 'objective', label: state.objective.actionLabel ?? state.objective.label, progress: state.objective.progress, required: state.objective.required }); finish(state, rules, events); }
+  }
+  if (events.some((event) => event.type === 'action' || event.type === 'status' || event.type === 'objective')) state.events = events;
+  state.actionSerial += events.filter((event) => event.type === 'action' || event.type === 'status' || event.type === 'objective').length;
   return { state, events, result: state.result, resourceChanges: { money: state.resources.money - previous.resources.money, flagsAdded: [] }, rngIndex: state.rngIndex };
 }

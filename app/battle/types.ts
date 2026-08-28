@@ -3,6 +3,19 @@ export type MoveSlot = 'attack' | 'ultimate' | 'recovery' | 'defense';
 
 export type BattleSide = 'ally' | 'enemy';
 export type BattleResult = 'victory' | 'defeat' | null;
+export type BattleObjectiveType = 'eliminate' | 'leader' | 'progress' | 'survive';
+export type BattleObjectiveState = {
+  type: BattleObjectiveType;
+  label: string;
+  description: string;
+  progress: number;
+  required: number;
+  actionLabel?: string;
+  leaderId?: string;
+  protectedActorIds: string[];
+  hostileActions: number;
+  deadline?: number;
+};
 export type BattleTarget = 'selected-enemy' | 'weakest-ally' | 'weakest-enemy' | 'first-enemy' | 'random-foe' | 'self' | 'taunt-target';
 export type BattleEffectRecipient = 'actor' | 'target';
 export type BattleTrigger = 'battle-start' | 'before-damage' | 'after-damage' | 'before-defeat' | 'action';
@@ -84,6 +97,7 @@ export type BattleEvent =
   | { type: 'ready'; actorId: string; actorName: string; side: BattleSide }
   | { type: 'action'; actorId: string; actorName: string; side: BattleSide; actionId: string; targetId?: string; targetName?: string; outcomes: BattleOutcome[]; interceptedBy?: string }
   | { type: 'status'; actorId: string; actorName: string; side: BattleSide; statusId: string; stacks: number; damage: number }
+  | { type: 'objective'; label: string; progress: number; required: number }
   | { type: 'result'; result: Exclude<BattleResult, null> };
 
 export type BattleState = {
@@ -93,6 +107,7 @@ export type BattleState = {
   cause: string;
   stakes: string;
   mandatory: boolean;
+  objective: BattleObjectiveState;
   turn: number;
   tick: number;
   rngIndex: number;
@@ -115,7 +130,7 @@ export type BattleRules = {
   damageModifiers: Array<{ passiveId: string; actor: 'player' | 'ally'; multiplier: number; condition?: BattleCondition; perPartyMember?: number; perMoney?: number; maximumStacks?: number }>;
 };
 
-export type BattleSetup = Omit<BattleState, 'turn' | 'tick' | 'readyActorId' | 'selectedTargetId' | 'actionSerial' | 'tauntActorId' | 'result' | 'intents' | 'events' | 'consumedPassives'>;
-export type BattleCommand = { type: 'advance' } | { type: 'select-target'; targetId: string } | { type: 'use-action'; actionId: string; targetId?: string };
+export type BattleSetup = Omit<BattleState, 'turn' | 'tick' | 'readyActorId' | 'selectedTargetId' | 'actionSerial' | 'tauntActorId' | 'result' | 'intents' | 'events' | 'consumedPassives' | 'objective'> & { objective?: BattleObjectiveState };
+export type BattleCommand = { type: 'advance' } | { type: 'select-target'; targetId: string } | { type: 'use-action'; actionId: string; targetId?: string } | { type: 'advance-objective' };
 export type BattleTransition = { state: BattleState; events: BattleEvent[]; result: BattleResult; resourceChanges: { money: number; flagsAdded: string[] }; rngIndex: number };
 export type BattleMoveSelection = { slot: MoveSlot; actionId: string };

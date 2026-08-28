@@ -19,4 +19,10 @@ describe('combat presentation', () => {
     expect(timelineMarkerPresentation(closeActors, 'slower').shift).toBe(-10);
     expect(timelineMarkerPresentation(closeActors, 'faster').shift).toBe(10);
   });
+
+  it('holds the ready actor at the exact end of the timeline while everyone is paused', () => {
+    const actors = [{ id: 'player', progress: 2 }, { id: 'enemy-0', progress: 98 }];
+    expect(timelineMarkerPresentation(actors, 'player', 'player')).toEqual({ progress: 100, shift: 0 });
+    expect(timelineMarkerPresentation(actors, 'enemy-0', 'player')).toEqual({ progress: 98, shift: -20 });
+  });
 });

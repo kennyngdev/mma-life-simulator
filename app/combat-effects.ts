@@ -11,24 +11,37 @@ const moveKinds: Record<string, CombatEffectKind> = {
   'emei-needle': 'swift', 'emei-moon': 'power', 'emei-medicine': 'recovery', 'emei-parry': 'guard',
   'tang-needle': 'swift', 'tang-bloom': 'power', 'tang-antidote': 'recovery', 'tang-smoke': 'guard',
   'enemy-strike': 'swift', 'enemy-assassin': 'power', 'enemy-guard': 'guard',
+  'enemy-rest': 'recovery',
   'friend-strike': 'swift', 'friend-help': 'recovery',
 };
 
 const glyphs: Record<SectId, string> = { huashan: '劍', shaolin: '拳', wudang: '太', beggar: '棍', emei: '針', tang: '鏢' };
 
-export function effectForAction(actionId: string): CombatEffectKind { return moveKinds[actionId] ?? 'swift'; }
+export function effectForAction(actionId: string): CombatEffectKind {
+  if (moveKinds[actionId]) return moveKinds[actionId];
+  if (actionId.endsWith('-power')) return 'power';
+  if (actionId.endsWith('-recover') || actionId === 'novice-breathe') return 'recovery';
+  if (actionId.endsWith('-defend') || actionId === 'novice-cover') return 'guard';
+  return 'swift';
+}
 export function effectGlyph(sectId: SectId, actorId: string) { return actorId === 'player' ? glyphs[sectId] : actorId === 'friend' ? '援' : '擊'; }
 
-const visibleTimelineProgress = (actor: Pick<BattleActor, 'progress'>) => Math.max(0, Math.min(100, actor.progress));
+const visibleTimelineProgress = (actor: Pick<BattleActor, 'id' | 'progress'>, readyActorId?: string | null) =>
+  actor.id === readyActorId ? 100 : Math.max(0, Math.min(100, actor.progress));
 
-export function timelineMarkerPresentation(actors: Array<Pick<BattleActor, 'id' | 'progress'>>, actorId: string, _readyActorId?: string | null) {
-  void _readyActorId;
+export function timelineMarkerPresentation(actors: Array<Pick<BattleActor, 'id' | 'progress'>>, actorId: string, readyActorId?: string | null) {
   const actor = actors.find((item) => item.id === actorId);
   if (!actor) return { progress: 0, shift: 0 };
-  const progress = visibleTimelineProgress(actor);
+  const progress = visibleTimelineProgress(actor, readyActorId);
+  if (actor.id === readyActorId) return { progress, shift: 0 };
   const cluster = actors
-    .filter((item) => Math.abs(visibleTimelineProgress(item) - progress) < 5)
-    .sort((left, right) => visibleTimelineProgress(left) - visibleTimelineProgress(right) || actors.findIndex((item) => item.id === left.id) - actors.findIndex((item) => item.id === right.id));
+    .filter((item) => Math.abs(visibleTimelineProgress(item, readyActorId) - progress) < 5)
+    .sort((left, right) => visibleTimelineProgress(left, readyActorId) - visibleTimelineProgress(right, readyActorId) || actors.findIndex((item) => item.id === left.id) - actors.findIndex((item) => item.id === right.id));
+  if (cluster.some((item) => item.id === readyActorId)) {
+    const waiting = cluster.filter((item) => item.id !== readyActorId);
+    const waitingRank = waiting.findIndex((item) => item.id === actorId);
+    return { progress, shift: -(waiting.length - waitingRank) * 20 };
+  }
   const rank = cluster.findIndex((item) => item.id === actorId);
   return { progress, shift: (rank - (cluster.length - 1) / 2) * 20 };
 }

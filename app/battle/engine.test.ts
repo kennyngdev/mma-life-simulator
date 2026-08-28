@@ -64,6 +64,27 @@ describe('battle engine', () => {
     expect(replanned.events.at(-1)).toEqual(expect.objectContaining({ type: 'action', actionId: 'basic' }));
   });
 
+  it('lets an exhausted enemy rest, recover inner power, and plan an affordable move', () => {
+    const restRules: BattleRules = { ...rules, actions: {
+      ...rules.actions,
+      heavy: { id: 'heavy', label: '重擊', target: 'random-foe', qiCost: 5, priority: 1, effects: [{ type: 'damage' }] },
+      rest: { id: 'rest', label: '調息', target: 'self', priority: -1, effects: [{ type: 'restore-qi', amount: 8, recipient: 'actor' }] },
+    } };
+    const state = createBattle(setup(), restRules);
+    const enemy = state.actors.find((item) => item.id === 'enemy')!;
+    enemy.actionIds = ['heavy', 'rest']; enemy.qi = 0; state.intents = [];
+    state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
+
+    const rested = reduceBattle(state, { type: 'advance' }, restRules);
+
+    expect(rested.events).toContainEqual(expect.objectContaining({
+      type: 'action', actorId: 'enemy', actionId: 'rest', targetId: 'enemy',
+      outcomes: [expect.objectContaining({ type: 'restore-qi', recipientId: 'enemy', amount: 8 })],
+    }));
+    expect(rested.state.actors.find((item) => item.id === 'enemy')?.qi).toBe(8);
+    expect(rested.state.intents.find((item) => item.actorId === 'enemy')?.actionId).toBe('heavy');
+  });
+
   it('can guard the actor while an attack targets an enemy', () => {
     const guardRules: BattleRules = { ...rules, actions: { ...rules.actions, guardedStrike: { id: 'guardedStrike', label: '護身擊', target: 'selected-enemy', effects: [{ type: 'damage' }, { type: 'guard', amount: 9, recipient: 'actor' }] } } };
     const state = createBattle(setup(), guardRules);
@@ -218,5 +239,54 @@ describe('battle engine', () => {
     const next = reduceBattle(state, { type: 'use-action', actionId: 'toxinFinisher', targetId: 'enemy' }, finisherRules).state;
     expect(next.actors.find((item) => item.id === 'enemy')?.statuses?.toxin).toBe(0);
     expect(next.actors.find((item) => item.id === 'enemy')?.hp).toBe(14);
+  });
+
+  it('uses a player turn to advance a progress objective', () => {
+    const state = createBattle({ ...setup(), objective: { type: 'progress', label: '開閘', description: '完成兩步', progress: 0, required: 2, actionLabel: '轉動機關', protectedActorIds: [], hostileActions: 0 } }, rules);
+    state.readyActorId = 'player';
+    const first = reduceBattle(state, { type: 'advance-objective' }, rules);
+    expect(first.state.objective.progress).toBe(1);
+    expect(first.state.actors.find((item) => item.id === 'player')?.actionsTaken).toBe(1);
+    expect(first.events).toContainEqual({ type: 'objective', label: '轉動機關', progress: 1, required: 2 });
+    first.state.readyActorId = 'player';
+    const second = reduceBattle(first.state, { type: 'advance-objective' }, rules);
+    expect(second.result).toBe('victory');
+  });
+
+  it('ends a leader objective when the named leader falls while others remain', () => {
+    const leaderSetup = setup();
+    leaderSetup.actors.push(actor('enemy-2', 'enemy', 'warrior'));
+    const state = createBattle({ ...leaderSetup, objective: { type: 'leader', label: '斬首', description: '擊倒頭目', progress: 0, required: 1, leaderId: 'enemy', protectedActorIds: [], hostileActions: 0 } }, rules);
+    state.readyActorId = 'player';
+    state.actors.find((item) => item.id === 'enemy')!.hp = 1;
+    const next = reduceBattle(state, { type: 'use-action', actionId: 'slash', targetId: 'enemy' }, rules);
+    expect(next.result).toBe('victory');
+    expect(next.state.actors.find((item) => item.id === 'enemy-2')?.hp).toBeGreaterThan(0);
+  });
+
+  it('wins a survival objective after the required hostile actions', () => {
+    const state = createBattle({ ...setup(), objective: { type: 'survive', label: '撐住', description: '撐過一次敵方行動', progress: 0, required: 1, protectedActorIds: [], hostileActions: 0 } }, rules);
+    state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
+    const next = reduceBattle(state, { type: 'advance' }, rules);
+    expect(next.state.objective.hostileActions).toBe(1);
+    expect(next.result).toBe('victory');
+  });
+
+  it('fails when a protected actor is already lost', () => {
+    const protectedSetup = setup();
+    protectedSetup.actors.push(actor('ward', 'ally', 'healer'));
+    const state = createBattle({ ...protectedSetup, objective: { type: 'progress', label: '撤離', description: '護住證人', progress: 0, required: 2, protectedActorIds: ['ward'], hostileActions: 0 } }, rules);
+    state.readyActorId = 'player';
+    state.actors.find((item) => item.id === 'ward')!.hp = 0;
+    const next = reduceBattle(state, { type: 'use-action', actionId: 'slash', targetId: 'enemy' }, rules);
+    expect(next.result).toBe('defeat');
+  });
+
+  it('fails a progress objective at its hostile-action deadline', () => {
+    const state = createBattle({ ...setup(), objective: { type: 'progress', label: '交付', description: '趕在追兵前完成', progress: 0, required: 3, protectedActorIds: [], hostileActions: 0, deadline: 1 } }, rules);
+    state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
+    const next = reduceBattle(state, { type: 'advance' }, rules);
+    expect(next.state.objective.hostileActions).toBe(1);
+    expect(next.result).toBe('defeat');
   });
 });
