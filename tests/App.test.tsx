@@ -45,6 +45,21 @@ function gameAtFinishMinigame(kind: FinishKind, attacker: 'player' | 'opponent' 
   return game
 }
 
+function gameAtFightResult(method: 'ko' | 'tko' | 'submission' | 'decision', finishingMoveId?: string): GameState {
+  const game = gameAtFinishMinigame(method === 'submission' ? 'submission' : 'strike')
+  game.phase = 'fight-result'
+  Object.assign(game.fight!, {
+    activeFinishWindow: undefined,
+    finished: true,
+    winner: 'player',
+    method,
+    finishRound: method === 'decision' ? undefined : 2,
+    finishingMoveId,
+    explanation: method === 'decision' ? '你拿下更多回合。' : '你把握終結機會完成收尾。',
+  })
+  return game
+}
+
 function gameAtBackControl(): GameState {
   const game = gameAtFinishMinigame('submission')
   const option = (id: string, label: string, category: CriticalOption['category'], executionName: string): CriticalOption => ({
@@ -182,6 +197,39 @@ describe('生涯重置', () => {
     for (const opponent of offeredOpponents) if (opponent.hometown) expect(screen.getAllByText(new RegExp(opponent.hometown)).length).toBeGreaterThan(0)
   })
 
+  it('邀約清楚解釋出場費、資金跑道與付費換約限制', async () => {
+    const game = createNewRun({ ...input, seed: 'ECONOMY-OFFER-UI' })
+    game.phase = 'offer'
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findAllByLabelText('出場費計算')).toHaveLength(3)
+    expect(screen.getAllByLabelText('出場費計算')[0]).toHaveTextContent('基礎')
+    expect(screen.getByText(/資金吃緊|有緩衝|可自主選擇/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '用積蓄等待另一組邀約' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /支付費用，查看新邀約/ })).toBeEnabled()
+  })
+
+  it('付費人生選項資金不足時會停用並顯示門檻，免費替代仍可選', async () => {
+    const game = createNewRun(input)
+    game.phase = 'life'
+    game.fighter.money = 0
+    game.lifeEvent = {
+      id: 'ui-medical', title: '身體發出的訊號', description: '你得決定如何處理傷勢。', personId: 'partner',
+      options: [
+        { id: 'doctor', label: '安排專科治療', detail: '快速可靠。', outcome: '完成治療。', effects: { money: -1_000, health: 8 }, minimumMoney: 1_000 },
+        { id: 'favor', label: '請拳館幫忙', detail: '欠下一份人情。', outcome: '拳館伸出援手。', effects: { trust: -4, health: 4 } },
+      ],
+    }
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const paid = await screen.findByRole('button', { name: /安排專科治療/ })
+    expect(paid).toBeDisabled()
+    expect(paid).toHaveTextContent('資金不足')
+    expect(screen.getByRole('button', { name: /請拳館幫忙/ })).toBeEnabled()
+  })
+
   it('切換遊戲畫面時將內容捲動位置重設到頂部', async () => {
     render(<App />)
 
@@ -200,18 +248,31 @@ describe('生涯重置', () => {
     })
   })
 
-  it('學習招式時顯示可用位置與最適攻防階段', async () => {
+  it('學習招式時清楚選定四選二，並顯示位置與最適攻防階段', async () => {
     const game = createNewRun(input)
     game.phase = 'training-reward'
     game.trainingMoveBranch = 'wrestling'
-    game.trainingMoveChoices = ['shot-entry']
+    game.trainingMoveChoices = ['shot-entry', 'level-change', 'body-lock-whizzer', 'collar-tie-club']
+    game.trainingMoveSelections = []
     storage.loadGame.mockResolvedValue({ game })
 
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: '把訓練變成你的招式' })).toBeInTheDocument()
-    expect(screen.getByText(/可用位置：遠距站立、近身交換/)).toBeInTheDocument()
-    expect(screen.getByText(/最適階段：交鋒/)).toBeInTheDocument()
+    const shotEntry = screen.getByRole('button', { name: /抱摔切入/ })
+    expect(shotEntry).toHaveTextContent(/可用位置：遠距站立、近身交換/)
+    expect(shotEntry).toHaveTextContent(/最適階段：交鋒/)
+    const confirm = screen.getByRole('button', { name: /學會這 2 招/ })
+    expect(confirm).toBeDisabled()
+    fireEvent.click(shotEntry)
+    fireEvent.click(screen.getByRole('button', { name: /變換高度/ }))
+    expect(screen.getByText('已選 2／2 招')).toBeInTheDocument()
+    expect(confirm).toBeEnabled()
+    fireEvent.click(confirm)
+    await waitFor(() => {
+      const saved = storage.saveGame.mock.calls.at(-1)?.[0] as GameState
+      expect(saved.fighter.learnedMoves).toEqual(expect.arrayContaining(['shot-entry', 'level-change']))
+    })
   })
 
   it('沒有新特質時顯示實戰進度而非科技樹', async () => {
@@ -228,17 +289,22 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: '繼續生涯' })).toBeInTheDocument()
   })
 
-  it('拳手狀態顯示技能、招式與天生特質', async () => {
+  it('拳手狀態顯示技能、0–100 能力、招式與天生特質', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
+    game.fighter.skills.boxing.xp = 600
+    game.fighter.skills.kicking.xp = 1_500
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: '拳手狀態' }))
-    expect(screen.getByText('技能與訓練')).toBeInTheDocument()
+    expect(screen.getByText('技能、能力與訓練')).toBeInTheDocument()
+    expect(screen.getByLabelText('拳擊能力 68 / 100')).toHaveTextContent('能力68/100')
+    expect(screen.getAllByLabelText(/能力 \d+ \/ 100/)).toHaveLength(5)
+    expect(screen.getByLabelText('拳擊強度 熟練')).toHaveTextContent('熟練')
+    expect(screen.getByLabelText('踢擊強度 大師')).toHaveTextContent('大師')
     expect(screen.getByText('已學招式')).toBeInTheDocument()
     expect(screen.getByText('特質')).toBeInTheDocument()
-    expect(screen.getAllByText(/Lv\./).length).toBeGreaterThanOrEqual(5)
   })
 
   it('狀態介面不再提供科技樹點數操作', async () => {
@@ -543,5 +609,72 @@ describe('生涯重置', () => {
     expect(dialog).toHaveTextContent('對手先取得主動位置')
     fireEvent.click(screen.getByRole('button', { name: '明白，開始攻防' }))
     expect(screen.queryByRole('dialog', { name: '你怎麼來到這個位置？' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['ko', 'haymaker', '擊倒', '重擺拳'],
+    ['tko', 'haymaker', '裁判終止', '重擺拳'],
+    ['submission', 'front-headlock-guillotine', '降服', '前頸斷頭台'],
+  ] as const)('玩家以 %s 終結時顯示勝利儀式、解說與教練稱讚', async (method, moveId, methodText, moveText) => {
+    const game = gameAtFightResult(method, moveId)
+    const opponent = game.opponents.find((item) => item.id === game.fight!.opponentId)!
+    const coach = game.fighter.relationships.find((item) => item.role === 'coach')!
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const celebration = await screen.findByLabelText('終結勝利')
+    expect(celebration).toHaveTextContent('FINISH VICTORY')
+    expect(celebration).toHaveTextContent(methodText)
+    expect(celebration).toHaveTextContent('第 2 回合')
+    expect(celebration).toHaveTextContent(moveText)
+    expect(screen.getByText('解說台').closest('article')).toHaveTextContent(game.fighter.name)
+    expect(screen.getByText('解說台').closest('article')).toHaveTextContent(opponent.name)
+    expect(screen.getByText('解說台').closest('article')).toHaveTextContent(moveText)
+    expect(screen.getByText(coach.name).closest('article')).toHaveTextContent(moveText)
+  })
+
+  it('判定勝保留克制版型，不顯示終結慶祝', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtFightResult('decision') })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '你贏了' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('終結勝利')).not.toBeInTheDocument()
+    expect(screen.getByText('W').closest('.verdict')).toBeInTheDocument()
+  })
+
+  it('缺少終結招式資料時使用自然的稱讚 fallback', async () => {
+    const game = gameAtFightResult('submission')
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const celebration = await screen.findByLabelText('終結勝利')
+    expect(celebration).toHaveTextContent('這次降服')
+    expect(document.body).not.toHaveTextContent('undefined')
+  })
+
+  it('緊張關係的教練仍給予簡短明確的肯定', async () => {
+    const game = gameAtFightResult('tko', 'haymaker')
+    game.fighter.relationships.find((item) => item.role === 'coach')!.trust = 30
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    await screen.findByLabelText('終結勝利')
+    expect(screen.getByText(/今晚，你做對了/)).toBeInTheDocument()
+  })
+
+  it('完整戰報以帶箭頭的可展開控制呈現', async () => {
+    const game = gameAtFightResult('tko', 'haymaker')
+    game.fight!.commentary = ['終結前的完整攻防紀錄。']
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const summary = (await screen.findByText('完整戰報')).closest('summary')!
+    const details = summary.closest('details')!
+    expect(summary).toHaveAccessibleName('完整戰報')
+    expect(summary.querySelector('.fight-log-arrow')).toHaveAttribute('aria-hidden', 'true')
+    expect(details).not.toHaveAttribute('open')
+    fireEvent.click(summary)
+    expect(details).toHaveAttribute('open')
+    expect(screen.getByText('終結前的完整攻防紀錄。')).toBeInTheDocument()
   })
 })

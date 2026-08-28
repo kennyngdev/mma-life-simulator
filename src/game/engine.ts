@@ -114,6 +114,32 @@ function stageFor(fights: number, experience: StartingExperience = 'hobbyist'): 
   return 'legacy'
 }
 
+function roundMoney(value: number): number {
+  return Math.max(0, Math.round(value / 100) * 100)
+}
+
+function isLocalStage(stage: Stage): boolean {
+  return stage === 'grassroots' || stage === 'amateur' || stage === 'regional'
+}
+
+export function typicalPurseForFighter(fighter: FighterState): number {
+  const stage = stageFor(fighter.evidence.fights, fighter.startingExperience)
+  const base = stage === 'grassroots' ? 1_000 : 4_000 + fighter.evidence.fights * 3_500
+  const regionalMultiplier = isLocalStage(stage) ? REGION_PROFILES[fighter.region].economyMultiplier : 1
+  return roundMoney(base * regionalMultiplier)
+}
+
+export function offerRefreshCost(fighter: FighterState): number {
+  return roundMoney(typicalPurseForFighter(fighter) * 0.35)
+}
+
+export function careerRunwayLabel(fighter: FighterState): '資金吃緊' | '有緩衝' | '可自主選擇' {
+  const purse = Math.max(1, typicalPurseForFighter(fighter))
+  if (fighter.money < purse * 0.5) return '資金吃緊'
+  if (fighter.money < purse * 1.5) return '有緩衝'
+  return '可自主選擇'
+}
+
 export const STAGE_LABELS: Record<Stage, string> = {
   grassroots: '草根試煉',
   amateur: '業餘起步',
@@ -285,9 +311,9 @@ export function createNewRun(input: NewRunInput): GameState {
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 11, rulesVersion: '0.7.0', contentVersion: '1.0.0', seed: input.seed.trim().toUpperCase(),
+    saveVersion: 12, rulesVersion: '0.9.0', contentVersion: '1.2.0', seed: input.seed.trim().toUpperCase(),
     phase: 'reveal', stage: stageFor(0, startingExperience), fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
-    campActions: [], campDrillHistory: [], scouting: 0,
+    offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
 }
 
@@ -375,13 +401,19 @@ function generateOpponents(fighter: FighterState, streams: RngStreams, count: nu
   return { opponents, rng }
 }
 
-function generateOffers(fighter: FighterState, opponents: Opponent[], streams: RngStreams): { offers: FightOffer[]; rng: RngStreams } {
+function riskPurseMultiplier(risk: RiskLabel): number {
+  return ({ '低風險': 0.85, '中度風險': 1, '高風險': 1.15, '極高風險': 1.3, '絕望': 1.5 } as const)[risk]
+}
+
+function generateOffers(fighter: FighterState, opponents: Opponent[], streams: RngStreams, excludedOpponentIds: string[] = []): { offers: FightOffer[]; rng: RngStreams } {
   let rng = streams
   const fights = fighter.evidence.fights
   const rating = averageRating(fighter)
   const eligible = opponents.filter((opponent) => opponent.meetings < 2 || opponent.relationship > 25)
-  const fresh = eligible.filter((opponent) => opponent.meetings === 0)
-  const candidatePool = fresh.length >= 3 ? fresh : eligible
+  const alternatives = eligible.filter((opponent) => !excludedOpponentIds.includes(opponent.id))
+  const replacementPool = alternatives.length >= 3 ? alternatives : eligible
+  const fresh = replacementPool.filter((opponent) => opponent.meetings === 0)
+  const candidatePool = fresh.length >= 3 ? fresh : replacementPool
   const selected: Opponent[] = []
   const roles: Array<{ min: number; max: number; target: number }> = [
     { min: -6, max: -1, target: -3.5 },
@@ -405,17 +437,26 @@ function generateOffers(fighter: FighterState, opponents: Opponent[], streams: R
     }
   }
   const stage = stageFor(fights, fighter.startingExperience)
-  const localStage = stage === 'grassroots' || stage === 'amateur' || stage === 'regional'
-  const localPromotions = localStage ? REGION_PROFILES[fighter.region].promotions[stage] : undefined
+  const localStage = isLocalStage(stage)
+  const localPromotions = stage === 'grassroots' || stage === 'amateur' || stage === 'regional'
+    ? REGION_PROFILES[fighter.region].promotions[stage]
+    : undefined
   const promotion = localPromotions?.[fights % localPromotions.length] ?? (stage === 'asia' ? '東亞戰線' : '世界鐵籠系列')
   const offers = selected.map((opponent, index): FightOffer => {
     const gap = opponent.rating - rating
     const titleFight = fights >= 10 && fighter.wins >= 8 && index === 0
+    const shortNotice = index === 1 && fights > 2
+    const riskLabel = riskLabelForGap(gap)
+    const base = typicalPurseForFighter(fighter)
+    const riskAdjustment = roundMoney(Math.abs(base * (riskPurseMultiplier(riskLabel) - 1))) * (riskPurseMultiplier(riskLabel) < 1 ? -1 : 1)
+    const shortNoticePremium = shortNotice ? roundMoney(base * 0.2) : 0
+    const titleBonus = titleFight ? 20_000 : 0
     return {
       id: `offer-${fights}-${opponent.id}`, opponentId: opponent.id, promotion,
-      purse: Math.round(((stage === 'grassroots' ? 1_000 + index * 500 : 4_000 + fights * 3_500 + (titleFight ? 20_000 : 0)) * (localStage ? REGION_PROFILES[fighter.region].economyMultiplier : 1)) / 100) * 100,
-      rankReward: clamp(2 + (fighter.ranking - opponent.rank) * 0.22, 2, 6), riskLabel: riskLabelForGap(gap),
-      titleFight, shortNotice: index === 1 && fights > 2,
+      purse: Math.max(500, base + riskAdjustment + shortNoticePremium + titleBonus),
+      purseBreakdown: { base, riskAdjustment, shortNoticePremium, titleBonus },
+      rankReward: clamp(2 + (fighter.ranking - opponent.rank) * 0.22, 2, 6), riskLabel,
+      titleFight, shortNotice,
       venueRegion: localStage ? fighter.region : undefined,
       opponentIsLocal: localStage && opponent.originRegion === fighter.region,
     }
@@ -454,10 +495,17 @@ export function riskLabelForGap(gap: number): RiskLabel {
 
 function createLifeEvent(state: GameState): [LifeEvent, RngStreams] {
   let rng = state.rng
+  const selectedOffer = state.offers.find((offer) => offer.id === state.selectedOfferId)
+  const historyHasTag = (tag: string) => state.fighter.history.some((entry) => entry.tags.includes(tag))
+  const lateCareer = state.fighter.evidence.fights >= Math.max(7, state.fighter.careerFightTarget - 3)
+  if (!state.offerRefreshUsed && lateCareer && !historyHasTag('傳承')) return [createLegacyLifeEvent(state), rng]
+  if (!state.offerRefreshUsed && selectedOffer && (selectedOffer.shortNotice || (!isLocalStage(state.stage) && !historyHasTag('客場後勤')))) {
+    return [createLogisticsLifeEvent(state), rng]
+  }
   const earlyRegionalStage = state.stage === 'grassroots' || state.stage === 'amateur' || state.stage === 'regional'
-  if (earlyRegionalStage && state.fighter.evidence.fights % 2 === 1) return [createRegionalLifeEvent(state), rng]
+  if (!state.offerRefreshUsed && earlyRegionalStage && state.fighter.evidence.fights % 2 === 1) return [createRegionalLifeEvent(state), rng]
   let roll: number
-  ;[roll, rng] = drawInt(rng, 'events', 0, 2)
+  ;[roll, rng] = drawInt(rng, 'events', 0, state.offerRefreshUsed ? 1 : 2)
   const relationship = state.fighter.relationships[roll]
   const templates: LifeEvent[] = [
     {
@@ -478,14 +526,49 @@ function createLifeEvent(state: GameState): [LifeEvent, RngStreams] {
     },
     {
       id: `health-${state.fighter.evidence.fights}`, title: '身體發出的訊號', personId: 'partner',
-      description: `${relationship.name}發現你每次對練完，都會不自覺地揉著身上傷得最重的地方。你可以現在花錢治療，也可以先撐過這場比賽再說。`,
+      description: `${relationship.name}發現你每次對練完，都會不自覺地揉著身上傷得最重的地方。你可以花錢換取確定的治療，也可以欠拳館一份人情，或把風險帶進比賽。`,
       options: [
-        { id: 'doctor', label: '安排檢查與治療', detail: '你付了醫療費，身上最嚴重的傷勢有所好轉。', outcome: '檢查結果不算嚴重，但治療師要求你暫停最激烈的訓練。幾天後疼痛終於退去，你也不再需要假裝一切正常。', effects: { trust: 4, money: -Math.round(2200 * REGION_PROFILES[state.fighter.region].economyMultiplier / 100) * 100, health: 8, fatigue: -4 } },
-        { id: 'hide', label: '照原計畫出賽', detail: '你省下醫療費，但得帶著傷勢和不安走進鐵籠。', outcome: '你笑著說只是普通痠痛，然後照常把護具塞進背包。沒有人再追問，但那個受傷的部位在每次發力時都提醒你代價還在。', effects: { trust: -4, money: 0, health: -2, readiness: -5 } },
+        { id: 'doctor', label: '安排專科治療', detail: '付費換取快速、可靠的治療，不必欠任何人情。', outcome: '檢查結果不算嚴重，但治療師要求你暫停最激烈的訓練。幾天後疼痛終於退去，你也不再需要假裝一切正常。', effects: { money: -roundMoney(typicalPurseForFighter(state.fighter) * 0.35), health: 9, fatigue: -5 }, minimumMoney: roundMoney(typicalPurseForFighter(state.fighter) * 0.35), historyTags: ['金錢', '醫療'], importance: 2 },
+        { id: 'gym-help', label: '請拳館幫忙', detail: '先不付錢，由拳館介紹熟識的治療師；恢復較有限，也欠下一份人情。', outcome: `${relationship.name}替你打了幾通電話，找到願意先處理傷勢的治療師。疼痛沒有完全消失，但你記得拳館替你墊下的這份人情。`, effects: { trust: -5, health: 5, fatigue: -2, readiness: -1 }, historyTags: ['人情', '醫療'], importance: 2 },
+        { id: 'hide', label: '照原計畫出賽', detail: '保留資金與人情，但得帶著傷勢和不安走進鐵籠。', outcome: '你笑著說只是普通痠痛，然後照常把護具塞進背包。沒有人再追問，但那個受傷的部位在每次發力時都提醒你代價還在。', effects: { trust: -4, health: -2, readiness: -5 }, historyTags: ['帶傷'], importance: 2 },
       ],
     },
   ]
   return [templates[roll], rng]
+}
+
+function createLogisticsLifeEvent(state: GameState): LifeEvent {
+  const fighter = state.fighter
+  const offer = state.offers.find((item) => item.id === state.selectedOfferId)
+  const partner = fighter.relationships.find((item) => item.role === 'partner')!
+  const cost = roundMoney(typicalPurseForFighter(fighter) * 0.15)
+  const shortNotice = offer?.shortNotice ?? false
+  return {
+    id: `logistics-${fighter.evidence.fights + 1}`, title: shortNotice ? '臨時出發的後勤' : '第一次遠征的後勤', personId: partner.id,
+    description: shortNotice
+      ? `比賽臨時敲定，交通、住宿和恢復全擠在一起。${partner.name}問你要花錢把混亂整理好，還是讓團隊一起扛。`
+      : `離開熟悉的賽事圈後，交通、住宿與恢復都不再理所當然。${partner.name}問你想用什麼代價換取這次遠征。`,
+    options: [
+      { id: 'professional', label: '自費安排完整後勤', detail: '支付一筆小額費用，減少旅途疲勞並保住備戰節奏。', outcome: '你把交通、住宿和恢復時段一次安排妥當。錢包變薄了，但抵達會場時，身體沒有替混亂付帳。', effects: { money: -cost, fatigue: -5, readiness: 3 }, minimumMoney: cost, historyTags: ['金錢', '客場後勤'], importance: 2 },
+      { id: 'team-help', label: '請團隊一起扛', detail: '不花錢，但陪練得替你處理行程；你會欠下一份人情。', outcome: `${partner.name}一路確認車票、住宿和訓練時間。你安全抵達了，也知道這趟遠征不是靠自己一個人完成的。`, effects: { trust: -4, fatigue: -1, readiness: 1 }, historyTags: ['人情', '客場後勤'], importance: 2 },
+      { id: 'standard', label: '接受標準安排', detail: '不花錢也不求人；行程仍可完成，但身體要承受一些奔波。', outcome: '你照著賽事方的基本安排出發，在候車室和陌生床鋪之間維持訓練。旅程沒有失控，只是身體比預期更沉。', effects: { fatigue: 3, readiness: -2 }, historyTags: ['客場後勤'], importance: 1 },
+    ],
+  }
+}
+
+function createLegacyLifeEvent(state: GameState): LifeEvent {
+  const fighter = state.fighter
+  const coach = fighter.relationships.find((item) => item.role === 'coach')!
+  const cost = roundMoney(typicalPurseForFighter(fighter))
+  return {
+    id: `legacy-${fighter.evidence.fights + 1}`, title: '拳館留下來的東西', personId: coach.id,
+    description: `${coach.name}說，拳館的舊器材撐不了幾年了，而幾個剛入門的孩子正需要一個能繼續練下去的地方。你的生涯已經走到可以決定留下什麼的時候。`,
+    options: [
+      { id: 'fund-gym', label: '出資整修家鄉拳館', detail: '投入約一場正常出場費，換來的不是戰力，而是一個會記住你的地方。', outcome: `你用生涯收入替${fighter.hometown}的拳館換上新墊子與護具。後來進門的年輕拳手未必看過你的比賽，卻每天踩在你留下的地方訓練。`, effects: { money: -cost, trust: 10, reputation: 7 }, minimumMoney: cost, historyTags: ['金錢', '傳承', '拳館'], importance: 3 },
+      { id: 'mentor', label: '親自陪後輩訓練', detail: '保留積蓄，以時間和身體把經驗傳下去。', outcome: '你沒有開支票，而是一次次留到閉館，把那些曾有人教過你的細節交給下一批人。', effects: { trust: 7, fatigue: 6, readiness: -2, reputation: 3 }, historyTags: ['傳承', '陪伴'], importance: 3 },
+      { id: 'security', label: '把積蓄留給退役生活', detail: '不必為沒有捐出去而道歉；保住選擇權也是一種人生決定。', outcome: '你坦白說，這些錢要留給傷後生活與家人。拳館沒有因此關門，而你第一次替離開鐵籠之後的自己做了準備。', effects: { trust: 1 }, historyTags: ['傳承', '安穩'], importance: 3 },
+    ],
+  }
 }
 
 function createRegionalLifeEvent(state: GameState): LifeEvent {
@@ -617,6 +700,14 @@ function moveForTraining(id: string): FightMoveDefinition {
 
 function uniqueMoves(moves: FightMoveDefinition[]): FightMoveDefinition[] {
   return [...new Map(moves.map((move) => [move.id, move])).values()]
+}
+
+const TRAINING_FOUNDATION_IDS: Record<Branch, string[]> = {
+  boxing: ['jab-cross', 'attack-body'],
+  kicking: ['damage-base', 'front-kick'],
+  clinch: ['enter-clinch', 'clinch-short-knee'],
+  wrestling: ['shot-entry', 'level-change'],
+  ground: ['rebuild-guard', 'guard-kimura'],
 }
 
 function padMovePool(state: GameState, branch: Branch): FightMoveDefinition[] {
@@ -757,6 +848,7 @@ function applyCampDrill(state: GameState, score: number): GameState {
   let rng = state.rng
   let scouting = state.scouting
   let trainingMoveChoices: string[] | undefined
+  let trainingMoveSelections: string[] | undefined
   let trainingMoveBranch: Branch | undefined
   if (action === 'technique') {
     const progress = fighter.skills[focus]
@@ -772,18 +864,19 @@ function applyCampDrill(state: GameState, score: number): GameState {
     if (levelAfter > levelBefore) effects.push(`技能升級：Lv.${levelBefore} → Lv.${levelAfter}`)
     const learned = new Set(fighter.learnedMoves)
     let candidates = movesForBranch(focus, levelAfter).filter((move) => !learned.has(move.id))
-    const requiredGroundEscape = levelBefore === 0 && focus === 'ground'
-      ? candidates.find((move) => move.id === 'rebuild-guard') ?? candidates.find((move) => move.id === 'hip-escape')
-      : undefined
+    const foundations = TRAINING_FOUNDATION_IDS[focus]
+      .map((id) => candidates.find((move) => move.id === id))
+      .filter((move): move is FightMoveDefinition => Boolean(move))
     const priority = candidates.filter((move) => minimumMoveLevel(move) === levelAfter)
     const rest = candidates.filter((move) => minimumMoveLevel(move) !== levelAfter)
     let shuffledPriority: typeof priority
     let shuffledRest: typeof rest
     ;[shuffledPriority, rng] = shuffle(priority, rng)
     ;[shuffledRest, rng] = shuffle(rest, rng)
-    trainingMoveChoices = [requiredGroundEscape, ...shuffledPriority, ...shuffledRest]
+    trainingMoveChoices = [...foundations, ...shuffledPriority, ...shuffledRest]
       .filter((move, index, items): move is FightMoveDefinition => Boolean(move) && items.findIndex((item) => item?.id === move?.id) === index)
-      .slice(0, 3).map((move) => move.id)
+      .slice(0, 4).map((move) => move.id)
+    trainingMoveSelections = trainingMoveChoices.length ? [] : undefined
     trainingMoveBranch = focus
     fighter.fatigue = clamp(fighter.fatigue + 7 + repeats * 4)
     effects.push(`疲勞 +${7 + repeats * 4}`)
@@ -815,7 +908,7 @@ function applyCampDrill(state: GameState, score: number): GameState {
   return {
     ...state, fighter, rng, scouting, campActions, lifeEvent,
     campDrillHistory: [...state.campDrillHistory, outcome], campDrillOutcome: outcome,
-    trainingMoveChoices, trainingMoveBranch,
+    trainingMoveChoices, trainingMoveSelections, trainingMoveBranch,
     lastMessage: `${outcome.label}：${outcome.summary}`,
   }
 }
@@ -836,12 +929,28 @@ function acknowledgeCampDrill(state: GameState): GameState {
     : { ...afterDrill, phase: 'camp' }
 }
 
-function learnTrainingMove(state: GameState, moveId: string): GameState {
+function toggleTrainingMove(state: GameState, moveId: string): GameState {
   if (state.phase !== 'training-reward' || !state.trainingMoveChoices?.includes(moveId)) return state
   const move = FIGHT_INTENTS.find((item) => item.id === moveId)
   if (!move || move.branch !== state.trainingMoveBranch || state.fighter.learnedMoves.includes(moveId)) return state
-  const fighter = { ...state.fighter, learnedMoves: [...state.fighter.learnedMoves, moveId] }
-  const cleared = { ...state, fighter, trainingMoveChoices: undefined, trainingMoveBranch: undefined, lastMessage: `你學會了「${move.label}」。下一場比賽就能使用。` }
+  const selected = state.trainingMoveSelections ?? []
+  if (selected.includes(moveId)) return { ...state, trainingMoveSelections: selected.filter((id) => id !== moveId) }
+  const required = Math.min(2, state.trainingMoveChoices.length)
+  if (selected.length >= required) return state
+  return { ...state, trainingMoveSelections: [...selected, moveId] }
+}
+
+function confirmTrainingMoves(state: GameState): GameState {
+  if (state.phase !== 'training-reward' || !state.trainingMoveChoices?.length) return state
+  const selected = state.trainingMoveSelections ?? []
+  const required = Math.min(2, state.trainingMoveChoices.length)
+  if (selected.length !== required || selected.some((id) => !state.trainingMoveChoices?.includes(id))) return state
+  const moves = selected.map((id) => FIGHT_INTENTS.find((move) => move.id === id))
+  if (moves.some((move) => !move || move.branch !== state.trainingMoveBranch || state.fighter.learnedMoves.includes(move.id))) return state
+  const learnedMoves = moves as FightMoveDefinition[]
+  const fighter = { ...state.fighter, learnedMoves: [...state.fighter.learnedMoves, ...learnedMoves.map((move) => move.id)] }
+  const learnedLabels = learnedMoves.map((move) => `「${move.label}」`).join('、')
+  const cleared = { ...state, fighter, trainingMoveChoices: undefined, trainingMoveSelections: undefined, trainingMoveBranch: undefined, lastMessage: `你學會了${learnedLabels}。下一場比賽就能使用。` }
   return state.campActions.length >= 3 ? { ...cleared, phase: 'life' } : { ...cleared, phase: 'camp' }
 }
 
@@ -1936,6 +2045,7 @@ function processFightResult(state: GameState): GameState {
     opponents,
     rng: offerResult.rng,
     offers: offerResult.offers,
+    offerRefreshUsed: false,
     stage: nextStage,
     phase: 'growth',
     growthDestination: shouldRetire ? 'retirement' : 'offer',
@@ -1961,6 +2071,7 @@ function makeBiography(state: GameState): Biography {
   const title = fighter.wins >= 11 ? '在國際舞台登頂的冠軍' : fighter.wins > fighter.losses ? '打出自己風格的職業拳手' : '一次次敗退，卻從未停止上場的人'
   const definingPerson = fighter.relationships.sort((a, b) => b.trust - a.trust)[0]
   const style = hybrid?.name ?? `${BRANCH_META[(Object.entries(fighter.technique) as Array<[Branch, number]>).sort((a, b) => b[1] - a[1])[0][0]].name}專家`
+  const financialLegacy = [...fighter.history].reverse().find((entry) => entry.tags.includes('傳承'))?.summary
   return {
     id: `bio-${state.seed}-${fighter.evidence.fights}`, seed: state.seed, name: fighter.name, region: fighter.region,
     hometown: fighter.hometown, alias: fighter.alias,
@@ -1969,7 +2080,7 @@ function makeBiography(state: GameState): Biography {
     turningPoints: important, unlockedNodes: fighter.unlockedNodes,
     startingExperience: fighter.startingExperience,
     finalSkills: Object.fromEntries(BRANCHES.map((branch) => [branch, skillLevel(fighter.skills[branch].xp)])) as Biography['finalSkills'],
-    learnedMoves: fighter.learnedMoves, traits: fighter.traits,
+    learnedMoves: fighter.learnedMoves, traits: fighter.traits, financialLegacy,
     retiredAt: fighter.age, createdAt: Date.UTC(fighter.year, 0, fighter.evidence.fights + 1),
   }
 }
@@ -2007,7 +2118,25 @@ function declineOffers(state: GameState): GameState {
   const fighter = { ...state.fighter, age: state.fighter.age + 1, year: state.fighter.year + 1, ranking: clamp(state.fighter.ranking + 3, 1, 99), promoterTrust: clamp(state.fighter.promoterTrust - 8), fatigue: clamp(state.fighter.fatigue - 18) }
   if (fighter.age >= 38) return retireGame({ ...state, fighter }, 'age-limit')
   const offerResult = generateOffers(fighter, state.opponents, state.rng)
-  return { ...state, fighter, rng: offerResult.rng, offers: offerResult.offers, lastMessage: '你拒絕了所有邀約。身體得到休息，但排名下滑，聯盟也漸漸失去耐心。' }
+  return { ...state, fighter, rng: offerResult.rng, offers: offerResult.offers, offerRefreshUsed: false, lastMessage: '你拒絕了所有邀約。身體得到休息，但排名下滑，聯盟也漸漸失去耐心。' }
+}
+
+function purchaseOfferRefresh(state: GameState): GameState {
+  if (state.phase !== 'offer' || state.offerRefreshUsed) return state
+  const cost = offerRefreshCost(state.fighter)
+  if (state.fighter.money < cost) return { ...state, lastMessage: `目前資金不足，無法支付 ${formatRegionalMoney(cost, state.fighter.region)} 的合約安排費。` }
+  const previousOpponentIds = state.offers.map((offer) => offer.opponentId)
+  const offerResult = generateOffers(state.fighter, state.opponents, state.rng, previousOpponentIds)
+  const fighter = structuredClone(state.fighter)
+  fighter.money -= cost
+  fighter.promoterTrust = clamp(fighter.promoterTrust - 3)
+  fighter.history.push({
+    id: `contract-freedom-${fighter.evidence.fights + 1}`, year: fighter.year, age: fighter.age,
+    title: '用積蓄換取選擇權',
+    summary: `你支付 ${formatRegionalMoney(cost, fighter.region)} 處理合約與營隊空窗，拒絕原本三份邀約而沒有浪費整整一年。聯盟並不高興，但新的對手名單來到了桌上。`,
+    people: [], importance: 2, tags: ['金錢', '合約'],
+  })
+  return { ...state, fighter, rng: offerResult.rng, offers: offerResult.offers, offerRefreshUsed: true, lastMessage: '你用積蓄保住了時間，也換來一組新的對手選擇。' }
 }
 
 export function advance(state: GameState, command: GameCommand): TransitionResult {
@@ -2022,41 +2151,50 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
     lastMessage: state.fighter.startingExperience === 'normie' ? '先在草根試煉活下來，再談成為職業拳手。' : '你的起步能力已經確定，現在選擇第一個對手。',
   }
   else if (command.type === 'SELECT_OFFER') next = selectOffer(state, command.offerId)
+  else if (command.type === 'PURCHASE_OFFER_REFRESH') next = purchaseOfferRefresh(state)
   else if (command.type === 'DECLINE_OFFERS') next = declineOffers(state)
   else if (command.type === 'START_CAMP_DRILL') next = startCampDrill(state, command.action, command.branch, command.relaxedTiming)
   else if (command.type === 'RESOLVE_CAMP_DRILL') next = resolveCampDrill(state, command.result)
   else if (command.type === 'ACK_CAMP_DRILL_RESULT') next = acknowledgeCampDrill(state)
-  else if (command.type === 'LEARN_TRAINING_MOVE') next = learnTrainingMove(state, command.moveId)
+  else if (command.type === 'TOGGLE_TRAINING_MOVE') next = toggleTrainingMove(state, command.moveId)
+  else if (command.type === 'CONFIRM_TRAINING_MOVES') next = confirmTrainingMoves(state)
   else if (command.type === 'CANCEL_CAMP_DRILL' && state.phase === 'camp-drill' && !state.campDrillOutcome) next = { ...state, phase: 'camp', activeCampDrill: undefined, lastMessage: '訓練尚未計入，你可以重新安排這個時段。' }
   else if (command.type === 'RESOLVE_LIFE' && state.phase === 'life' && state.lifeEvent) {
     const event = state.lifeEvent
     const option = event.options.find((item) => item.id === command.optionId)
     if (option) {
-      let fighter = structuredClone(state.fighter)
-      fighter = updateRelationship(fighter, event.personId, option.effects.trust ?? 0, `${event.title}：${option.label}`)
-      fighter.fatigue = clamp(fighter.fatigue + (option.effects.fatigue ?? 0))
-      fighter.readiness = clamp(fighter.readiness + (option.effects.readiness ?? 0))
-      fighter.money = Math.max(0, fighter.money + (option.effects.money ?? 0))
-      if (option.effects.health) {
-        const weakest = (Object.keys(fighter.health) as HealthPart[]).sort((a, b) => fighter.health[a] - fighter.health[b])[0]
-        fighter.health[weakest] = clamp(fighter.health[weakest] + option.effects.health)
-      }
-      fighter.history.push({ id: event.id, year: fighter.year, age: fighter.age, title: event.title, summary: option.outcome ?? option.detail, people: [fighter.relationships.find((item) => item.id === event.personId)?.name ?? ''], importance: event.region ? 2 : 1, tags: event.region ? ['人生', '家鄉', REGION_LABELS[event.region]] : ['人生'] })
-      const personName = fighter.relationships.find((item) => item.id === event.personId)?.name ?? '重要的人'
-      next = {
-        ...state,
-        fighter,
-        phase: 'growth',
-        growthDestination: 'weight',
-        insightGained: undefined,
-        lifeEventResult: {
-          eventTitle: event.title,
-          optionLabel: option.label,
-          personName,
-          story: option.outcome ?? option.detail,
-          effects: option.effects,
-        },
-        lastMessage: option.detail,
+      const requiredMoney = option.minimumMoney ?? Math.max(0, -(option.effects.money ?? 0))
+      if (state.fighter.money < requiredMoney) {
+        next = { ...state, lastMessage: `資金不足：這個選擇需要 ${formatRegionalMoney(requiredMoney, state.fighter.region)}。` }
+      } else {
+        let fighter = structuredClone(state.fighter)
+        fighter = updateRelationship(fighter, event.personId, option.effects.trust ?? 0, `${event.title}：${option.label}`)
+        fighter.fatigue = clamp(fighter.fatigue + (option.effects.fatigue ?? 0))
+        fighter.readiness = clamp(fighter.readiness + (option.effects.readiness ?? 0))
+        fighter.reputation = clamp(fighter.reputation + (option.effects.reputation ?? 0))
+        fighter.money += option.effects.money ?? 0
+        if (option.effects.health) {
+          const weakest = (Object.keys(fighter.health) as HealthPart[]).sort((a, b) => fighter.health[a] - fighter.health[b])[0]
+          fighter.health[weakest] = clamp(fighter.health[weakest] + option.effects.health)
+        }
+        const baseTags = event.region ? ['人生', '家鄉', REGION_LABELS[event.region]] : ['人生']
+        fighter.history.push({ id: event.id, year: fighter.year, age: fighter.age, title: event.title, summary: option.outcome ?? option.detail, people: [fighter.relationships.find((item) => item.id === event.personId)?.name ?? ''], importance: option.importance ?? (event.region ? 2 : 1), tags: [...baseTags, ...(option.historyTags ?? [])] })
+        const personName = fighter.relationships.find((item) => item.id === event.personId)?.name ?? '重要的人'
+        next = {
+          ...state,
+          fighter,
+          phase: 'growth',
+          growthDestination: 'weight',
+          insightGained: undefined,
+          lifeEventResult: {
+            eventTitle: event.title,
+            optionLabel: option.label,
+            personName,
+            story: option.outcome ?? option.detail,
+            effects: option.effects,
+          },
+          lastMessage: option.detail,
+        }
       }
     }
   } else if (command.type === 'ACK_LIFE_RESULT' && state.lifeEventResult) {

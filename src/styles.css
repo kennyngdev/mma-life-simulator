@@ -76,6 +76,8 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .choice-row small { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line); color: #cabfae; font-size: 10px; line-height: 1.5; }
 .choice-row em { margin-top: 7px; color: var(--gold); font: 500 11px/1.4 "IBM Plex Mono", monospace; font-style: normal; }
 .choice-row em.relationship-change { color: #f4b392; }
+.choice-row:disabled { opacity: .72; cursor: not-allowed; }
+.choice-row em.unavailable-reason { color: #ef9a88; font-weight: 700; }
 .event-option-effects { margin-top: 9px; display: flex; flex-wrap: wrap; gap: 5px; }
 .event-option-effects b { padding: 4px 6px; border-radius: 5px; color: #ead9bd; background: rgb(215 189 131 / .09); font-size: 11px; }
 .seed-row { margin-top: 22px; }
@@ -170,7 +172,13 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .offer-card > .coach-verdict { margin-top: 10px; padding: 9px 10px; color: #cfc2af; background: rgb(215 189 131 / .055); font-size: 12px; line-height: 1.6; }
 .offer-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 13px 0; }
 .offer-meta span { padding: 5px 7px; border-radius: 6px; color: var(--gold); background: rgb(215 189 131 / .09); font-size: 11px; }
+.purse-breakdown { margin: -6px 0 13px !important; color: #bcae99 !important; font-size: 11px !important; line-height: 1.55; }
 .choice-confirm { min-height: 48px; color: var(--ink); background: var(--surface-3); border: 1px solid var(--line-bright); }
+.contract-freedom { margin: 18px 0 4px; padding: 16px; border: 1px solid rgb(215 189 131 / .34); border-radius: var(--radius); background: linear-gradient(145deg, rgb(215 189 131 / .1), var(--surface)); }
+.contract-freedom > span { color: var(--gold); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+.contract-freedom h3 { margin: 5px 0 6px; font-size: 18px; }
+.contract-freedom p { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.contract-freedom .choice-confirm:disabled { opacity: .64; }
 .memory-callout { margin: 12px 0 !important; padding: 10px 12px; border-left: 2px solid var(--gold); color: #d5c6a7 !important; background: rgb(215 189 131 / .06); line-height: 1.5; }
 .status-region-card { padding: 15px; border: 1px solid rgb(215 189 131 / .3); border-radius: 12px; background: rgb(215 189 131 / .06); }
 .status-region-card > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -630,15 +638,58 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .scorecards > div { padding: 8px; display: flex; justify-content: center; gap: 5px; border: 1px solid var(--line); background: var(--surface); font: 600 11px "IBM Plex Mono", monospace; }
 .scorecards span { color: var(--dim); }
 .scorecards i { color: var(--dim); font-style: normal; }
-.fight-log { margin-top: 12px; border-block: 1px solid var(--line); }
-.fight-log summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; color: var(--muted); font-size: 13px; }
-.fight-log p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.fight-result-screen.finish-victory > .screen-title { text-align: center; }
+.fight-result-screen.finish-victory > .screen-title p { color: var(--gold); }
+.fight-result-screen.finish-victory > .screen-title h1 { font-size: clamp(32px, 10vw, 48px); letter-spacing: .08em; text-shadow: 0 0 24px rgb(226 83 53 / .34); }
+.victory-hero { position: relative; min-height: 238px; padding: 24px 16px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; isolation: isolate; border: 1px solid rgb(215 189 131 / .48); border-radius: 20px; background: radial-gradient(circle at 50% 42%, rgb(226 83 53 / .3), transparent 38%), repeating-linear-gradient(125deg, transparent 0 28px, rgb(255 255 255 / .018) 29px 30px), linear-gradient(150deg, #2b1b14, #11100e 72%); box-shadow: inset 0 0 48px rgb(226 83 53 / .12), 0 16px 42px rgb(0 0 0 / .32); animation: victory-rise .42s cubic-bezier(.2, .8, .2, 1) both; }
+.victory-hero.method-submission { background: radial-gradient(circle at 50% 42%, rgb(143 103 182 / .32), transparent 38%), repeating-linear-gradient(125deg, transparent 0 28px, rgb(255 255 255 / .018) 29px 30px), linear-gradient(150deg, #251a2c, #11100e 72%); box-shadow: inset 0 0 48px rgb(143 103 182 / .14), 0 16px 42px rgb(0 0 0 / .32); }
+.victory-hero::after { content: ""; position: absolute; z-index: -1; inset: 0; translate: -115% 0; background: linear-gradient(110deg, transparent 32%, rgb(255 255 255 / .17) 48%, transparent 64%); animation: victory-shine .9s .18s ease-out both; }
+.victory-burst { position: absolute; z-index: -2; width: 270px; aspect-ratio: 1; border-radius: 50%; background: repeating-conic-gradient(from -7deg, rgb(215 189 131 / .22) 0 5deg, transparent 5deg 17deg); mask: radial-gradient(circle, transparent 0 27%, #000 29% 64%, transparent 66%); animation: victory-rays .72s .06s cubic-bezier(.2, .8, .2, 1) both; }
+.victory-hero > p { margin: 0 0 11px; color: var(--gold); font: 800 11px/1.2 "IBM Plex Mono", monospace; letter-spacing: .22em; }
+.victory-mark { width: 90px; height: 90px; display: grid; place-items: center; border: 2px solid var(--gold); border-radius: 50%; color: #fff5df; background: radial-gradient(circle at 42% 32%, #e56747, var(--accent-deep) 72%); box-shadow: 0 0 0 8px rgb(215 189 131 / .08), 0 0 36px rgb(226 83 53 / .42), inset 0 -8px 18px rgb(0 0 0 / .22); font: 900 50px/1 "IBM Plex Mono", monospace; animation: victory-pop .52s .08s cubic-bezier(.15, 1.3, .35, 1) both; }
+.method-submission .victory-mark { background: radial-gradient(circle at 42% 32%, #a57bc8, #563b70 72%); box-shadow: 0 0 0 8px rgb(215 189 131 / .08), 0 0 36px rgb(143 103 182 / .46), inset 0 -8px 18px rgb(0 0 0 / .22); }
+.victory-facts { margin-top: 15px; display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
+.victory-facts > * { min-height: 30px; padding: 6px 10px; display: inline-flex; align-items: center; border: 1px solid rgb(215 189 131 / .3); border-radius: 999px; color: #e7d9c2; background: rgb(10 9 8 / .52); font-size: 12px; }
+.victory-facts strong { color: #fff1d5; border-color: var(--gold); }
+.victory-praise-grid { margin-top: 12px; display: grid; gap: 9px; }
+.victory-praise { min-width: 0; min-height: 116px; margin: 0; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(145deg, var(--surface-2), var(--surface)); animation: victory-rise .4s .26s ease-out both; }
+.commentary-praise { border-left: 3px solid var(--accent); }
+.commentary-praise > span { display: block; color: #f09a84; font: 800 11px/1.2 "IBM Plex Mono", monospace; letter-spacing: .1em; }
+.victory-praise p { margin: 7px 0 0; color: #e4d9ca; font-size: 14px; line-height: 1.65; }
+.coach-praise { display: flex; align-items: flex-start; gap: 11px; border-left: 3px solid var(--gold); animation-delay: .34s; }
+.praise-avatar { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; color: #17120c; background: var(--gold); font-size: 14px; font-weight: 900; }
+.coach-praise strong { display: block; color: var(--gold); font-size: 13px; }
+.coach-praise p { margin-top: 5px; }
+@keyframes victory-rise { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes victory-pop { from { transform: scale(.45) rotate(-10deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes victory-rays { from { transform: scale(.45) rotate(-18deg); opacity: 0; } to { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes victory-shine { from { translate: -115% 0; } to { translate: 115% 0; } }
+.fight-log { margin-top: 14px; overflow: hidden; border: 1px solid var(--line-bright); border-radius: 11px; background: var(--surface); }
+.fight-log summary { min-height: 52px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; color: var(--ink); font-size: 14px; font-weight: 800; list-style: none; transition: border-color .14s ease, background .14s ease; }
+.fight-log summary::-webkit-details-marker { display: none; }
+.fight-log summary:hover { background: var(--surface-2); }
+.fight-log[open] summary { border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.fight-log-arrow { color: var(--gold); font: 800 20px/1 "IBM Plex Mono", monospace; transition: transform .18s ease; }
+.fight-log[open] .fight-log-arrow { transform: rotate(90deg); }
+.fight-log p { margin: 0; padding: 10px 14px 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.fight-log p:last-child { padding-bottom: 13px; }
+
+@media (min-width: 560px) {
+  .victory-praise-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .victory-hero, .victory-mark, .victory-burst, .victory-praise { animation: none; }
+  .victory-hero::after { display: none; }
+  .fight-log-arrow { transition: none; }
+}
 
 .biography-card { padding: 23px; border: 1px solid var(--gold); border-radius: 2px; color: #2b251c; background: linear-gradient(145deg, #eadcc0, #c9b58e); box-shadow: var(--shadow); }
 .biography-card .eyebrow { color: #8f3b27; }
 .biography-card h2 { margin: 5px 0 2px; font-size: 29px; }
 .biography-card > strong { display: block; font-size: 14px; }
 .biography-card p:last-child { margin: 14px 0 0; font-size: 13px; line-height: 1.75; }
+.biography-card blockquote { margin: 14px 0 0; padding: 11px 12px; border-left: 3px solid #8f3b27; color: #4b3d2d; background: rgb(255 255 255 / .22); font-size: 12px; line-height: 1.65; }
 .career-record { margin-top: 10px; padding-block: 8px; border-block: 1px solid rgb(43 37 28 / .25); font: 700 17px "IBM Plex Mono", monospace; }
 .timeline > div { display: grid; grid-template-columns: 52px 1fr; gap: 12px; }
 .timeline > div > span { padding-top: 3px; color: var(--accent); font: 600 11px "IBM Plex Mono", monospace; }
@@ -692,10 +743,13 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .experience-list .choice-row.selected { border-color: var(--gold); background: rgb(215 189 131 / .1); }
 .skill-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .skill-progress-card { min-height: 104px; padding: 14px; border: 1px solid var(--line); border-left: 3px solid var(--skill); border-radius: 11px; background: var(--surface); }
-.skill-progress-card > div { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 3px 8px; }
+.skill-progress-card > div { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 3px 8px; }
 .skill-progress-card span { color: #c8bdae; font-size: 12px; font-weight: 800; }
-.skill-progress-card strong { color: var(--ink); font-size: 20px; }
-.skill-progress-card small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.skill-progress-card .skill-ability { display: flex; align-items: baseline; gap: 2px; color: var(--ink); font-size: 23px; }
+.skill-progress-card .skill-ability em { margin-right: 2px; color: var(--muted); font-size: 9px; font-style: normal; font-weight: 800; letter-spacing: .06em; }
+.skill-progress-card .skill-ability small { color: var(--muted); font-size: 9px; font-weight: 700; }
+.skill-progress-card .skill-level { color: var(--gold); font-size: 13px; white-space: nowrap; }
+.skill-progress-card .skill-support { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .skill-progress-card > i, .trait-progress-list article > i { height: 5px; margin-top: 9px; display: block; overflow: hidden; border-radius: 99px; background: #171411; }
 .skill-progress-card > i b, .trait-progress-list article > i b { height: 100%; display: block; border-radius: inherit; background: var(--skill, var(--accent)); }
 .skill-progress-card p { margin: 7px 0 0; color: #b8ad9e; font-size: 11px; line-height: 1.4; }
@@ -722,6 +776,9 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .learned-move-grid small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .empty-progression { padding: 14px; border: 1px dashed var(--line-bright); border-radius: 10px; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .move-learning-list { display: grid; gap: 9px; }
+.training-selection-status { margin: -7px 0 11px; color: var(--gold); font-size: 13px; font-weight: 900; }
+.move-learning-card { box-shadow: inset 0 0 0 0 transparent; }
+.move-learning-card.selected { border-color: var(--gold); background: rgb(104 79 38 / .24); box-shadow: inset 3px 0 var(--gold); }
 .move-learning-card strong { display: flex; justify-content: space-between; gap: 12px; }
 .move-learning-card strong small { color: var(--gold); font-size: 9px; }
 .opponent-traits { margin: 10px 0; display: grid; gap: 5px; }

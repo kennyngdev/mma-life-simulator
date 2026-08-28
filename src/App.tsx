@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
-import { advance, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, getWeightOptions, relationshipTier, STAGE_LABELS } from './game/engine'
-import { aptitudeLabel, minimumMoveLevel, nextSkillThreshold, skillLevel, traitDefinition } from './game/progression'
+import { advance, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, getWeightOptions, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
+import { aptitudeLabel, minimumMoveLevel, nextSkillThreshold, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
@@ -15,6 +15,7 @@ import type {
   CriticalOption,
   FighterState,
   FightDamagePart,
+  FightOffer,
   FightMoveDefinition,
   FightStageName,
   FightState,
@@ -300,6 +301,8 @@ function RevealView({ game, dispatch }: ViewProps) {
 
 function OfferView({ game, dispatch }: ViewProps) {
   const coach = game.fighter.relationships.find((relationship) => relationship.role === 'coach')
+  const refreshCost = offerRefreshCost(game.fighter)
+  const canRefresh = !game.offerRefreshUsed && game.fighter.money >= refreshCost
   return (
     <Screen title="下一場戰鬥" kicker={`${game.fighter.year} · 排名 #${game.fighter.ranking}`}>
       <ContextStrip fighter={game.fighter} />
@@ -326,16 +329,32 @@ function OfferView({ game, dispatch }: ViewProps) {
             })}</div>
             <p className="coach-verdict">「{coachVerdict(opponent, offer.riskLabel)}」</p>
             <div className="offer-meta"><span>出場費 {formatRegionalMoney(offer.purse, game.fighter.region)}</span><span>{offer.shortNotice ? '短期代打' : '完整備戰'}</span>{offer.venueRegion && <span>{offer.opponentIsLocal ? '同鄉對決' : '客場挑戰者'}</span>}</div>
+            <PurseBreakdown offer={offer} region={game.fighter.region} />
             {opponent.meetings > 0 && <p className="memory-callout">你們已經交手 {opponent.meetings} 次，彼此都很清楚上次發生了什麼。</p>}
             <button className="choice-confirm" onClick={() => dispatch({ type: 'SELECT_OFFER', offerId: offer.id })}>簽下這場比賽</button>
           </article>
         })}
       </div>
+      <section className="contract-freedom" aria-labelledby="contract-freedom-title">
+        <span>選擇權</span><h3 id="contract-freedom-title">用積蓄等待另一組邀約</h3>
+        <p>支付 {formatRegionalMoney(refreshCost, game.fighter.region)} 處理合約與營隊空窗，不讓年齡前進；聯盟信任會小幅下降。本輪只能使用一次。</p>
+        <button type="button" className="choice-confirm" disabled={!canRefresh} onClick={() => dispatch({ type: 'PURCHASE_OFFER_REFRESH' })}>{game.offerRefreshUsed ? '本輪已經換過邀約' : game.fighter.money < refreshCost ? `資金不足，還差 ${formatRegionalMoney(refreshCost - game.fighter.money, game.fighter.region)}` : '支付費用，查看新邀約'}</button>
+      </section>
       {game.fighter.age >= 34 && <p className="memory-callout">你的職業生涯已進入尾聲。到了三十八歲就得退役，你也可以選擇現在收手。</p>}
       <button className="secondary-action" onClick={() => dispatch({ type: 'DECLINE_OFFERS' })}>{game.fighter.age >= 37 ? '拒絕邀約，結束職業生涯' : '拒絕邀約，讓時間前進一年'}</button>
       {(game.fighter.evidence.fights >= 5 || game.fighter.age >= 34) && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>現在退役</button>}
     </Screen>
   )
+}
+
+function PurseBreakdown({ offer, region }: { offer: FightOffer; region: Region }) {
+  const parts = [
+    `基礎 ${formatRegionalMoney(offer.purseBreakdown.base, region)}`,
+    offer.purseBreakdown.riskAdjustment ? `對手風險 ${signedRegionalMoney(offer.purseBreakdown.riskAdjustment, region)}` : '標準風險 ±0',
+    offer.purseBreakdown.shortNoticePremium ? `短期代打 ${signedRegionalMoney(offer.purseBreakdown.shortNoticePremium, region)}` : undefined,
+    offer.purseBreakdown.titleBonus ? `冠軍戰 ${signedRegionalMoney(offer.purseBreakdown.titleBonus, region)}` : undefined,
+  ].filter((part): part is string => Boolean(part))
+  return <p className="purse-breakdown" aria-label="出場費計算">{parts.join(' · ')}</p>
 }
 
 function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills: boolean }) {
@@ -409,15 +428,25 @@ function CampDrillView({ game, dispatch }: ViewProps) {
 
 function TrainingRewardView({ game, dispatch }: ViewProps) {
   const branch = game.trainingMoveBranch ?? 'boxing'
-  const moves = FIGHT_INTENTS.filter((move) => game.trainingMoveChoices?.includes(move.id))
+  const moves = (game.trainingMoveChoices ?? [])
+    .map((id) => FIGHT_INTENTS.find((move) => move.id === id))
+    .filter((move): move is FightMoveDefinition => Boolean(move))
+  const selected = game.trainingMoveSelections ?? []
+  const required = Math.min(2, moves.length)
   return <Screen title="把訓練變成你的招式" kicker={`${BRANCH_META[branch].name} · Lv.${skillLevel(game.fighter.skills[branch].xp)}`}>
-    <p className="lead">這堂課讓你看見三條不同路線。選擇一招真正帶進下一場比賽；沒有重抽，也不能用點數把其餘招式一起買走。</p>
-    <div className="move-learning-list">{moves.map((move) => <button className="choice-row move-learning-card" key={move.id} onClick={() => dispatch({ type: 'LEARN_TRAINING_MOVE', moveId: move.id })}>
-      <strong>{move.label}<small>Lv.{minimumMoveLevel(move)} · {move.category === 'offense' ? '進攻' : move.category === 'transition' ? '轉位' : '防守'}</small></strong>
+    <p className="lead">{moves.length >= 4 ? '從四條路線選擇兩招，建立下一場就能使用的技術組合。' : `這個分支還有 ${moves.length} 招可學；選擇 ${required} 招帶進下一場比賽。`}沒有重抽；確認前可以重新選擇。</p>
+    <p className="training-selection-status" role="status">已選 {selected.length}／{required} 招</p>
+    <div className="move-learning-list">{moves.map((move) => {
+      const isSelected = selected.includes(move.id)
+      return <button type="button" aria-pressed={isSelected} className={`choice-row move-learning-card ${isSelected ? 'selected' : ''}`} key={move.id} onClick={() => dispatch({ type: 'TOGGLE_TRAINING_MOVE', moveId: move.id })}>
+      <strong>{move.label}<small>{isSelected ? '✓ 已選 · ' : ''}Lv.{minimumMoveLevel(move)} · {move.category === 'offense' ? '進攻' : move.category === 'transition' ? '轉位' : '防守'}</small></strong>
       <span>{move.description}</span>
       <small>可用位置：{move.positions.map(positionLabel).join('、')} · 最適階段：{bestMoveStageLabel(move)}</small>
       <em>{move.submission ? '降服路線' : move.cleanPosition ? `成功可進入 ${positionLabel(move.cleanPosition)}` : `終結壓力 ${move.effects.finishPressure}`}</em>
-    </button>)}</div>
+    </button>})}</div>
+    <ActionDock><button type="button" className="primary-action" disabled={selected.length !== required} onClick={() => dispatch({ type: 'CONFIRM_TRAINING_MOVES' })}>
+      <span>學會這 {required} 招</span><small>{selected.length === required ? '確認後帶進下一場比賽' : `還要選擇 ${required - selected.length} 招`}</small>
+    </button></ActionDock>
   </Screen>
 }
 
@@ -631,6 +660,8 @@ function LifeView({ game, dispatch }: ViewProps) {
       <p className="story-copy">{event.description}</p>
       <div className="choice-list">
         {event.options.map((option) => {
+          const requiredMoney = option.minimumMoney ?? Math.max(0, -(option.effects.money ?? 0))
+          const canAfford = game.fighter.money >= requiredMoney
           const trustDelta = option.effects.trust ?? 0
           const nextTrust = Math.max(0, Math.min(100, person.trust + trustDelta))
           const nextBenefit = getRelationshipBenefit({ ...person, trust: nextTrust })
@@ -640,11 +671,12 @@ function LifeView({ game, dispatch }: ViewProps) {
             option.effects.readiness ? `準備度 ${signed(option.effects.readiness)}` : undefined,
             option.effects.fatigue ? `疲勞 ${signed(option.effects.fatigue)}` : undefined,
             option.effects.health ? `健康 ${signed(option.effects.health)}` : undefined,
+            option.effects.reputation ? `名聲 ${signed(option.effects.reputation)}` : undefined,
           ].filter((value): value is string => Boolean(value))
-          return <button className="choice-row" key={option.id} onClick={() => dispatch({ type: 'RESOLVE_LIFE', optionId: option.id })}>
+          return <button className="choice-row" key={option.id} disabled={!canAfford} onClick={() => dispatch({ type: 'RESOLVE_LIFE', optionId: option.id })}>
             <strong>{option.label}</strong><span>{option.detail}</span>
             {effectPreview.length > 0 && <div className="event-option-effects">{effectPreview.map((effect) => <b key={effect}>{effect}</b>)}</div>}
-            <em className={tierChanges ? 'relationship-change' : ''}>信任 {trustDelta >= 0 ? '+' : ''}{trustDelta} → {nextTrust}。{tierChanges ? `關係將變為「${nextBenefit.tierLabel}」：` : `之後仍是「${nextBenefit.tierLabel}」：`}{nextBenefit.effect}</em>
+            {!canAfford ? <em className="unavailable-reason">資金不足 · 需要 {formatRegionalMoney(requiredMoney, game.fighter.region)}</em> : <em className={tierChanges ? 'relationship-change' : ''}>信任 {trustDelta >= 0 ? '+' : ''}{trustDelta} → {nextTrust}。{tierChanges ? `關係將變為「${nextBenefit.tierLabel}」：` : `之後仍是「${nextBenefit.tierLabel}」：`}{nextBenefit.effect}</em>}
           </button>
         })}
       </div>
@@ -1133,13 +1165,62 @@ function FightResultView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const opponent = getOpponent(game)!
   const won = fight.winner === 'player'
-  return <Screen title={fight.winner === 'draw' ? '本場平手' : won ? '你贏了' : `${opponent.name}獲勝`} kicker={`${methodLabel(fight.method)}${fight.finishRound ? ` · 第 ${fight.finishRound} 回合` : ''}`}>
-    <div className={`verdict ${won ? 'win' : fight.winner === 'draw' ? 'draw' : 'loss'}`}><span>{won ? 'W' : fight.winner === 'draw' ? 'D' : 'L'}</span><div><strong>{game.fighter.name}</strong><small>對 {opponent.name}</small></div></div>
+  const celebratedFinish = won && fight.method !== undefined && ['ko', 'tko', 'submission'].includes(fight.method)
+  const finishingMove = FIGHT_INTENTS.find((move) => move.id === fight.finishingMoveId)
+  const finishAction = finishingMove?.label ?? (fight.method === 'submission' ? '這次降服' : '這波攻勢')
+  const praise = celebratedFinish ? finishVictoryPraise(game, opponent, finishAction) : undefined
+  return <Screen className={`fight-result-screen${celebratedFinish ? ' finish-victory' : ''}`} title={fight.winner === 'draw' ? '本場平手' : won ? '你贏了' : `${opponent.name}獲勝`} kicker={`${methodLabel(fight.method)}${fight.finishRound ? ` · 第 ${fight.finishRound} 回合` : ''}`}>
+    {celebratedFinish ? <>
+      <section className={`victory-hero method-${fight.method}`} aria-label="終結勝利">
+        <span className="victory-burst" aria-hidden="true" />
+        <p>FINISH VICTORY</p>
+        <div className="victory-mark" aria-hidden="true">W</div>
+        <div className="victory-facts">
+          <strong>{methodLabel(fight.method)}</strong>
+          {fight.finishRound && <span>第 {fight.finishRound} 回合</span>}
+          <span>{finishAction}</span>
+        </div>
+      </section>
+      <div className="victory-praise-grid">
+        <article className="victory-praise commentary-praise">
+          <span>解說台</span>
+          <p>{praise!.commentary}</p>
+        </article>
+        <article className="victory-praise coach-praise">
+          <span className="praise-avatar" aria-hidden="true">教</span>
+          <div><strong>{praise!.coachName}</strong><p>{praise!.coach}</p></div>
+        </article>
+      </div>
+    </> : <div className={`verdict ${won ? 'win' : fight.winner === 'draw' ? 'draw' : 'loss'}`}><span>{won ? 'W' : fight.winner === 'draw' ? 'D' : 'L'}</span><div><strong>{game.fighter.name}</strong><small>對 {opponent.name}</small></div></div>}
     {fight.scores.length > 0 && <div className="scorecards">{fight.scores.map((score) => <div key={score.round}><span>R{score.round}</span><b>{score.player}</b><i>–</i><b>{score.opponent}</b></div>)}</div>}
     <div className="result-explain"><strong>為什麼會有這個結果</strong><p>{fight.explanation}</p></div>
-    <details className="fight-log"><summary>完整戰報</summary>{fight.commentary.map((line, index) => <p key={index}>{line}</p>)}</details>
+    <details className="fight-log"><summary><span>完整戰報</span><span className="fight-log-arrow" aria-hidden="true">→</span></summary>{fight.commentary.map((line, index) => <p key={index}>{line}</p>)}</details>
     <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_FIGHT_RESULT' })}>繼續生涯</button></ActionDock>
   </Screen>
+}
+
+function finishVictoryPraise(game: GameState, opponent: Opponent, finishAction: string) {
+  const method = game.fight!.method
+  const fighterName = game.fighter.name
+  const coach = game.fighter.relationships.find((relationship) => relationship.role === 'coach')
+  const coachName = coach?.name ?? '教練'
+  const coachTier = relationshipTier(coach?.trust ?? 50)
+  const submission = method === 'submission'
+  const commentary = method === 'ko'
+    ? `「一擊定音！${fighterName}用${finishAction}直接關掉比賽，${opponent.name}完全沒有恢復的機會！」`
+    : method === 'tko'
+      ? `「裁判衝進來了！${fighterName}用${finishAction}把終結窗口壓到底，${opponent.name}已經無法有效防守！」`
+      : `「拍手了！${fighterName}用${finishAction}封死所有退路，${opponent.name}只能認輸！」`
+  const coachPraise = coachTier === 'trusted'
+    ? submission
+      ? `「每一步位置都沒有白搶。你冷靜到最後，今晚這個${finishAction}完全是你自己做出來的。」`
+      : `「就是這樣。你看見破口就壓到底，今晚你把我們練過的${finishAction}完整打出來了。」`
+    : coachTier === 'strained'
+      ? `「這個${finishAction}收得很乾淨。今晚，你做對了。」`
+      : submission
+        ? `「位置、控制、收緊，一步都沒亂。這個${finishAction}是你應得的終結。」`
+        : `「你沒有浪費破口，${finishAction}收得很乾淨。這就是成熟的終結。」`
+  return { commentary, coach: coachPraise, coachName }
 }
 
 function methodLabel(method?: string) {
@@ -1150,7 +1231,7 @@ function RetirementView({ game, onNew }: { game: GameState; onNew: () => void })
   const bio = game.biography!
   return <Screen title="最後一回合之後" kicker={`${bio.retiredAt} 歲退役 · Seed ${bio.seed}`}>
     <article className="biography-card" id="biography-card">
-      <p className="eyebrow">CAREER BIOGRAPHY</p><h2>{bio.name}</h2>{bio.alias && <em className="biography-alias">{bio.alias}</em>}<small className="biography-origin">{REGION_LABELS[bio.region]}{bio.hometown ? ` · ${bio.hometown}` : ''} · {REGION_PROFILES[bio.region].circuit}</small><strong>{bio.title}</strong><div className="career-record">{bio.record}</div><p>{bio.summary}</p>
+      <p className="eyebrow">CAREER BIOGRAPHY</p><h2>{bio.name}</h2>{bio.alias && <em className="biography-alias">{bio.alias}</em>}<small className="biography-origin">{REGION_LABELS[bio.region]}{bio.hometown ? ` · ${bio.hometown}` : ''} · {REGION_PROFILES[bio.region].circuit}</small><strong>{bio.title}</strong><div className="career-record">{bio.record}</div><p>{bio.summary}</p>{bio.financialLegacy && <blockquote>{bio.financialLegacy}</blockquote>}
     </article>
     <section><SectionTitle title="生涯轉捩點" subtitle="勝敗會被記錄，但真正留下來的是你做過的選擇。" />
       <div className="timeline">{bio.turningPoints.map((entry) => <div key={entry.id}><span>{entry.age} 歲</span><article><strong>{entry.title}</strong><p>{entry.summary}</p></article></div>)}</div>
@@ -1160,7 +1241,7 @@ function RetirementView({ game, onNew }: { game: GameState; onNew: () => void })
 }
 
 async function shareBiography(bio: Biography) {
-  const text = `《拳途人生》${bio.name}｜${REGION_LABELS[bio.region]}${bio.hometown ? `・${bio.hometown}` : ''}｜${bio.record}\n${bio.title}\n${bio.summary}\nSeed：${bio.seed}`
+  const text = `《拳途人生》${bio.name}｜${REGION_LABELS[bio.region]}${bio.hometown ? `・${bio.hometown}` : ''}｜${bio.record}\n${bio.title}\n${bio.summary}${bio.financialLegacy ? `\n留下的東西：${bio.financialLegacy}` : ''}\nSeed：${bio.seed}`
   if (navigator.share) await navigator.share({ title: `拳途人生｜${bio.name}`, text })
   else { await navigator.clipboard.writeText(text); window.alert('生涯摘要已複製。') }
 }
@@ -1310,7 +1391,7 @@ function positionLabel(position: string) {
 function ContextStrip({ fighter }: { fighter: FighterState }) {
   const minHealth = Math.min(...Object.values(fighter.health))
   const best = Math.max(...BRANCHES.map((branch) => skillLevel(fighter.skills[branch].xp)))
-  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="身體" value={`${minHealth}`} note={minHealth < 60 ? '舊傷復發' : '沒有嚴重傷勢'} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={REGION_PROFILES[fighter.region].economyLabel} /></div>
+  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="身體" value={`${minHealth}`} note={minHealth < 60 ? '舊傷復發' : '沒有嚴重傷勢'} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={`${careerRunwayLabel(fighter)} · ${REGION_PROFILES[fighter.region].economyLabel}`} /></div>
 }
 
 function StatusBar({ label, value, tone }: { label: string; value: number; tone: string }) {
@@ -1340,20 +1421,22 @@ function rarityLabel(value: NonNullable<ReturnType<typeof traitDefinition>>['rar
 function SkillProgressCard({ branch, fighter }: { branch: Branch; fighter: FighterState }) {
   const progress = fighter.skills[branch]
   const level = skillLevel(progress.xp)
+  const ability = skillRating(progress)
+  const strength = skillStrengthLabel(level)
   const thresholds = [0, 100, 300, 600, 1_000, 1_500]
   const next = nextSkillThreshold(progress.xp)
   const start = thresholds[level]
   const percent = next ? Math.max(0, Math.min(100, (progress.xp - start) / (next - start) * 100)) : 100
   const known = fighter.learnedMoves.filter((id) => FIGHT_INTENTS.find((move) => move.id === id)?.branch === branch).length
   return <article className="skill-progress-card" style={{ '--skill': BRANCH_META[branch].accent } as React.CSSProperties}>
-    <div><span>{BRANCH_META[branch].name}</span><strong>Lv.{level}</strong><small>{aptitudeLabel(progress.aptitude)} · 已學 {known} 招</small></div>
+    <div><span>{BRANCH_META[branch].name}</span><strong className="skill-ability" aria-label={`${BRANCH_META[branch].name}能力 ${ability} / 100`}><em>能力</em>{ability}<small>/100</small></strong><b className="skill-level" aria-label={`${BRANCH_META[branch].name}強度 ${strength}`}>{strength}</b><small className="skill-support">{aptitudeLabel(progress.aptitude)} · 已學 {known} 招</small></div>
     <i><b style={{ width: `${percent}%` }} /></i>
     <p>{next ? `${progress.xp} / ${next} XP` : `${progress.xp} XP · 已達大師級`}</p>
   </article>
 }
 
 function SkillOverview({ fighter }: { fighter: FighterState }) {
-  return <section><SectionTitle title="技能與訓練" subtitle="Lv.0 是未受訓；Lv.5 是大師。天賦只改變學習速度，不封死上限。" /><div className="skill-overview">{BRANCHES.map((branch) => <SkillProgressCard key={branch} branch={branch} fighter={fighter} />)}</div></section>
+  return <section><SectionTitle title="技能、能力與訓練" subtitle="強度由未受訓逐步成長至大師；能力是戰鬥使用的 0–100 評級。天賦只改變學習速度。" /><div className="skill-overview">{BRANCHES.map((branch) => <SkillProgressCard key={branch} branch={branch} fighter={fighter} />)}</div></section>
 }
 
 function TraitGrid({ traits }: { traits: FighterState['traits'] }) {
@@ -1397,6 +1480,7 @@ function LifeEventResultDialog({ game, dispatch }: { game: GameState; dispatch: 
     result.effects.fatigue ? { label: `疲勞 ${signed(result.effects.fatigue)}`, positive: result.effects.fatigue < 0 } : undefined,
     result.effects.health ? { label: `最弱部位健康 ${signed(result.effects.health)}`, positive: result.effects.health > 0 } : undefined,
     result.effects.money ? { label: `金錢 ${signedRegionalMoney(result.effects.money, game.fighter.region)}`, positive: result.effects.money > 0 } : undefined,
+    result.effects.reputation ? { label: `名聲 ${signed(result.effects.reputation)}`, positive: result.effects.reputation > 0 } : undefined,
   ].filter((effect): effect is { label: string; positive: boolean } => Boolean(effect))
 
   return <div className="event-result-backdrop">
@@ -1441,7 +1525,7 @@ function StatusDetails({ game }: { game: GameState; dispatch: (command: GameComm
   const fighter = game.fighter
   return <>
     <SectionTitle title="家鄉與賽事生態" subtitle="出身地影響人物、早期對手、地方賽事與經濟，不會直接改變戰鬥能力。" />
-    <article className="status-region-card"><div><span>{REGION_LABELS[fighter.region]} · {fighter.hometown}</span><strong>{REGION_PROFILES[fighter.region].circuit}</strong></div>{fighter.alias && <em>{fighter.alias}</em>}<p>{REGION_PROFILES[fighter.region].description}</p><small>{REGION_PROFILES[fighter.region].opponentMix} · 資金 {formatRegionalMoney(fighter.money, fighter.region)}</small></article>
+    <article className="status-region-card"><div><span>{REGION_LABELS[fighter.region]} · {fighter.hometown}</span><strong>{REGION_PROFILES[fighter.region].circuit}</strong></div>{fighter.alias && <em>{fighter.alias}</em>}<p>{REGION_PROFILES[fighter.region].description}</p><small>{REGION_PROFILES[fighter.region].opponentMix} · 資金 {formatRegionalMoney(fighter.money, fighter.region)} · {careerRunwayLabel(fighter)}</small></article>
     <SectionTitle title="體格資料" subtitle="身高與臂展由 Seed 決定，會影響遠距及近身對位。" />
     <div className="health-grid"><Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} /><Metric label="身高" value={`${fighter.heightCm} cm`} note="影響重心與對戰距離" /><Metric label="臂展" value={`${fighter.reachCm} cm`} note={`臂展差 ${fighter.reachCm - fighter.heightCm >= 0 ? '+' : ''}${fighter.reachCm - fighter.heightCm} cm`} /><Metric label="目前量級" value={fighter.weightClass} note={weightPlanLabel(fighter.weightPlan)} /></div>
     <SkillOverview fighter={fighter} />

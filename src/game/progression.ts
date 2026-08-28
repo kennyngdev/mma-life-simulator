@@ -17,6 +17,7 @@ import { draw, drawInt, pick } from './rng'
 export const BRANCHES: Branch[] = ['boxing', 'kicking', 'clinch', 'wrestling', 'ground']
 export const SKILL_XP_THRESHOLDS = [0, 100, 300, 600, 1_000, 1_500] as const
 export const SKILL_RATINGS = [10, 30, 50, 68, 84, 96] as const
+export const SKILL_STRENGTH_LABELS = ['未受訓', '初學', '中階', '熟練', '進階', '大師'] as const
 
 export function skillLevel(xp: number): SkillLevel {
   if (xp >= SKILL_XP_THRESHOLDS[5]) return 5
@@ -29,6 +30,10 @@ export function skillLevel(xp: number): SkillLevel {
 
 export function skillRating(progress: SkillProgress): number {
   return SKILL_RATINGS[skillLevel(progress.xp)]
+}
+
+export function skillStrengthLabel(level: SkillLevel): string {
+  return SKILL_STRENGTH_LABELS[level]
 }
 
 export function nextSkillThreshold(xp: number): number | undefined {
@@ -52,6 +57,7 @@ export const UNIVERSAL_MOVE_IDS = new Set([
 
 export function minimumMoveLevel(move: FightMoveDefinition): SkillLevel {
   if (UNIVERSAL_MOVE_IDS.has(move.id)) return 0
+  if (move.minimumLevel !== undefined) return move.minimumLevel
   if (move.submission || move.effects.finishPressure >= 18 || move.effects.control >= 15) return 5
   if (move.effects.finishPressure >= 14 || move.effects.control >= 12 || move.effects.headDamage >= 15) return 4
   if (move.effects.finishPressure >= 10 || move.effects.control >= 9 || move.effects.headDamage >= 11) return 3

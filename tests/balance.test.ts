@@ -17,12 +17,17 @@ function perfectDrillResult(challenge: CampDrillChallenge): CampDrillResult {
   return { kind: challenge.kind, answers: challenge.prompts.map((prompt) => prompt.answer), elapsedMs: 0 } as CampDrillResult
 }
 
+function chooseTrainingMoves(state: GameState): GameState {
+  for (const moveId of state.trainingMoveChoices!.slice(0, 2)) state = apply(state, { type: 'TOGGLE_TRAINING_MOVE', moveId })
+  return apply(state, { type: 'CONFIRM_TRAINING_MOVES' })
+}
+
 function completeCampDrill(state: GameState, action: CampAction): GameState {
   let next = apply(state, { type: 'START_CAMP_DRILL', action, branch: 'boxing' })
   const challenge = next.activeCampDrill!
   next = apply(next, { type: 'RESOLVE_CAMP_DRILL', result: perfectDrillResult(challenge) })
   next = apply(next, { type: 'ACK_CAMP_DRILL_RESULT' })
-  if (next.phase === 'training-reward') next = apply(next, { type: 'LEARN_TRAINING_MOVE', moveId: next.trainingMoveChoices![0] })
+  if (next.phase === 'training-reward') next = chooseTrainingMoves(next)
   return next
 }
 
@@ -44,7 +49,7 @@ function playGreedyFight(seed: string, targetRatingGap?: number, region: Region 
       const action = state.campActions.length === 0 ? 'film' : state.campActions.length === 1 ? 'technique' : 'recovery'
       state = completeCampDrill(state, action)
     } else if (state.phase === 'training-reward') {
-      state = apply(state, { type: 'LEARN_TRAINING_MOVE', moveId: state.trainingMoveChoices![0] })
+      state = chooseTrainingMoves(state)
     } else if (state.phase === 'life') state = apply(state, { type: 'RESOLVE_LIFE', optionId: state.lifeEvent!.options[0].id })
     else if (state.phase === 'weight') state = apply(state, { type: 'SET_WEIGHT_PLAN', plan: 'safe' })
     else if (state.phase === 'prefight') {
@@ -89,7 +94,7 @@ function playStyleFight(seed: string, playerStyle: TestedStyle, opponentStyle: T
     else if (state.phase === 'growth') state = apply(state, { type: 'CONTINUE_GROWTH' })
     else if (state.phase === 'offer') state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
     else if (state.phase === 'camp') state = completeCampDrill(state, state.campActions.length === 0 ? 'film' : 'recovery')
-    else if (state.phase === 'training-reward') state = apply(state, { type: 'LEARN_TRAINING_MOVE', moveId: state.trainingMoveChoices![0] })
+    else if (state.phase === 'training-reward') state = chooseTrainingMoves(state)
     else if (state.phase === 'life') state = apply(state, { type: 'RESOLVE_LIFE', optionId: state.lifeEvent!.options[0].id })
     else if (state.phase === 'weight') state = apply(state, { type: 'SET_WEIGHT_PLAN', plan: 'safe' })
     else if (state.phase === 'prefight') {

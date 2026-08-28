@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } from '../src/game/content'
 import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
-import { advance, bodyStaminaPenalty, branchSkill, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, mirrorPosition, riskLabelForGap } from '../src/game/engine'
-import { migrateVersion10, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, restoreBackgroundStartingMoves } from '../src/game/storage'
-import { EARNED_TRAITS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, movesForBranch, skillLevel, startingMoves, traitModifier } from '../src/game/progression'
+import { advance, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, mirrorPosition, offerRefreshCost, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
+import { migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, restoreBackgroundStartingMoves } from '../src/game/storage'
+import { EARNED_TRAITS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, movesForBranch, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
 import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, Position } from '../src/game/types'
 
 const input = { name: '林致遠', region: 'taiwan' as const, motive: 'prove' as const, seed: 'TESTCAGE01' }
@@ -24,12 +24,17 @@ function perfectDrillResult(challenge: CampDrillChallenge): CampDrillResult {
   return { kind: challenge.kind, answers: challenge.prompts.map((prompt) => prompt.answer), elapsedMs: 2_400 } as CampDrillResult
 }
 
+function chooseTrainingMoves(state: GameState): GameState {
+  for (const moveId of state.trainingMoveChoices!.slice(0, 2)) state = apply(state, { type: 'TOGGLE_TRAINING_MOVE', moveId })
+  return apply(state, { type: 'CONFIRM_TRAINING_MOVES' })
+}
+
 function completeCampDrill(state: GameState, action: CampAction, branch?: 'boxing'): GameState {
   let next = apply(state, { type: 'START_CAMP_DRILL', action, branch })
   const challenge = next.activeCampDrill!
   next = apply(next, { type: 'RESOLVE_CAMP_DRILL', result: perfectDrillResult(challenge) })
   next = apply(next, { type: 'ACK_CAMP_DRILL_RESULT' })
-  if (next.phase === 'training-reward') next = apply(next, { type: 'LEARN_TRAINING_MOVE', moveId: next.trainingMoveChoices![0] })
+  if (next.phase === 'training-reward') next = chooseTrainingMoves(next)
   return next
 }
 
@@ -69,8 +74,11 @@ function completeCareer(initial: GameState): GameState {
     if (state.phase === 'reveal') state = apply(state, { type: 'ACK_REVEAL' })
     else if (state.phase === 'offer') state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
     else if (state.phase === 'camp') state = completeCampDrill(state, state.campActions.length === 0 ? 'film' : state.campActions.length === 1 ? 'technique' : 'recovery', 'boxing')
-    else if (state.phase === 'training-reward') state = apply(state, { type: 'LEARN_TRAINING_MOVE', moveId: state.trainingMoveChoices![0] })
-    else if (state.phase === 'life') state = apply(state, { type: 'RESOLVE_LIFE', optionId: state.lifeEvent!.options[0].id })
+    else if (state.phase === 'training-reward') state = chooseTrainingMoves(state)
+    else if (state.phase === 'life') {
+      const option = state.lifeEvent!.options.find((item) => state.fighter.money >= (item.minimumMoney ?? Math.max(0, -(item.effects.money ?? 0))))!
+      state = apply(state, { type: 'RESOLVE_LIFE', optionId: option.id })
+    }
     else if (state.phase === 'growth') state = apply(state, { type: 'CONTINUE_GROWTH' })
     else if (state.phase === 'weight') state = apply(state, { type: 'SET_WEIGHT_PLAN', plan: 'safe' })
     else if (state.phase === 'prefight') state = apply(state, { type: 'START_FIGHT' })
@@ -97,7 +105,7 @@ function reachFirstFightResult(initial: GameState): GameState {
     if (state.phase === 'reveal') state = apply(state, { type: 'ACK_REVEAL' })
     else if (state.phase === 'offer') state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
     else if (state.phase === 'camp') state = completeCampDrill(state, state.campActions.length === 0 ? 'film' : state.campActions.length === 1 ? 'technique' : 'recovery', 'boxing')
-    else if (state.phase === 'training-reward') state = apply(state, { type: 'LEARN_TRAINING_MOVE', moveId: state.trainingMoveChoices![0] })
+    else if (state.phase === 'training-reward') state = chooseTrainingMoves(state)
     else if (state.phase === 'life') state = apply(state, { type: 'RESOLVE_LIFE', optionId: state.lifeEvent!.options[0].id })
     else if (state.phase === 'growth') state = apply(state, { type: 'CONTINUE_GROWTH' })
     else if (state.phase === 'weight') state = apply(state, { type: 'SET_WEIGHT_PLAN', plan: 'safe' })
@@ -142,6 +150,7 @@ describe('拳途人生模擬核心', () => {
     expect(SKILL_XP_THRESHOLDS).toEqual([0, 100, 300, 600, 1_000, 1_500])
     expect(skillLevel(0)).toBe(0)
     expect(skillLevel(1_500)).toBe(5)
+    expect([0, 1, 2, 3, 4, 5].map((level) => skillStrengthLabel(level as ReturnType<typeof skillLevel>))).toEqual(['未受訓', '初學', '中階', '熟練', '進階', '大師'])
     expect(EARNED_TRAITS.map((trait) => trait.id)).toEqual(expect.arrayContaining(['power-puncher', 'escape-artist', 'iron-will']))
   })
 
@@ -262,8 +271,8 @@ describe('拳途人生模擬核心', () => {
     legacy.campSharpness = { boxing: 8 }
     const migrated = migrateVersion8(legacy)
 
-    expect(migrated.saveVersion).toBe(11)
-    expect(migrated.rulesVersion).toBe('0.7.0')
+    expect(migrated.saveVersion).toBe(12)
+    expect(migrated.rulesVersion).toBe('0.9.0')
     expect(migrated).not.toHaveProperty('campSharpness')
     expect(migrated.campDrillHistory).toEqual([])
   })
@@ -327,7 +336,7 @@ describe('拳途人生模擬核心', () => {
     technique = apply(technique, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
     technique = resolvePerfectDrill(technique)
     expect(technique.fighter.skills.boxing.xp - beforeTechnique).toBeGreaterThanOrEqual(70)
-    expect(technique.trainingMoveChoices).toHaveLength(3)
+    expect(technique.trainingMoveChoices).toHaveLength(4)
 
     let film = enterCamp('DRILL-FILM')
     const beforeIQ = film.fighter.mind.fightIQ
@@ -349,7 +358,37 @@ describe('拳途人生模擬核心', () => {
     untrained = apply(untrained, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'ground' })
     untrained = resolvePerfectDrill(untrained)
     expect(skillLevel(untrained.fighter.skills.ground.xp)).toBe(1)
-    expect(untrained.trainingMoveChoices).toEqual(expect.arrayContaining(['rebuild-guard']))
+    expect(untrained.trainingMoveChoices).toEqual(expect.arrayContaining(['rebuild-guard', 'guard-kimura']))
+  })
+
+  it('普通人的第一堂專項課保證提供能實際成立的風格基礎', () => {
+    const foundations = {
+      boxing: ['jab-cross', 'attack-body'],
+      kicking: ['damage-base', 'front-kick'],
+      clinch: ['enter-clinch', 'clinch-short-knee'],
+      wrestling: ['shot-entry', 'level-change'],
+      ground: ['rebuild-guard', 'guard-kimura'],
+    } as const
+    for (const [branch, expected] of Object.entries(foundations) as Array<[keyof typeof foundations, readonly string[]]>) {
+      let state = apply(createNewRun({ ...input, seed: `FOUNDATION-${branch}`, startingExperience: 'normie' }), { type: 'ACK_REVEAL' })
+      state = apply(state, { type: 'CONTINUE_GROWTH' })
+      state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
+      state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch })
+      state = resolvePerfectDrill(state)
+      expect(state.trainingMoveChoices).toHaveLength(4)
+      expect(state.trainingMoveChoices).toEqual(expect.arrayContaining([...expected]))
+    }
+  })
+
+  it('招牌打法按實際學習複雜度解鎖，不再被傷害與控制數值推到生涯末段', () => {
+    const level = (id: string) => minimumMoveLevel(FIGHT_INTENTS.find((move) => move.id === id)!)
+    expect(level('enter-clinch')).toBe(1)
+    expect(level('shot-entry')).toBe(1)
+    expect(level('guard-kimura')).toBe(1)
+    expect(level('front-headlock-guillotine')).toBe(2)
+    expect(level('rear-naked-choke')).toBe(2)
+    expect(level('head-kick')).toBe(3)
+    expect(level('front-headlock-anaconda')).toBe(5)
   })
 
   it('每個技術分支都有真實招式組合', () => {
@@ -520,6 +559,117 @@ describe('拳途人生模擬核心', () => {
     expect(formatRegionalMoney(4_000, 'mainland')).toContain('¥')
   })
 
+  it('出場費由舞台基礎、對手風險、短期代打與冠軍獎金透明組成', () => {
+    const state = createNewRun({ ...input, seed: 'RISK-PRICED-PURSES' })
+    for (const offer of state.offers) {
+      const breakdown = offer.purseBreakdown
+      expect(offer.purse).toBe(Math.max(500, breakdown.base + breakdown.riskAdjustment + breakdown.shortNoticePremium + breakdown.titleBonus))
+      if (offer.riskLabel === '低風險') expect(breakdown.riskAdjustment).toBeLessThan(0)
+      if (offer.riskLabel === '高風險' || offer.riskLabel === '極高風險' || offer.riskLabel === '絕望') expect(breakdown.riskAdjustment).toBeGreaterThan(0)
+    }
+    expect(state.offers.every((offer) => offer.purseBreakdown.base === typicalPurseForFighter(state.fighter))).toBe(true)
+  })
+
+  it('資金跑道只描述選擇空間，不會成為新的儲存屬性或戰鬥加成', () => {
+    const state = createNewRun(input)
+    const purse = typicalPurseForFighter(state.fighter)
+    state.fighter.money = purse * 0.4
+    expect(careerRunwayLabel(state.fighter)).toBe('資金吃緊')
+    state.fighter.money = purse
+    expect(careerRunwayLabel(state.fighter)).toBe('有緩衝')
+    state.fighter.money = purse * 2
+    expect(careerRunwayLabel(state.fighter)).toBe('可自主選擇')
+    expect(state.fighter).not.toHaveProperty('runway')
+  })
+
+  it('每輪邀約只能付費更換一次，不會讓年齡前進且相同選擇可重現', () => {
+    const initial = apply(createNewRun({ ...input, seed: 'CONTRACT-FREEDOM' }), { type: 'ACK_REVEAL' })
+    initial.fighter.money = offerRefreshCost(initial.fighter) * 3
+    const replay = structuredClone(initial)
+    const oldOpponentIds = initial.offers.map((offer) => offer.opponentId)
+    const oldMoney = initial.fighter.money
+    const oldAge = initial.fighter.age
+
+    const refreshed = apply(initial, { type: 'PURCHASE_OFFER_REFRESH' })
+    expect(refreshed.fighter.age).toBe(oldAge)
+    expect(refreshed.fighter.money).toBe(oldMoney - offerRefreshCost(initial.fighter))
+    expect(refreshed.offerRefreshUsed).toBe(true)
+    expect(refreshed.offers.map((offer) => offer.opponentId)).not.toEqual(oldOpponentIds)
+    expect(refreshed.fighter.history.at(-1)?.tags).toEqual(expect.arrayContaining(['金錢', '合約']))
+    expect(apply(refreshed, { type: 'PURCHASE_OFFER_REFRESH' })).toEqual(refreshed)
+    expect(apply(replay, { type: 'PURCHASE_OFFER_REFRESH' }).offers).toEqual(refreshed.offers)
+    let camp = apply(refreshed, { type: 'SELECT_OFFER', offerId: refreshed.offers[0].id })
+    camp = completeCampDrill(camp, 'recovery')
+    camp = completeCampDrill(camp, 'recovery')
+    camp = completeCampDrill(camp, 'recovery')
+    expect(camp.lifeEvent?.options.every((option) => !option.minimumMoney && (option.effects.money ?? 0) >= 0)).toBe(true)
+  })
+
+  it('付費人生選項會檢查資金，且零資金仍保有非金錢路線', () => {
+    let state = createNewRun(input)
+    state.phase = 'life'
+    state.fighter.money = 0
+    state.lifeEvent = {
+      id: 'medical-floor', title: '治療選擇', description: '測試醫療底線', personId: 'partner',
+      options: [
+        { id: 'paid', label: '專科治療', detail: '付費治療', outcome: '完成付費治療。', effects: { money: -1_000, health: 8 }, minimumMoney: 1_000 },
+        { id: 'favor', label: '請拳館幫忙', detail: '欠一份人情', outcome: '拳館替你找到幫助。', effects: { trust: -4, health: 4 }, historyTags: ['人情'] },
+      ],
+    }
+
+    const rejected = apply(state, { type: 'RESOLVE_LIFE', optionId: 'paid' })
+    expect(rejected.phase).toBe('life')
+    expect(rejected.fighter.money).toBe(0)
+    expect(rejected.lastMessage).toContain('資金不足')
+
+    const continued = apply(rejected, { type: 'RESOLVE_LIFE', optionId: 'favor' })
+    expect(continued.phase).toBe('growth')
+    expect(continued.fighter.money).toBe(0)
+    expect(continued.fighter.history.at(-1)?.tags).toContain('人情')
+  })
+
+  it('短期代打會出現單一後勤取捨，付費與求人都不是必要路線', () => {
+    let state = createNewRun({ ...input, seed: 'SHORT-NOTICE-LOGISTICS' })
+    state.phase = 'camp'
+    state.stage = 'regional'
+    state.fighter.evidence.fights = 3
+    state.offers[0] = { ...state.offers[0], shortNotice: true }
+    state.selectedOfferId = state.offers[0].id
+    state = completeCampDrill(state, 'recovery')
+    state = completeCampDrill(state, 'recovery')
+    state = completeCampDrill(state, 'recovery')
+    expect(state.lifeEvent?.title).toBe('臨時出發的後勤')
+    expect(state.lifeEvent?.options).toHaveLength(3)
+    expect(state.lifeEvent?.options.some((option) => (option.minimumMoney ?? 0) > 0)).toBe(true)
+    expect(state.lifeEvent?.options.some((option) => !option.minimumMoney && !(option.effects.money && option.effects.money < 0))).toBe(true)
+  })
+
+  it('晚期資金可以轉化為拳館傳承並寫進退休傳記，而不增加永久戰力', () => {
+    let state = createNewRun({ ...input, seed: 'FINANCIAL-LEGACY' })
+    state.phase = 'camp'
+    state.stage = 'world'
+    state.fighter.evidence.fights = state.fighter.careerFightTarget - 3
+    state.fighter.money = 1_000_000
+    const techniqueBefore = structuredClone(state.fighter.technique)
+    state = completeCampDrill(state, 'recovery')
+    state = completeCampDrill(state, 'recovery')
+    state = completeCampDrill(state, 'recovery')
+    expect(state.lifeEvent?.title).toBe('拳館留下來的東西')
+    state = apply(state, { type: 'RESOLVE_LIFE', optionId: 'fund-gym' })
+    expect(state.fighter.history.at(-1)?.tags).toEqual(expect.arrayContaining(['金錢', '傳承', '拳館']))
+    expect(state.fighter.technique).toEqual(techniqueBefore)
+    const retired = apply(state, { type: 'RETIRE' })
+    expect(retired.biography?.financialLegacy).toContain('拳館')
+  })
+
+  it('零資金拳手不會因經濟系統卡住完整生涯', () => {
+    const state = createNewRun({ ...input, seed: 'ZERO-MONEY-LIFE' })
+    state.fighter.money = 0
+    const retired = completeCareer(state)
+    expect(retired.phase).toBe('retirement')
+    expect(retired.biography).toBeDefined()
+  })
+
   it('每第二個早期營隊會出現家鄉事件，選擇結果會留下地區記憶', () => {
     let state = createNewRun({ ...input, region: 'taiwan', seed: 'REGIONAL-EVENT' })
     state.phase = 'camp'
@@ -551,10 +701,41 @@ describe('拳途人生模擬核心', () => {
       delete offer.opponentIsLocal
     }
     const migrated = migrateVersion10(legacy)
-    expect(migrated.saveVersion).toBe(11)
+    expect(migrated.saveVersion).toBe(12)
     expect(migrated.fighter.name).toBe('自訂姓名')
     expect(REGION_PROFILES.taiwan.hometowns).toContain(migrated.fighter.hometown)
     expect(migrated.offers.every((offer) => offer.venueRegion === 'taiwan')).toBe(true)
+  })
+
+  it('第十一版生涯會補上邀約價格明細與合約自由狀態', () => {
+    const current = createNewRun({ ...input, seed: 'MIGRATE-ECONOMY' })
+    const legacy = structuredClone(current) as unknown as Record<string, any>
+    legacy.saveVersion = 11
+    legacy.rulesVersion = '0.7.0'
+    legacy.contentVersion = '1.0.0'
+    delete legacy.offerRefreshUsed
+    for (const offer of legacy.offers) delete offer.purseBreakdown
+    const migrated = migrateVersion11(legacy)
+    expect(migrated.saveVersion).toBe(12)
+    expect(migrated.offerRefreshUsed).toBe(false)
+    expect(migrated.offers.every((offer) => offer.purseBreakdown.base === offer.purse)).toBe(true)
+  })
+
+  it('舊版三選一獎勵畫面會保留候選並安全轉成四選二流程', () => {
+    const legacy = structuredClone(createNewRun({ ...input, seed: 'MIGRATE-TRAINING-REWARD' })) as unknown as Record<string, any>
+    legacy.rulesVersion = '0.8.0'
+    legacy.contentVersion = '1.1.0'
+    legacy.phase = 'training-reward'
+    legacy.trainingMoveBranch = 'ground'
+    legacy.trainingMoveChoices = ['rebuild-guard', 'guard-kimura', 'hip-escape']
+    delete legacy.trainingMoveSelections
+
+    const migrated = migrateVersion12(legacy)
+    expect(migrated.rulesVersion).toBe('0.9.0')
+    expect(migrated.contentVersion).toBe('1.2.0')
+    expect(migrated.phase).toBe('training-reward')
+    expect(migrated.trainingMoveChoices).toEqual(legacy.trainingMoveChoices)
+    expect(migrated.trainingMoveSelections).toEqual([])
   })
 
   it('科技樹命令不再花費點數或解鎖節點', () => {
@@ -609,15 +790,18 @@ describe('拳途人生模擬核心', () => {
     expect(strainedFamily.fighter.health.head).toBe(82)
   })
 
-  it('技術訓練後必須從三個候選中學會一招', () => {
+  it('技術訓練後從四個候選中選定兩招才會完成獎勵', () => {
     let state = enterCamp('MOVE-CHOICE')
     state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
     state = resolvePerfectDrill(state)
     state = apply(state, { type: 'ACK_CAMP_DRILL_RESULT' })
     expect(state.phase).toBe('training-reward')
-    const choice = state.trainingMoveChoices![0]
-    state = apply(state, { type: 'LEARN_TRAINING_MOVE', moveId: choice })
-    expect(state.fighter.learnedMoves).toContain(choice)
+    const choices = state.trainingMoveChoices!.slice(0, 2)
+    state = apply(state, { type: 'TOGGLE_TRAINING_MOVE', moveId: choices[0] })
+    expect(apply(state, { type: 'CONFIRM_TRAINING_MOVES' }).phase).toBe('training-reward')
+    state = apply(state, { type: 'TOGGLE_TRAINING_MOVE', moveId: choices[1] })
+    state = apply(state, { type: 'CONFIRM_TRAINING_MOVES' })
+    expect(state.fighter.learnedMoves).toEqual(expect.arrayContaining(choices))
     expect(state.trainingMoveChoices).toBeUndefined()
   })
 

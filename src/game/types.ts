@@ -245,6 +245,12 @@ export interface FightOffer {
   opponentId: string
   promotion: string
   purse: number
+  purseBreakdown: {
+    base: number
+    riskAdjustment: number
+    shortNoticePremium: number
+    titleBonus: number
+  }
   rankReward: number
   riskLabel: RiskLabel
   titleFight: boolean
@@ -254,6 +260,15 @@ export interface FightOffer {
 }
 
 export type RiskLabel = '低風險' | '中度風險' | '高風險' | '極高風險' | '絕望'
+
+export interface EconomyEffects {
+  trust?: number
+  fatigue?: number
+  money?: number
+  readiness?: number
+  health?: number
+  reputation?: number
+}
 
 export interface CampDrillPrompt {
   cue: string
@@ -406,6 +421,7 @@ export interface FightMoveDefinition {
   basic: boolean
   stageWeights: Record<FightStageName, number>
   effects: FightEffectVector
+  minimumLevel?: SkillLevel
   cleanPosition?: Position
   contestedPosition?: Position
   counteredPosition?: Position
@@ -586,7 +602,10 @@ export interface LifeEvent {
     label: string
     detail: string
     outcome: string
-    effects: Partial<{ trust: number; fatigue: number; money: number; readiness: number; health: number }>
+    effects: EconomyEffects
+    minimumMoney?: number
+    historyTags?: string[]
+    importance?: 1 | 2 | 3
   }>
 }
 
@@ -595,7 +614,7 @@ export interface LifeEventResult {
   optionLabel: string
   personName: string
   story: string
-  effects: Partial<{ trust: number; fatigue: number; money: number; readiness: number; health: number }>
+  effects: EconomyEffects
 }
 
 export interface Biography {
@@ -614,6 +633,7 @@ export interface Biography {
   finalSkills: Record<Branch, SkillLevel>
   learnedMoves: string[]
   traits: OwnedTrait[]
+  financialLegacy?: string
   retiredAt: number
   createdAt: number
 }
@@ -629,9 +649,9 @@ export interface RngStreams {
 }
 
 export interface GameState {
-  saveVersion: 11
-  rulesVersion: '0.7.0'
-  contentVersion: '1.0.0'
+  saveVersion: 12
+  rulesVersion: '0.9.0'
+  contentVersion: '1.2.0'
   seed: string
   phase: GamePhase
   stage: Stage
@@ -639,12 +659,14 @@ export interface GameState {
   rng: RngStreams
   opponents: Opponent[]
   offers: FightOffer[]
+  offerRefreshUsed: boolean
   selectedOfferId?: string
   campActions: CampAction[]
   campDrillHistory: CampDrillOutcome[]
   activeCampDrill?: CampDrillChallenge
   campDrillOutcome?: CampDrillOutcome
   trainingMoveChoices?: string[]
+  trainingMoveSelections?: string[]
   trainingMoveBranch?: Branch
   lifeEvent?: LifeEvent
   lifeEventResult?: LifeEventResult
@@ -660,11 +682,13 @@ export interface GameState {
 export type GameCommand =
   | { type: 'ACK_REVEAL' }
   | { type: 'SELECT_OFFER'; offerId: string }
+  | { type: 'PURCHASE_OFFER_REFRESH' }
   | { type: 'DECLINE_OFFERS' }
   | { type: 'START_CAMP_DRILL'; action: CampAction; branch?: Branch; relaxedTiming?: boolean }
   | { type: 'RESOLVE_CAMP_DRILL'; result: CampDrillResult }
   | { type: 'ACK_CAMP_DRILL_RESULT' }
-  | { type: 'LEARN_TRAINING_MOVE'; moveId: string }
+  | { type: 'TOGGLE_TRAINING_MOVE'; moveId: string }
+  | { type: 'CONFIRM_TRAINING_MOVES' }
   | { type: 'CANCEL_CAMP_DRILL' }
   | { type: 'RESOLVE_LIFE'; optionId: string }
   | { type: 'ACK_LIFE_RESULT' }

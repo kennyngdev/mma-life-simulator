@@ -1,6 +1,6 @@
 import { openDB } from 'idb'
 import { BACKGROUNDS, REGION_PROFILES } from './content'
-import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, GameState, LoadGameResult, SaveEnvelope } from './types'
+import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LoadGameResult, SaveEnvelope } from './types'
 
 const DATABASE = 'cage-life'
 const STORE = 'records'
@@ -17,7 +17,7 @@ async function database() {
 export async function saveGame(game: GameState): Promise<void> {
   const db = await database()
   const envelope: SaveEnvelope = {
-    saveVersion: 11,
+    saveVersion: 12,
     rulesVersion: game.rulesVersion,
     contentVersion: game.contentVersion,
     savedAt: Date.now(),
@@ -30,9 +30,11 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
-  if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0' && envelope.contentVersion === '1.0.0') {
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.0' && envelope.contentVersion === '1.2.0') {
     return { game: restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)) }
   }
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.8.0' && envelope.contentVersion === '1.1.0') return { game: migrateVersion12(envelope.game) }
+  if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion11(envelope.game) }
   if (envelope.saveVersion === 10 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion10(envelope.game) }
   return { resetReason: 'combat-rules-upgrade' }
 }
@@ -153,7 +155,61 @@ export function migrateVersion10(game: unknown): GameState {
     if (migratedOffer) legacy.fight.offer = migratedOffer
   }
   if (legacy.biography) legacy.biography = { ...legacy.biography, hometown: legacy.biography.hometown ?? legacy.fighter.hometown, alias: legacy.biography.alias ?? legacy.fighter.alias }
-  return removeRetiredSparring({ ...legacy, saveVersion: 11 })
+  return migrateVersion11({ ...legacy, saveVersion: 11, rulesVersion: '0.7.0', contentVersion: '1.0.0' })
+}
+
+type Version11Offer = Omit<FightOffer, 'purseBreakdown'> & { purseBreakdown?: FightOffer['purseBreakdown'] }
+type Version11Game = Omit<GameState, 'saveVersion' | 'rulesVersion' | 'contentVersion' | 'offerRefreshUsed' | 'offers' | 'fight'> & {
+  saveVersion: number
+  rulesVersion: string
+  contentVersion: string
+  offerRefreshUsed?: boolean
+  offers: Version11Offer[]
+  fight?: GameState['fight'] & { offer: Version11Offer }
+}
+
+/** Adds optional-economy state without invalidating an active career or changing its current opponents. */
+export function migrateVersion11(game: unknown): GameState {
+  const legacy = structuredClone(game) as Version11Game
+  if (!legacy.fighter || !legacy.offers) throw new Error('無法讀取舊生涯存檔')
+  const offers = legacy.offers.map((offer): FightOffer => ({
+    ...offer,
+    purseBreakdown: offer.purseBreakdown ?? { base: offer.purse, riskAdjustment: 0, shortNoticePremium: 0, titleBonus: 0 },
+  }))
+  const fight = legacy.fight ? {
+    ...legacy.fight,
+    offer: offers.find((offer) => offer.id === legacy.fight!.offer.id) ?? {
+      ...legacy.fight.offer,
+      purseBreakdown: legacy.fight.offer.purseBreakdown ?? { base: legacy.fight.offer.purse, riskAdjustment: 0, shortNoticePremium: 0, titleBonus: 0 },
+    },
+  } : undefined
+  return migrateVersion12({
+    ...legacy,
+    offers,
+    fight,
+    offerRefreshUsed: legacy.offerRefreshUsed ?? false,
+    saveVersion: 12,
+    rulesVersion: '0.8.0',
+    contentVersion: '1.1.0',
+  })
+}
+
+type Version12Game = Omit<GameState, 'rulesVersion' | 'contentVersion' | 'trainingMoveSelections'> & {
+  rulesVersion: string
+  contentVersion: string
+  trainingMoveSelections?: string[]
+}
+
+/** Preserves active careers while adopting authored move access and two-pick training rewards. */
+export function migrateVersion12(game: unknown): GameState {
+  const legacy = structuredClone(game) as Version12Game
+  if (!legacy.fighter || !legacy.offers) throw new Error('無法讀取舊生涯存檔')
+  return restoreBackgroundStartingMoves(removeRetiredSparring({
+    ...legacy,
+    trainingMoveSelections: legacy.phase === 'training-reward' ? legacy.trainingMoveSelections ?? [] : undefined,
+    rulesVersion: '0.9.0',
+    contentVersion: '1.2.0',
+  } as GameState))
 }
 
 /** Backwards-compatible name used by legacy callers and migration tests. */

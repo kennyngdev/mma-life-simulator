@@ -1,4 +1,4 @@
-import type { Branch, ExecutionVariant, FightMoveDefinition, FightStageName, OpeningKey, Position } from './types'
+import type { Branch, ExecutionVariant, FightMoveDefinition, FightStageName, OpeningKey, Position, SkillLevel } from './types'
 
 const stages = (contact: number, exchange: number, turn: number, finish: number): Record<FightStageName, number> => ({ contact, exchange, turn, finish })
 const effects = (score: number, headDamage: number, bodyDamage: number, legDamage: number, control: number, staminaCost: number, finishPressure: number) =>
@@ -6,6 +6,39 @@ const effects = (score: number, headDamage: number, bodyDamage: number, legDamag
 
 const STANDING_POSITIONS: Position[] = ['range', 'pocket', 'cage', 'cage-control', 'cage-defense']
 const COMMITTED_KICKS = new Set(['body-kick', 'switch-kick', 'question-mark-kick', 'head-kick', 'spinning-back-kick', 'step-knee'])
+
+/** Identity-defining techniques unlock by authored complexity, not raw damage/control thresholds alone. */
+const AUTHORED_MOVE_LEVELS: Partial<Record<string, SkillLevel>> = {
+  // A developing clinch fighter needs a route into the position before advanced Thai-clinch chains.
+  'enter-clinch': 1,
+  'inside-position': 1,
+  'double-collar-entry': 2,
+
+  // Wrestling training must teach a real takedown immediately, then broaden into situational finishes.
+  'shot-entry': 1,
+  'single-leg-shot': 2,
+  'body-lock-control': 2,
+  'wall-takedown': 2,
+
+  // A kicking identity can pursue a head-kick finish before mastery, while trick kicks remain advanced.
+  'head-kick': 3,
+
+  // Ground fighters learn a basic submission immediately; later levels add positions and complexity.
+  'guard-kimura': 1,
+  'front-headlock': 2,
+  'front-headlock-guillotine': 2,
+  'guard-armbar': 2,
+  'rear-naked-choke': 2,
+  'americana': 3,
+  'bottom-submission': 3,
+  'side-kimura': 3,
+  'arm-triangle': 4,
+  'back-armbar': 4,
+  'mounted-armbar': 4,
+  'north-south-choke': 4,
+  'seek-choke': 4,
+  'front-headlock-anaconda': 5,
+}
 
 function move(
   id: string, label: string, description: string, positions: Position[], branch: Branch,
@@ -17,7 +50,7 @@ function move(
     ? branch === 'boxing' ? 'punch' : branch === 'kicking' ? 'kick' : undefined
     : undefined)
   const commitment = extras.commitment ?? (strikeKind === 'punch' ? 'quick' : strikeKind === 'kick' ? (COMMITTED_KICKS.has(id) ? 'committed' : 'set') : undefined)
-  return { id, label, description, positions, branch, category, stageWeights, effects: vector, basic: true, creates: [], exploits: [], strikeKind, commitment, ...extras }
+  return { id, label, description, positions, branch, category, stageWeights, effects: vector, basic: true, creates: [], exploits: [], strikeKind, commitment, minimumLevel: AUTHORED_MOVE_LEVELS[id], ...extras }
 }
 
 /** Every legal positional action lives here. The engine ranks this full pool instead of enforcing branch diversity. */
