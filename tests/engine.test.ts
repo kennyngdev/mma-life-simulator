@@ -296,6 +296,24 @@ describe('拳途人生模擬核心', () => {
     expect(checkedBottomSituation).toBe(true)
   })
 
+  it('抱摔戰術被破解而落入下位時會交代具體過程', () => {
+    let checkedCounteredEntry = false
+    for (let index = 0; index < 80 && !checkedCounteredEntry; index += 1) {
+      let state = reachFirstRoundPlan(createNewRun({ ...input, seed: `COUNTERED-ENTRY-${index}` }))
+      state.fighter.technique.wrestling = 0
+      state.fighter.body.cardio = 0
+      state.fighter.mind.fightIQ = 0
+      state = apply(state, { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+      if (state.fight!.position !== 'bottom') continue
+
+      expect(state.fight!.commentary.at(-1)).toContain('射出雙腿抱摔')
+      expect(state.fight!.commentary.at(-1)).toContain('後撤髖部避開切入')
+      expect(state.fight!.commentary.at(-1)).toContain('落到防守架下位')
+      checkedCounteredEntry = true
+    }
+    expect(checkedCounteredEntry).toBe(true)
+  })
+
   it('成功的雙腿抱摔會進入上位並計入抱摔紀錄', () => {
     let checkedSecondCritical = false
     for (let index = 0; index < 80 && !checkedSecondCritical; index += 1) {
@@ -565,6 +583,24 @@ describe('拳途人生模擬核心', () => {
     }
     expect(titles).toEqual(['接觸', '交鋒', '轉折', '收尾'])
     expect(state.fight!.opponentAdaptation['steady-output']).toBe(4)
+    expect(state.fight!.opponentAdaptation['category:offense']).toBeGreaterThanOrEqual(4)
+    expect(state.fight!.opponentAdaptation['branch:boxing']).toBeGreaterThanOrEqual(4)
+  })
+
+  it('對手會跨招式讀取重複的攻防類型與技術分支，使綠色克制不再是永久答案', () => {
+    const base = reachFirstRoundPlan(createNewRun({ ...input, seed: 'PATTERN-READ' }))
+    const adapted = structuredClone(base)
+    adapted.fight!.opponentAdaptation['category:defense'] = 2
+    adapted.fight!.opponentAdaptation['branch:boxing'] = 2
+
+    const freshRound = apply(base, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const readRound = apply(adapted, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const fresh = freshRound.fight!.prompt!.allOptions.find((option) => option.intentId === 'angle-away')!
+    const read = readRound.fight!.prompt!.allOptions.find((option) => option.intentId === 'angle-away')!
+
+    expect(read.chance.min).toBeLessThanOrEqual(fresh.chance.min - 18)
+    expect(read.negatives.join('、')).toContain('防守節奏已曝光 2 次')
+    expect(read.negatives.join('、')).toContain('拳擊路線已被追蹤')
   })
 
   it('三種結果層級都能產生電影式結構化戰報', () => {
@@ -579,6 +615,8 @@ describe('拳途人生模擬核心', () => {
       outcomes.add(beat.outcome)
       expect(beat.narrative.paragraph).toContain(beat.narrative.executionName)
       expect(beat.narrative.paragraph.length).toBeGreaterThan(35)
+      expect(beat.narrative.colorCommentary?.length).toBeGreaterThan(12)
+      expect(state.fight!.commentary.some((line) => line.startsWith('解說台｜'))).toBe(true)
     }
     expect(outcomes).toEqual(new Set(['clean', 'contested', 'countered']))
   })
@@ -685,7 +723,43 @@ describe('拳途人生模擬核心', () => {
     state = apply(state, { type: 'CONTINUE_ROUND' })
     const bodyTier = state.fight!.playerDamageByPart.body >= 75 ? 3 : state.fight!.playerDamageByPart.body >= 50 ? 2 : state.fight!.playerDamageByPart.body >= 25 ? 1 : 0
     expect(state.phase).toBe('round-plan')
-    expect(state.fight!.playerStamina).toBe(55 - [0, 2, 4, 6][bodyTier])
+    expect(state.fight!.playerStamina).toBe(62 - [0, 2, 4, 6][bodyTier])
+    expect(state.fight!.commentary.at(-1)).toContain('體力從 40 拉回')
+  })
+
+  it('追打指示會把目標部位招式推到前排，並公開強化與代價', () => {
+    const base = reachFirstRoundPlan(createNewRun({ ...input, seed: 'CORNER-PRESS' }))
+    const press = structuredClone(base)
+    press.fight!.cornerAdjustment = 'press'
+    press.fight!.cornerTarget = 'head'
+    const normalRound = apply(base, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const pressRound = apply(press, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const normalJab = normalRound.fight!.prompt!.allOptions.find((option) => option.actionKey === 'probe-range')!
+    const pressJab = pressRound.fight!.prompt!.allOptions.find((option) => option.actionKey === 'probe-range')!
+
+    expect(pressJab.chance.min - normalJab.chance.min).toBe(12)
+    expect(pressJab.effectSummary).toContain('場角：命中 +12、頭部傷害 +35%')
+    expect(pressRound.fight!.prompt!.featuredOptions.some((option) => option.effectSummary?.includes('場角'))).toBe(true)
+  })
+
+  it('傷處防護會實際減半該部位傷害，並在戰報顯示擋下的傷害', () => {
+    let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'CORNER-PROTECT' })), { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    state.fight!.sequenceStep = 4
+    state.fight!.finishWindowsUsed = 4
+    state.fight!.opponentIntent = {
+      intentId: 'haymaker', executionName: '重擺拳', branch: 'boxing', category: 'offense', target: 'head',
+      effectSummary: '主要威脅：頭部傷害', exploitsOpenings: [], threatLevel: 'danger',
+    }
+    const option = state.fight!.prompt!.allOptions.find((item) => !FIGHT_INTENTS.find((intent) => intent.id === item.actionKey)?.submission)!
+    option.chance = { min: 100, max: 100 }
+    const unprotected = apply(structuredClone(state), { type: 'RESOLVE_CRITICAL', optionId: option.id })
+    state.fight!.cornerAdjustment = 'protect'
+    state.fight!.cornerTarget = 'head'
+    const protectedState = apply(state, { type: 'RESOLVE_CRITICAL', optionId: option.id })
+
+    expect(protectedState.fight!.playerDamageByPart.head).toBeLessThan(unprotected.fight!.playerDamageByPart.head)
+    expect(protectedState.fight!.lastNarrative!.impactTags.some((tag) => tag.startsWith('場角防護 -'))).toBe(true)
+    expect(protectedState.fight!.lastNarrative!.paragraph).toContain('少承受了')
   })
 
   it('降服機會會實際讀取終結壓力、控制優勢與已製造的破綻', () => {
@@ -743,7 +817,7 @@ describe('拳途人生模擬核心', () => {
     expect(submissionState.fight!.activeFinishWindow?.kind).toBe('submission')
   })
 
-  it('任何明確的降服選擇都會立即進入小遊戲，即使機會很差或已用完一般終結窗口', () => {
+  it('沒有鋪墊的降服不會直接變成必勝小遊戲', () => {
     let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'DIRECT-BOTTOM-SUB' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
     const execution = variantsForIntent('guard-armbar')[0]
     const template = state.fight!.prompt!.allOptions[0]
@@ -757,8 +831,9 @@ describe('拳途人生模擬核心', () => {
 
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: submission.id })
 
-    expect(state.phase).toBe('finish-minigame')
-    expect(state.fight!.activeFinishWindow).toMatchObject({ attacker: 'player', kind: 'submission', sourcePosition: 'bottom', failurePosition: 'side-control-defense' })
+    expect(state.phase).toBe('critical')
+    expect(state.fight!.activeFinishWindow).toBeUndefined()
+    expect(state.fight!.commentary.at(-1)).toContain('抓握還沒鎖緊')
   })
 
   it('低完成度的下位降服失敗會被過腿，額外消耗體力並送出控制分', () => {

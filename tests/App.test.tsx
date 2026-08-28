@@ -61,10 +61,22 @@ function gameAtBackControl(): GameState {
   return game
 }
 
+function gameAtCounteredTakedownEntry(): GameState {
+  const game = gameAtBackControl()
+  const opponent = game.opponents.find((item) => item.id === game.fight!.opponentId)!
+  Object.assign(game.fight!, {
+    position: 'bottom', plan: 'takedown', sequenceStep: 1, stageName: 'contact', beatHistory: [],
+    commentary: [`第 1 回合，你主動尋找抱摔機會。你壓低重心射出雙腿抱摔，但${opponent.name}後撤髖部避開切入，順勢壓住上身；你落到防守架下位。`],
+    prompt: { ...game.fight!.prompt!, title: '接觸｜防守架下位', position: 'bottom' },
+  })
+  return game
+}
+
 describe('生涯重置', () => {
   afterEach(() => cleanup())
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     storage.loadGame.mockResolvedValue({ game: createNewRun(input) })
     storage.listBiographies.mockResolvedValue([])
     storage.saveGame.mockResolvedValue(undefined)
@@ -210,6 +222,7 @@ describe('生涯重置', () => {
     render(<App />)
 
     expect(await screen.findByText('終結一擊')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '我明白了，開始挑戰' }))
     expect(await screen.findByLabelText('擊倒進攻小遊戲')).toBeInTheDocument()
     expect(screen.getByText(/拖曳準星瞄準紅色目標/)).toBeInTheDocument()
   })
@@ -218,11 +231,31 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({ game: gameAtFinishMinigame('submission') })
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: '我明白了，開始挑戰' }))
     expect(await screen.findByLabelText('降服進攻小遊戲')).toBeInTheDocument()
     expect(screen.getByText(/下位失敗可能被過腿/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '快速連點' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '改用節奏長按' }))
     expect(screen.getByRole('button', { name: '亮區內按住' })).toBeInTheDocument()
+  })
+
+  it('第一次進入小遊戲時顯示玩法教學，確認後不再顯示', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtFinishMinigame('strike') })
+    const first = render(<App />)
+
+    const tutorial = await screen.findByRole('dialog', { name: '終結小遊戲怎麼玩？' })
+    expect(tutorial).toHaveTextContent('重擊：瞄準再抓時機')
+    expect(tutorial).toHaveTextContent('降服：連點或節奏長按')
+    expect(screen.queryByLabelText('擊倒進攻小遊戲')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '我明白了，開始挑戰' }))
+    expect(screen.queryByRole('dialog', { name: '終結小遊戲怎麼玩？' })).not.toBeInTheDocument()
+    expect(localStorage.getItem('cage-life:minigame-tutorial-seen-v1')).toBe('true')
+
+    first.unmount()
+    render(<App />)
+    expect(await screen.findByText('終結一擊')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '終結小遊戲怎麼玩？' })).not.toBeInTheDocument()
   })
 
   it('背後控制在戰鬥介面顯示獨立位置、裸絞、十字固與背後打擊', async () => {
@@ -231,8 +264,21 @@ describe('生涯重置', () => {
 
     expect(await screen.findByRole('heading', { name: '轉折｜背後控制' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '目前位置：背後控制' })).toBeInTheDocument()
+    expect(screen.getByText('你掌握位置')).toBeInTheDocument()
+    expect(screen.getByText('你控制對手背部並建立鉤腿，裸絞與背後打擊威脅最高。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /裸絞（RNC）/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /背後十字固/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /背後短拳/ })).toBeInTheDocument()
+  })
+
+  it('抱摔開局被破解落入下位時顯示醒目的原因說明', async () => {
+    const game = gameAtCounteredTakedownEntry()
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const event = await screen.findByRole('status')
+    expect(event).toHaveTextContent('抱摔被破解')
+    expect(event).toHaveTextContent('後撤髖部避開切入')
+    expect(event).toHaveTextContent('你落到防守架下位')
   })
 })

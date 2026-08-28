@@ -288,6 +288,7 @@ export interface NarrativeBeat {
   openingsCreated: OpeningKey[]
   openingsConsumed: OpeningKey[]
   impactTags: string[]
+  colorCommentary?: string
 }
 
 export interface DecisionPrompt {

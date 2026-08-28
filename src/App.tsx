@@ -11,6 +11,8 @@ import type {
   CampAction,
   CriticalOption,
   FighterState,
+  FightDamagePart,
+  FightState,
   GameCommand,
   GameState,
   HealthPart,
@@ -27,6 +29,7 @@ import type {
 import { t } from './i18n'
 
 const BRANCHES: Branch[] = ['boxing', 'kicking', 'clinch', 'wrestling', 'ground']
+const MINIGAME_TUTORIAL_KEY = 'cage-life:minigame-tutorial-seen-v1'
 
 export default function App() {
   const [game, setGame] = useState<GameState>()
@@ -458,6 +461,27 @@ function weightPlanLabel(plan: WeightPlan) {
   return ({ safe: '保守減重', standard: '標準減重', aggressive: '激進減重' } as const)[plan]
 }
 
+function fightDamagePartLabel(part?: FightDamagePart) {
+  return part === 'head' ? '頭部' : part === 'body' ? '軀幹' : part === 'leg' ? '腿部' : '傷處'
+}
+
+function mostDamagedPart(damage: FightState['playerDamageByPart']): FightDamagePart {
+  return (Object.entries(damage) as Array<[FightDamagePart, number]>).sort((a, b) => b[1] - a[1])[0][0]
+}
+
+function CornerDirective({ fight, pending = false }: { fight: FightState; pending?: boolean }) {
+  if (!fight.cornerAdjustment) return null
+  const target = fightDamagePartLabel(fight.cornerTarget)
+  const title = fight.cornerAdjustment === 'protect' ? `鎖住${target}防線`
+    : fight.cornerAdjustment === 'recover' ? '搶回呼吸' : `追打${target}`
+  const detail = fight.cornerAdjustment === 'protect' ? `${target}承傷 -50%；下回合開局主動 -4。`
+    : fight.cornerAdjustment === 'recover' ? `體力回復 22（會受軀幹傷勢與上限影響）；下回合開局主動 -10。`
+      : `${target}招式命中 +12、傷害 +35%；我方承傷 +15%、每次行動多耗 2 體力。`
+  return <aside className={`corner-directive ${fight.cornerAdjustment}`} aria-live="polite">
+    <span>{pending ? '已鎖定下回合' : '本回合場角指示'}</span><strong>{title}</strong><p>{detail}</p>
+  </aside>
+}
+
 function RoundPlanView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const plans: Array<{ id: RoundPlan; label: string; detail: string }> = [
@@ -469,6 +493,7 @@ function RoundPlanView({ game, dispatch }: ViewProps) {
   ]
   return <Screen title={`第 ${fight.round} 回合`} kicker={`${fight.totalRounds} 回合制`}>
     <FightArena game={game} />
+    <CornerDirective fight={fight} />
     <SectionTitle title="這回合怎麼打？" subtitle="戰術會影響場上位置、體力消耗和接下來出現的機會。" />
     <div className="choice-list fight-choices">{plans.map((plan) => <button className="choice-row" key={plan.id} onClick={() => dispatch({ type: 'SET_ROUND_PLAN', plan: plan.id })}><strong>{plan.label}</strong><span>{plan.detail}</span></button>)}</div>
   </Screen>
@@ -489,15 +514,18 @@ function CriticalView({ game, dispatch }: ViewProps) {
   const outcomeLabel = fight.lastNarrative?.outcome === 'clean' ? '乾淨奏效' : fight.lastNarrative?.outcome === 'contested' ? '互有得失' : '遭到破解'
   return <Screen title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · ${momentum}`}>
     <FightArena game={game} compact />
+    <CornerDirective fight={fight} />
     {fight.lastNarrative && <article className={`narrative-beat ${fight.lastNarrative.outcome}`}>
       <header><span>上一段攻防</span><strong>{outcomeLabel}</strong></header>
       <p>{fight.lastNarrative.paragraph}</p>
+      {fight.lastNarrative.colorCommentary && <aside className="color-call"><span>解說台</span><q>{fight.lastNarrative.colorCommentary}</q></aside>}
       <div className="impact-tags">{(fight.lastNarrative.impactTags ?? []).map((tag) => <b key={tag}>{tag}</b>)}</div>
     </article>}
     <p className="story-copy critical-copy">{prompt.description}</p>
     <ThreatCard game={game} />
     {fight.opponentOpenings.length > 0 && <div className="opening-strip"><span>可利用破綻</span>{fight.opponentOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
     {fight.playerOpenings.length > 0 && <div className="opening-strip danger"><span>你的防守空檔</span>{fight.playerOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
+    {fight.beatHistory.length > 0 && <AdaptationWarning fight={fight} />}
     <div className="move-section-label"><span>關鍵選擇</span><small>克制、招牌、轉位與安全路線</small></div>
     <div className="choice-list">{prompt.featuredOptions.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} />)}</div>
     {remaining > 0 && <button className="more-moves-button" onClick={() => { setMoveBranch('all'); setShowAllMoves(true) }}>查看其餘 {remaining} 種招式 <span>進攻、轉位與防守</span></button>}
@@ -515,6 +543,17 @@ function CriticalView({ game, dispatch }: ViewProps) {
       </section>
     </div>}
   </Screen>
+}
+
+function AdaptationWarning({ fight }: { fight: FightState }) {
+  const categories: Array<[MoveCategory, string]> = [['offense', '進攻'], ['transition', '轉位'], ['defense', '防守']]
+  const mostRead = categories
+    .map(([id, label]) => ({ label, count: fight.opponentAdaptation[`category:${id}`] ?? 0 }))
+    .sort((a, b) => b.count - a.count)[0]
+  return <aside className="adaptation-warning" aria-live="polite">
+    <span>對手正在學習你的節奏</span>
+    <p>{mostRead.count > 1 ? `你已經使用 ${mostRead.label} ${mostRead.count} 次；` : ''}重複同類攻防或同一技術分支會逐步降低成功率。換一條路，往往比再按一次綠色答案更安全。</p>
+  </aside>
 }
 
 function ThreatCard({ game }: { game: GameState }) {
@@ -548,10 +587,16 @@ function FinishMinigameView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const finishWindow = fight.activeFinishWindow!
   const [ready, setReady] = useState(false)
+  const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(MINIGAME_TUTORIAL_KEY) !== 'true')
   useEffect(() => {
+    if (showTutorial) return
     const timer = window.setTimeout(() => setReady(true), 700)
     return () => window.clearTimeout(timer)
-  }, [])
+  }, [showTutorial])
+  const closeTutorial = () => {
+    localStorage.setItem(MINIGAME_TUTORIAL_KEY, 'true')
+    setShowTutorial(false)
+  }
   const attacking = finishWindow.attacker === 'player'
   const bottomSubmissionRisk = finishWindow.kind === 'submission' && attacking && finishWindow.sourcePosition === 'bottom'
   const title = finishWindow.kind === 'strike'
@@ -570,7 +615,27 @@ function FinishMinigameView({ game, dispatch }: ViewProps) {
       : finishWindow.kind === 'strike'
         ? <StrikeMinigame game={game} dispatch={dispatch} />
         : <SubmissionMinigame game={game} dispatch={dispatch} />}
+    {showTutorial && <MinigameTutorial currentKind={finishWindow.kind} onStart={closeTutorial} />}
   </Screen>
+}
+
+function MinigameTutorial({ currentKind, onStart }: { currentKind: 'strike' | 'submission'; onStart: () => void }) {
+  return <div className="tutorial-backdrop">
+    <section className="tutorial-dialog" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" aria-describedby="tutorial-summary">
+      <p className="eyebrow">FIRST FINISH WINDOW</p>
+      <div className="tutorial-heading">
+        <span aria-hidden="true">?</span>
+        <div><h2 id="tutorial-title">終結小遊戲怎麼玩？</h2><p id="tutorial-summary">關鍵攻防會交給你親手完成。操作越準確，終結或逃脫的機會越高。</p></div>
+      </div>
+      <ol className="tutorial-steps">
+        <li><b>1</b><div><strong>先看清楚角色</strong><span>「終結機會」代表你正在進攻；「終結危險」則要成功防守或掙脫。</span></div></li>
+        <li className={currentKind === 'strike' ? 'current' : ''}><b>2</b><div><strong>重擊：瞄準再抓時機</strong><span>拖曳準星對準紅色目標，等時機線進入中央亮區時放手。</span></div></li>
+        <li className={currentKind === 'submission' ? 'current' : ''}><b>3</b><div><strong>降服：連點或節奏長按</strong><span>在倒數結束前推高進度；也能切換成亮區內按住、離開前放手。</span></div></li>
+      </ol>
+      <p className="tutorial-note">這次是<strong>{currentKind === 'strike' ? '重擊操作' : '降服操作'}</strong>。視窗關閉後才會開始倒數。</p>
+      <button type="button" className="primary-action" autoFocus onClick={onStart}>我明白了，開始挑戰</button>
+    </section>
+  </div>
 }
 
 function StrikeMinigame({ game, dispatch }: ViewProps) {
@@ -733,15 +798,18 @@ function SubmissionMinigame({ game, dispatch }: ViewProps) {
 function RoundResultView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const score = fight.scores.at(-1)!
+  const protectTarget = fightDamagePartLabel(mostDamagedPart(fight.playerDamageByPart))
+  const pressTarget = fightDamagePartLabel(mostDamagedPart(fight.opponentDamageByPart))
   return <Screen title={`第 ${score.round} 回合結束`} kicker={`場邊暫估 ${score.player}–${score.opponent}`}>
     <FightArena game={game} />
     <div className="result-explain"><strong>{score.note}</strong><p>這是場邊根據有效打擊和纏鬥表現做出的估分，正式裁判的看法可能不同。</p></div>
-    {fight.round < fight.totalRounds && <><SectionTitle title="場角調整" subtitle="選一項，只影響下一回合。" />
+    {fight.round < fight.totalRounds && <><SectionTitle title="場角調整" subtitle="選一項承擔整個下回合的優勢與代價。" />
       <div className="corner-grid">
-        <button className={fight.cornerAdjustment === 'protect' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'protect' })}><strong>保護傷處</strong><span>該部位承傷 -30%，計畫效果略降</span></button>
-        <button className={fight.cornerAdjustment === 'recover' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })}><strong>深呼吸</strong><span>恢復 15 體力，但讓出更多主動</span></button>
-        <button className={fight.cornerAdjustment === 'press' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'press' })}><strong>追打傷處</strong><span>命中率 +8，每次行動多耗 2 體力</span></button>
+        <button aria-pressed={fight.cornerAdjustment === 'protect'} className={fight.cornerAdjustment === 'protect' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'protect' })}><strong>鎖住{protectTarget}防線</strong><span>{protectTarget}承傷 -50%；下回合開局主動 -4</span></button>
+        <button aria-pressed={fight.cornerAdjustment === 'recover'} className={fight.cornerAdjustment === 'recover' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })}><strong>搶回呼吸</strong><span>體力回復 22；下回合開局主動 -10</span></button>
+        <button aria-pressed={fight.cornerAdjustment === 'press'} className={fight.cornerAdjustment === 'press' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'press' })}><strong>追打對手{pressTarget}</strong><span>{pressTarget}招式命中 +12、傷害 +35%；我方承傷 +15%</span></button>
       </div></>}
+    {fight.round < fight.totalRounds && <CornerDirective fight={fight} pending />}
     <ActionDock><button className="primary-action" disabled={fight.round < fight.totalRounds && !fight.cornerAdjustment} onClick={() => dispatch({ type: 'CONTINUE_ROUND' })}>{fight.round >= fight.totalRounds ? '交給裁判，公布結果' : fight.cornerAdjustment ? '帶著調整進入下一回合' : '先選擇場角調整'}</button></ActionDock>
   </Screen>
 }
@@ -792,21 +860,8 @@ function downloadBiography(bio: Biography) {
 function FightArena({ game, compact = false }: { game: GameState; compact?: boolean }) {
   const fight = game.fight!
   const opponent = getOpponent(game)!
-  const positions: Record<Position, { player: [number, number]; opponent: [number, number] }> = {
-    range: { player: [28, 28], opponent: [72, 28] }, pocket: { player: [43, 28], opponent: [57, 28] },
-    clinch: { player: [48, 28], opponent: [52, 28] }, cage: { player: [17, 28], opponent: [10, 28] },
-    'cage-control': { player: [18, 28], opponent: [10, 28] }, 'cage-defense': { player: [10, 28], opponent: [18, 28] },
-    'thai-clinch': { player: [48, 25], opponent: [52, 30] }, 'thai-clinch-defense': { player: [52, 30], opponent: [48, 25] },
-    'body-lock': { player: [47, 28], opponent: [53, 28] }, 'body-lock-defense': { player: [53, 28], opponent: [47, 28] },
-    'front-headlock-control': { player: [46, 26], opponent: [54, 32] }, 'front-headlock-defense': { player: [54, 32], opponent: [46, 26] },
-    top: { player: [48, 25], opponent: [52, 34] }, bottom: { player: [52, 34], opponent: [48, 25] },
-    'side-control': { player: [45, 25], opponent: [53, 34] }, 'side-control-defense': { player: [53, 34], opponent: [45, 25] },
-    mount: { player: [50, 23], opponent: [50, 34] }, 'mount-defense': { player: [50, 34], opponent: [50, 23] },
-    scramble: { player: [44, 29], opponent: [56, 27] },
-    'back-control': { player: [47, 26], opponent: [53, 30] }, 'back-defense': { player: [53, 30], opponent: [47, 26] },
-  }
-  const markers = positions[fight.position]
   const lastBeat = fight.beatHistory.at(-1)
+  const counteredTakedownEntry = fight.plan === 'takedown' && fight.position === 'bottom' && fight.beatHistory.length === 0
   const playerHit = lastBeat?.damageEvents.find((event) => event.side === 'player')
   const opponentHit = lastBeat?.damageEvents.find((event) => event.side === 'opponent')
   const critical = [...Object.values(fight.playerDamageByPart), ...Object.values(fight.opponentDamageByPart)].some((value) => value >= 75)
@@ -815,15 +870,107 @@ function FightArena({ game, compact = false }: { game: GameState; compact?: bool
       <div><StatusBar label={game.fighter.name} value={fight.playerStamina} tone="player" /><DamageRibbon damage={fight.playerDamageByPart} /></div>
       <div><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /><DamageRibbon damage={fight.opponentDamageByPart} opponent /></div>
     </div>
-    <svg viewBox="0 0 100 54" role="img" aria-label={`目前位置：${positionLabel(fight.position)}`}>
-      <defs><pattern id="mesh" width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 0 7 7M7 0 0 7" stroke="currentColor" strokeWidth=".25" opacity=".28" /></pattern></defs>
-      <path d="M8 8h84v37H8z" fill="url(#mesh)" stroke="currentColor" strokeWidth="1" />
-      <circle cx={markers.player[0]} cy={markers.player[1]} r="5" className="fighter-dot player-dot" />
-      <circle cx={markers.opponent[0]} cy={markers.opponent[1]} r="5" className="fighter-dot opponent-dot" />
-      <text x="50" y="51" textAnchor="middle">{positionLabel(fight.position)}</text>
-    </svg>
+    <PositionScene position={fight.position} playerName={game.fighter.name} opponentName={opponent.name} />
+    {counteredTakedownEntry && <aside className="position-event countered" role="status" aria-live="polite">
+      <span>抱摔被破解</span>
+      <p>你壓低重心射出雙腿抱摔，但{opponent.name}後撤髖部避開切入，順勢壓住上身；你落到防守架下位。</p>
+    </aside>}
     <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>
   </section>
+}
+
+type FighterPose = 'standing' | 'leaning' | 'crouched' | 'kneeling' | 'grounded' | 'seated'
+type PositionFamily = 'standing' | 'clinch' | 'cage' | 'ground' | 'scramble'
+
+interface PositionVisual {
+  family: PositionFamily
+  player: { x: number; y: number; pose: FighterPose; flip?: boolean; rotate?: number }
+  opponent: { x: number; y: number; pose: FighterPose; flip?: boolean; rotate?: number }
+  owner: 'player' | 'opponent' | 'neutral'
+  detail: string
+  connection?: 'hands' | 'head' | 'waist' | 'ground'
+  cageSide?: 'left' | 'right'
+}
+
+const POSITION_VISUALS: Record<Position, PositionVisual> = {
+  range: { family: 'standing', player: { x: 27, y: 34, pose: 'standing' }, opponent: { x: 73, y: 34, pose: 'standing', flip: true }, owner: 'neutral', detail: '雙方仍在拳腳距離外圍，移動、刺拳與踢擊最容易展開。' },
+  pocket: { family: 'standing', player: { x: 42, y: 34, pose: 'standing' }, opponent: { x: 58, y: 34, pose: 'standing', flip: true }, owner: 'neutral', detail: '雙方已進入短拳交換距離，傷害提高，也更容易接入纏抱。' },
+  clinch: { family: 'clinch', player: { x: 46, y: 34, pose: 'leaning' }, opponent: { x: 54, y: 34, pose: 'leaning', flip: true }, owner: 'neutral', connection: 'hands', detail: '雙方正在爭奪頭位與內勾，尚未有人建立完整控制。' },
+  cage: { family: 'cage', player: { x: 19, y: 34, pose: 'leaning', flip: true }, opponent: { x: 11, y: 34, pose: 'standing' }, owner: 'neutral', connection: 'hands', cageSide: 'left', detail: '戰局貼近鐵網，但控制方向仍在轉換。' },
+  'cage-control': { family: 'cage', player: { x: 20, y: 34, pose: 'leaning', flip: true }, opponent: { x: 11, y: 34, pose: 'standing' }, owner: 'player', connection: 'hands', cageSide: 'left', detail: '你把對手固定在鐵網，能連接短打、膝擊與籠邊摔法。' },
+  'cage-defense': { family: 'cage', player: { x: 11, y: 34, pose: 'standing', flip: true }, opponent: { x: 20, y: 34, pose: 'leaning' }, owner: 'opponent', connection: 'hands', cageSide: 'left', detail: '你的背部受到鐵網限制，首要問題是轉身脫離或重新搶內勾。' },
+  'thai-clinch': { family: 'clinch', player: { x: 46, y: 31, pose: 'standing' }, opponent: { x: 54, y: 36, pose: 'crouched', flip: true }, owner: 'player', connection: 'head', detail: '你控制了對手頭頸，可直接製造膝擊與失衡。' },
+  'thai-clinch-defense': { family: 'clinch', player: { x: 54, y: 36, pose: 'crouched' }, opponent: { x: 46, y: 31, pose: 'standing', flip: true }, owner: 'opponent', connection: 'head', detail: '對手正拉低你的頭位，必須先恢復姿勢才能安全反擊。' },
+  'body-lock': { family: 'clinch', player: { x: 46, y: 34, pose: 'standing' }, opponent: { x: 54, y: 34, pose: 'standing', flip: true }, owner: 'player', connection: 'waist', detail: '你鎖住對手腰部與髖線，摔投、回摔與推向鐵網都已開放。' },
+  'body-lock-defense': { family: 'clinch', player: { x: 54, y: 34, pose: 'standing' }, opponent: { x: 46, y: 34, pose: 'standing', flip: true }, owner: 'opponent', connection: 'waist', detail: '對手已鎖住你的腰部，重心與轉身空間受到限制。' },
+  'front-headlock-control': { family: 'clinch', player: { x: 44, y: 31, pose: 'leaning' }, opponent: { x: 55, y: 37, pose: 'crouched', flip: true }, owner: 'player', connection: 'head', detail: '你壓住頭頸與一側手臂，可以轉背、膝擊或尋找前頸降服。' },
+  'front-headlock-defense': { family: 'clinch', player: { x: 55, y: 37, pose: 'crouched' }, opponent: { x: 44, y: 31, pose: 'leaning', flip: true }, owner: 'opponent', connection: 'head', detail: '你的頭頸被控制，起身前必須先處理抓握與角度。' },
+  top: { family: 'ground', player: { x: 48, y: 28, pose: 'kneeling' }, opponent: { x: 52, y: 38, pose: 'grounded', rotate: -8 }, owner: 'player', connection: 'ground', detail: '你在對手防守架上方；可以穩固上位、過腿或進行地面打擊。' },
+  bottom: { family: 'ground', player: { x: 52, y: 38, pose: 'grounded', rotate: 8 }, opponent: { x: 48, y: 28, pose: 'kneeling', flip: true }, owner: 'opponent', connection: 'ground', detail: '你在防守架下位；能掃摔或降服反攻，但裁判得分通常偏向上方控制者。' },
+  'side-control': { family: 'ground', player: { x: 46, y: 29, pose: 'grounded', rotate: 12 }, opponent: { x: 54, y: 38, pose: 'grounded', rotate: -5 }, owner: 'player', connection: 'ground', detail: '你越過雙腿取得側控，能孤立手臂、轉騎乘或尋找絞技。' },
+  'side-control-defense': { family: 'ground', player: { x: 54, y: 38, pose: 'grounded', rotate: 5 }, opponent: { x: 46, y: 29, pose: 'grounded', flip: true, rotate: -12 }, owner: 'opponent', connection: 'ground', detail: '對手已取得側控；你的髖部與肩線都受到壓制。' },
+  mount: { family: 'ground', player: { x: 50, y: 27, pose: 'kneeling' }, opponent: { x: 50, y: 39, pose: 'grounded' }, owner: 'player', connection: 'ground', detail: '你跨坐在對手軀幹上，是地面打擊與降服威脅都很高的位置。' },
+  'mount-defense': { family: 'ground', player: { x: 50, y: 39, pose: 'grounded' }, opponent: { x: 50, y: 27, pose: 'kneeling', flip: true }, owner: 'opponent', connection: 'ground', detail: '對手取得騎乘位，你必須先保護頭部並創造橋式或髖逃空間。' },
+  'back-control': { family: 'ground', player: { x: 47, y: 34, pose: 'seated' }, opponent: { x: 54, y: 35, pose: 'seated', flip: true }, owner: 'player', connection: 'waist', detail: '你控制對手背部並建立鉤腿，裸絞與背後打擊威脅最高。' },
+  'back-defense': { family: 'ground', player: { x: 54, y: 35, pose: 'seated' }, opponent: { x: 47, y: 34, pose: 'seated', flip: true }, owner: 'opponent', connection: 'waist', detail: '對手已取得背後控制，首要任務是保護頸部並解除鉤腿。' },
+  scramble: { family: 'scramble', player: { x: 43, y: 35, pose: 'crouched' }, opponent: { x: 57, y: 33, pose: 'crouched', flip: true }, owner: 'neutral', detail: '雙方都還沒有穩定位置，下一個動作可能直接決定上下位。' },
+}
+
+function PositionScene({ position, playerName, opponentName }: { position: Position; playerName: string; opponentName: string }) {
+  const visual = POSITION_VISUALS[position]
+  const ownerLabel = visual.owner === 'player' ? '你掌握位置' : visual.owner === 'opponent' ? '對手掌握位置' : '位置仍在爭奪'
+  const drawOpponentFirst = visual.owner === 'player'
+  return <div className={`position-scene family-${visual.family} owner-${visual.owner}`}>
+    <svg viewBox="0 0 100 58" role="img" aria-label={`目前位置：${positionLabel(position)}`}>
+      <defs>
+        <pattern id={`mesh-${position}`} width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 0 7 7M7 0 0 7" stroke="currentColor" strokeWidth=".25" opacity=".28" /></pattern>
+        <linearGradient id={`mat-${position}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#24211d" /><stop offset="1" stopColor="#11100e" /></linearGradient>
+      </defs>
+      <path d="M7 7h86v40H7z" fill={`url(#mat-${position})`} stroke="currentColor" strokeWidth="1" />
+      <path d="M7 7h86v18H7z" fill={`url(#mesh-${position})`} opacity=".62" />
+      <path d="M9 45 Q50 50 91 45" fill="none" stroke="currentColor" strokeWidth=".45" opacity=".7" />
+      {visual.cageSide && <g className="cage-pressure-zone"><path d="M8 8v38" /><path d="M11 8v38" /><text x="13" y="13">鐵網</text></g>}
+      <text className="scene-name player-name" x="10" y="12">你 · {playerName.slice(0, 4)}</text>
+      <text className="scene-name opponent-name" x="90" y="12" textAnchor="end">{opponentName.slice(0, 8)}</text>
+      {visual.connection && <PositionConnection type={visual.connection} player={visual.player} opponent={visual.opponent} />}
+      {drawOpponentFirst ? <>
+        <FighterGlyph {...visual.opponent} side="opponent" />
+        <FighterGlyph {...visual.player} side="player" />
+      </> : <>
+        <FighterGlyph {...visual.player} side="player" />
+        <FighterGlyph {...visual.opponent} side="opponent" />
+      </>}
+    </svg>
+    <div className="position-readout"><div><span>目前位置</span><strong>{positionLabel(position)}</strong></div><em>{ownerLabel}</em><p>{visual.detail}</p></div>
+  </div>
+}
+
+function FighterGlyph({ x, y, pose, side, flip = false, rotate = 0 }: PositionVisual['player'] & { side: 'player' | 'opponent' }) {
+  const transform = `translate(${x} ${y}) rotate(${rotate}) scale(${flip ? -1 : 1} 1)`
+  return <g className={`fighter-glyph ${side} pose-${pose}`} transform={transform} aria-hidden="true">
+    <ellipse className="fighter-shadow" cx="0" cy="8.2" rx={pose === 'grounded' ? 11 : 5.5} ry="1.7" />
+    {pose === 'grounded' ? <>
+      <circle className="fighter-head" cx="-8" cy="0" r="3" />
+      <path className="fighter-body" d="M-5 1L5 2L10 0M1 2L5-3M4 2L10 5" />
+    </> : pose === 'kneeling' ? <>
+      <circle className="fighter-head" cx="0" cy="-8" r="2.7" />
+      <path className="fighter-body" d="M0-5L1 2M0-2L6 1M1 2L6 7M1 2L-3 7" />
+    </> : pose === 'seated' ? <>
+      <circle className="fighter-head" cx="0" cy="-7" r="2.7" />
+      <path className="fighter-body" d="M0-4L1 3M0-1L6 1M1 3L7 6M1 3L-3 7" />
+    </> : pose === 'crouched' ? <>
+      <circle className="fighter-head" cx="2" cy="-7" r="2.7" />
+      <path className="fighter-body" d="M1-4L-2 2M0-2L7 0M-2 2L4 7M-2 2L-6 7" />
+    </> : <>
+      <circle className="fighter-head" cx={pose === 'leaning' ? 2 : 0} cy="-9" r="2.8" />
+      <path className="fighter-body" d={pose === 'leaning' ? 'M1-6L-2 2M0-3L7-1M-2 2L3 8M-2 2L-6 8' : 'M0-6L0 2M0-3L6-1M0-3L-4 0M0 2L5 8M0 2L-5 8'} />
+    </>}
+  </g>
+}
+
+function PositionConnection({ type, player, opponent }: { type: NonNullable<PositionVisual['connection']>; player: PositionVisual['player']; opponent: PositionVisual['opponent'] }) {
+  const y = type === 'head' ? Math.min(player.y, opponent.y) - 6 : type === 'waist' ? (player.y + opponent.y) / 2 : type === 'ground' ? Math.max(player.y, opponent.y) - 3 : (player.y + opponent.y) / 2 - 3
+  return <g className={`position-connection connection-${type}`} aria-hidden="true"><path d={`M${player.x} ${y} Q${(player.x + opponent.x) / 2} ${y - 2} ${opponent.x} ${y}`} />{type === 'waist' && <ellipse cx={(player.x + opponent.x) / 2} cy={y} rx="6" ry="3" />}</g>
 }
 
 function DamageRibbon({ damage, opponent = false }: { damage: { head: number; body: number; leg: number }; opponent?: boolean }) {

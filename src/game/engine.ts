@@ -573,6 +573,16 @@ function matchupReason(matchup: TacticalMatchup, opponent: FightMoveDefinition['
   return '雙方戰術沒有直接克制'
 }
 
+function moveCategoryLabel(category: FightMoveDefinition['category']): string {
+  return category === 'offense' ? '進攻' : category === 'transition' ? '轉位' : '防守'
+}
+
+function patternExposure(fight: FightState, intent: FightMoveDefinition) {
+  const category = fight.opponentAdaptation[`category:${intent.category}`] ?? 0
+  const branch = fight.opponentAdaptation[`branch:${intent.branch}`] ?? 0
+  return { category, branch, penalty: Math.min(24, category * 7 + branch * 3) }
+}
+
 function oddsFor(chance: NumericRange): ExchangeOdds {
   const midpoint = (chance.min + chance.max) / 2
   const clean = clamp(midpoint * 0.64, 1, 90)
@@ -672,38 +682,47 @@ function buildCriticalPrompt(state: GameState, fight: FightState): [DecisionProm
     const firstRule = rules.at(0)
     const exploited = [...intent.exploits, ...(execution.exploits ?? [])].filter((key) => openings.includes(key))
     const adaptation = fight.opponentAdaptation[intent.id] ?? 0
+    const exposure = patternExposure(fight, intent)
     const base = chanceFor(state, opponent, execution.branch ?? intent.branch, fight.position, firstRule?.node.id)
     const matchup = matchupFor(intent.category, opponentMove.category)
     const target = moveTarget(intent)
     const headPenalty = [0, -3, -7, -12][severityTier(fight.playerDamageByPart.head)]
     const legPenalty = (intent.branch === 'kicking' || intent.branch === 'wrestling' || intent.category === 'transition') ? [0, -3, -7, -12][severityTier(fight.playerDamageByPart.leg)] : 0
     const scoutingBonus = matchup === 'favored' || exploited.length ? Math.min(8, Math.floor(state.scouting / 14)) : 0
-    const pressBonus = fight.cornerAdjustment === 'press' && target === fight.cornerTarget ? 8 : 0
+    const pressBonus = fight.cornerAdjustment === 'press' && target === fight.cornerTarget ? 12 : 0
     const opponentOpeningPenalty = Math.min(16, opponentIntent.exploitsOpenings.length * 8)
-    const matchupBonus = matchup === 'favored' ? 16 : matchup === 'exposed' ? -14 : 0
+    const matchupBonus = matchup === 'favored' ? 14 : matchup === 'exposed' ? -18 : 0
     const opponentSkillPressure = (opponent.technique[opponentIntent.branch] - 50) * -0.12
     const bonus = (affinity?.bonus ?? 0) + rules.reduce((sum, item) => sum + item.rule.bonus, 0) + exploited.length * 10
-      - (fight.sequenceStep === 3 ? adaptation * 7 : adaptation * 3) + matchupBonus + scoutingBonus + pressBonus
+      - (fight.sequenceStep === 3 ? adaptation * 7 : adaptation * 3) - exposure.penalty + matchupBonus + scoutingBonus + pressBonus
       - opponentOpeningPenalty + headPenalty + legPenalty + opponentSkillPressure
     const chance = shiftChance(base, bonus)
     const style = intent.branch === background.primary ? 18 : intent.branch === background.secondary ? 8 : 0
     const pressureFit = fight.initiative === 'opponent' && intent.defensive ? 12 : fight.initiative === 'player' && intent.category === 'offense' ? 7 : 0
     const lowStaminaFit = fight.playerStamina < 35 && intent.defensive ? 15 : fight.playerStamina < 35 && intent.effects.staminaCost > 8 ? -15 : 0
-    const score = intent.stageWeights[stage.id] + style + exploited.length * 15 + rules.length * 8 + pressureFit + lowStaminaFit - adaptation * 4
+    const cornerFit = fight.cornerAdjustment === 'press' && target === fight.cornerTarget ? 24 : 0
+    const score = intent.stageWeights[stage.id] + style + exploited.length * 15 + rules.length * 8 + pressureFit + lowStaminaFit + cornerFit - adaptation * 4 - exposure.penalty * 1.2
     const staminaCost = intent.effects.staminaCost + severityTier(fight.playerDamageByPart.body) + (fight.cornerAdjustment === 'press' ? 2 : 0)
+    const cornerEffect = fight.cornerAdjustment === 'press' && target === fight.cornerTarget
+      ? ` · 場角：命中 +12、${target === 'head' ? '頭部' : target === 'body' ? '軀幹' : '腿部'}傷害 +35%`
+      : ''
     const effectSummary = intent.submission
-      ? `主效：立即進入降服操作 · 難度取決於受創、體力與位置 · 代價：體力 ${staminaCost}${fight.position === 'bottom' ? '，下位失敗可能被過腿' : '，失敗可能失去位置'}`
-      : intent.category === 'transition' ? `主效：${intent.cleanPosition ? `轉到${positionLabel(intent.cleanPosition)}` : '爭取位置'} · 代價：體力 ${staminaCost}`
+      ? `主效：建立降服；條件達 52 才進入操作 · 條件取決於受創、體力、控制與位置 · 代價：體力 ${staminaCost}${fight.position === 'bottom' ? '，下位失敗可能被過腿' : '，失敗可能失去位置'}${cornerEffect}`
+      : intent.category === 'transition' ? `主效：${intent.cleanPosition ? `轉到${positionLabel(intent.cleanPosition)}` : '爭取位置'} · 代價：體力 ${staminaCost}${cornerEffect}`
       : intent.defensive ? `主效：降低風險並重整位置 · 代價：得分較少`
-        : `主效：${intent.effects.headDamage >= intent.effects.bodyDamage && intent.effects.headDamage >= intent.effects.legDamage ? '頭部傷害' : intent.effects.bodyDamage >= intent.effects.legDamage ? '軀幹傷害' : '腿部傷害'} · 代價：體力 ${staminaCost}`
+        : `主效：${intent.effects.headDamage >= intent.effects.bodyDamage && intent.effects.headDamage >= intent.effects.legDamage ? '頭部傷害' : intent.effects.bodyDamage >= intent.effects.legDamage ? '軀幹傷害' : '腿部傷害'} · 代價：體力 ${staminaCost}${cornerEffect}`
     const option: CriticalOption = {
       id: `${intent.id}:${execution.id}`, label: intent.label, description: intent.description,
-      chance, positives: rules.map((item) => item.rule.note), negatives: adaptation ? [`對手已看過 ${adaptation} 次`] : [],
+      chance, positives: rules.map((item) => item.rule.note), negatives: [
+        adaptation ? `同一招已被看過 ${adaptation} 次` : '',
+        exposure.category ? `${moveCategoryLabel(intent.category)}節奏已曝光 ${exposure.category} 次` : '',
+        exposure.branch >= 2 ? `${BRANCH_META[intent.branch].name}路線已被追蹤` : '',
+      ].filter(Boolean),
       actionKey: intent.id, branch: execution.branch ?? intent.branch, intentId: intent.id, executionId: execution.id,
       executionName: execution.name, category: intent.category, effectSummary,
       usesOpenings: exploited, affinityLabel: affinity?.label, affinityBonus: affinity?.bonus,
       recommendation: exploited.length ? `利用：${exploited.map((key) => OPENING_LABELS[key]).join('、')}` : style ? `${background.name}擅長的路線` : `${stage.name}階段適合`,
-      finishRoute: intent.submission ? '降服路線：選擇後立即操作；先重創或控制對手會明顯降低難度'
+      finishRoute: intent.submission ? '降服路線：先累積傷害、體力差、控制或破綻；條件達 52 才能真正鎖緊'
         : intent.category === 'offense' && intent.effects.finishPressure >= 10 ? 'TKO 路線：重創會直接累積終結壓力' : undefined,
       conservative: intent.defensive,
       unlockNode: firstRule?.node.id,
@@ -739,7 +758,7 @@ function chanceFor(state: GameState, opponent: Opponent, branch: Branch, positio
   const strengthened = Boolean(nodeId && state.fighter.unlockedNodes.includes(nodeId))
   const mastery = strengthened && nodeId ? (state.fighter.mastery[nodeId]?.value ?? 0) : 0
   const health = Object.values(state.fighter.health).reduce((sum, value) => sum + value, 0) / 4
-  const opponentDefense = opponent.technique[branch] * 0.55 + opponent.composure * 0.2
+  const opponentDefense = opponent.technique[branch] * 0.78 + opponent.composure * 0.28
   const defensiveGround = ['bottom', 'side-control-defense', 'mount-defense', 'back-defense', 'front-headlock-defense'].includes(position)
   const dominantGround = ['side-control', 'mount', 'back-control', 'front-headlock-control'].includes(position)
   const clinchPosition = ['clinch', 'cage', 'cage-control', 'cage-defense', 'thai-clinch', 'thai-clinch-defense', 'body-lock', 'body-lock-defense'].includes(position)
@@ -790,7 +809,7 @@ function setRoundPlan(state: GameState, plan: RoundPlan): GameState {
   const reachDelta = state.fighter.reachCm - opponent.reachCm
   const bodyMatchup = plan === 'distance' ? Math.max(-6, Math.min(6, reachDelta * 0.5)) : plan === 'pressure' ? Math.max(-3, Math.min(3, reachDelta * -0.22)) : 0
   const legPlanPenalty = (plan === 'distance' || plan === 'pressure') ? [0, -3, -7, -12][severityTier(fight.playerDamageByPart.leg)] : 0
-  const cornerMargin = fight.cornerAdjustment === 'recover' ? -8 : fight.cornerAdjustment === 'protect' ? -3 : 0
+  const cornerMargin = fight.cornerAdjustment === 'recover' ? -10 : fight.cornerAdjustment === 'protect' ? -4 : 0
   const margin = playerRating - opponentRating + variance + bodyMatchup + (plan === 'recover' ? -5 : 0) + legPlanPenalty + cornerMargin
   fight.plan = plan
   fight.sequenceStep = 1
@@ -804,7 +823,10 @@ function setRoundPlan(state: GameState, plan: RoundPlan): GameState {
     ? 'bottom'
     : plan === 'takedown' ? 'clinch' : plan === 'cage' ? (margin >= 0 ? 'cage-control' : 'cage-defense') : plan === 'pressure' ? 'pocket' : 'range'
   const openingPlan = plan === 'cage' && margin < 0 ? `${opponent.name}反過來把你壓向籠邊` : planLabel(plan)
-  fight.commentary.push(`第 ${fight.round} 回合，${openingPlan}。${margin >= 0 ? '你先取得較好的接觸位置。' : `${opponent.name}提前讀到你的意圖。`}`)
+  const openingResult = plan === 'takedown' && fight.position === 'bottom'
+    ? `你壓低重心射出雙腿抱摔，但${opponent.name}後撤髖部避開切入，順勢壓住上身；你落到防守架下位。`
+    : margin >= 0 ? '你先取得較好的接觸位置。' : `${opponent.name}提前讀到你的意圖。`
+  fight.commentary.push(`第 ${fight.round} 回合，${openingPlan}。${openingResult}`)
   const [prompt, nextRng] = buildCriticalPrompt({ ...state, rng }, fight)
   fight.prompt = prompt
   return { ...state, rng: nextRng, fight, phase: 'critical' }
@@ -850,7 +872,8 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   const stageDamage = fight.sequenceStep === 1 ? 0.62 : fight.sequenceStep === 4 ? 1.14 : 1
   const bonus = execution.effectBonus ?? {}
   const playerAmount = (key: keyof typeof intent.effects) => (intent.effects[key] + (bonus[key] ?? 0)) * playerFactor
-  const opponentAmount = (key: keyof typeof opponentMove.effects) => opponentMove.effects[key] * opponentFactor
+  const opponentThreatScale = Math.max(0.9, Math.min(1.35, 0.9 + (opponent.rating - 42) * 0.012))
+  const opponentAmount = (key: keyof typeof opponentMove.effects) => opponentMove.effects[key] * opponentFactor * opponentThreatScale
   const scoreStage = fight.sequenceStep === 1 ? 0.75 : fight.sequenceStep === 4 ? 1.12 : 1
   const scoreGain = Math.round(playerAmount('score') * scoreStage)
   const opponentScoreGain = Math.round(opponentAmount('score') * scoreStage)
@@ -862,13 +885,33 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   let body = Math.round(playerAmount('bodyDamage') * stageDamage)
   let leg = Math.round(playerAmount('legDamage') * stageDamage)
   if (ruleEffects.has('safe-low-kick') && outcome === 'clean') leg += 2
+  let cornerDamageBonus = 0
+  if (fight.cornerAdjustment === 'press' && fight.cornerTarget && moveTarget(intent) === fight.cornerTarget) {
+    const before = fight.cornerTarget === 'head' ? head : fight.cornerTarget === 'body' ? body : leg
+    const after = Math.round(before * 1.35)
+    cornerDamageBonus = after - before
+    if (fight.cornerTarget === 'head') head = after
+    if (fight.cornerTarget === 'body') body = after
+    if (fight.cornerTarget === 'leg') leg = after
+  }
   let incomingHead = Math.round(opponentAmount('headDamage') * stageDamage)
   let incomingBody = Math.round(opponentAmount('bodyDamage') * stageDamage)
   let incomingLeg = Math.round(opponentAmount('legDamage') * stageDamage)
+  let cornerDamagePrevented = 0
+  let cornerExposureDamage = 0
   if (fight.cornerAdjustment === 'protect' && fight.cornerTarget) {
-    if (fight.cornerTarget === 'head') incomingHead = Math.round(incomingHead * 0.7)
-    if (fight.cornerTarget === 'body') incomingBody = Math.round(incomingBody * 0.7)
-    if (fight.cornerTarget === 'leg') incomingLeg = Math.round(incomingLeg * 0.7)
+    const before = fight.cornerTarget === 'head' ? incomingHead : fight.cornerTarget === 'body' ? incomingBody : incomingLeg
+    const after = Math.round(before * 0.5)
+    cornerDamagePrevented = before - after
+    if (fight.cornerTarget === 'head') incomingHead = after
+    if (fight.cornerTarget === 'body') incomingBody = after
+    if (fight.cornerTarget === 'leg') incomingLeg = after
+  } else if (fight.cornerAdjustment === 'press') {
+    const before = incomingHead + incomingBody + incomingLeg
+    incomingHead = Math.round(incomingHead * 1.15)
+    incomingBody = Math.round(incomingBody * 1.15)
+    incomingLeg = Math.round(incomingLeg * 1.15)
+    cornerExposureDamage = incomingHead + incomingBody + incomingLeg - before
   }
   if (outcome === 'countered' && ruleEffects.has('closed-guard') && (intent.id === 'rebuild-guard' || intent.id === 'pull-guard')) {
     const incomingTotal = incomingHead + incomingBody + incomingLeg
@@ -927,6 +970,8 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   }
   if (ruleEffects.has('jab-exit')) fight.playerOpenings = fight.playerOpenings.filter((item) => item.key !== 'weight-forward')
   fight.opponentAdaptation[intent.id] = (fight.opponentAdaptation[intent.id] ?? 0) + 1
+  fight.opponentAdaptation[`category:${intent.category}`] = (fight.opponentAdaptation[`category:${intent.category}`] ?? 0) + 1
+  fight.opponentAdaptation[`branch:${intent.branch}`] = (fight.opponentAdaptation[`branch:${intent.branch}`] ?? 0) + 1
   fight.opponentMoveHistory[opponentMove.id] = (fight.opponentMoveHistory[opponentMove.id] ?? 0) + 1
   const damageEvents: DamageEvent[] = []
   for (const part of ['head', 'body', 'leg'] as FightDamagePart[]) {
@@ -935,10 +980,16 @@ function resolveCritical(state: GameState, optionId: string): GameState {
     if (playerAmountTaken > 0) damageEvents.push({ side: 'player', part, amount: playerAmountTaken, severityBefore: damageSeverity(playerDamageBefore[part]), severityAfter: damageSeverity(fight.playerDamageByPart[part]) })
     if (opponentAmountTaken > 0) damageEvents.push({ side: 'opponent', part, amount: opponentAmountTaken, severityBefore: damageSeverity(opponentDamageBefore[part]), severityAfter: damageSeverity(fight.opponentDamageByPart[part]) })
   }
-  const impactTags = [scoreGain ? `有效得分 +${scoreGain}` : '', opponentScoreGain ? `對手得分 +${opponentScoreGain}` : '', head ? `對手頭部 +${head}` : '', body ? `對手軀幹 +${body}` : '', leg ? `對手腿部 +${leg}` : '', incomingHead ? `我方頭部 +${incomingHead}` : '', incomingBody ? `我方軀幹 +${incomingBody}` : '', incomingLeg ? `我方腿部 +${incomingLeg}` : '', opponentStaminaBefore > fight.opponentStamina ? `對手體力 -${opponentStaminaBefore - fight.opponentStamina}` : '', playerStaminaBefore > fight.playerStamina ? `我方體力 -${playerStaminaBefore - fight.playerStamina}` : '', positionBefore !== fight.position ? `${positionLabel(positionBefore)} → ${positionLabel(fight.position)}` : ''].filter(Boolean)
-  const narrative = buildNarrativeBeat(opponent.name, execution.id, execution.name, opponentMoveExecution.name, outcome, positionBefore, fight.position, created, consumed, intent.category, option.matchup, impactTags)
+  const cornerTargetLabel = fight.cornerTarget === 'head' ? '頭部' : fight.cornerTarget === 'body' ? '軀幹' : '腿部'
+  const cornerNarrative = cornerDamagePrevented > 0 ? `場角強調的${cornerTargetLabel}防護少承受了 ${cornerDamagePrevented} 點傷害。`
+    : cornerDamageBonus > 0 ? `你照場角指示追打${cornerTargetLabel}，多製造了 ${cornerDamageBonus} 點傷害。`
+      : cornerExposureDamage > 0 ? `追打讓防線敞開，你額外承受了 ${cornerExposureDamage} 點傷害。` : ''
+  const impactTags = [cornerDamagePrevented ? `場角防護 -${cornerDamagePrevented}` : '', cornerDamageBonus ? `場角追打 +${cornerDamageBonus}` : '', cornerExposureDamage ? `追打暴露 +${cornerExposureDamage}` : '', scoreGain ? `有效得分 +${scoreGain}` : '', opponentScoreGain ? `對手得分 +${opponentScoreGain}` : '', head ? `對手頭部 +${head}` : '', body ? `對手軀幹 +${body}` : '', leg ? `對手腿部 +${leg}` : '', incomingHead ? `我方頭部 +${incomingHead}` : '', incomingBody ? `我方軀幹 +${incomingBody}` : '', incomingLeg ? `我方腿部 +${incomingLeg}` : '', opponentStaminaBefore > fight.opponentStamina ? `對手體力 -${opponentStaminaBefore - fight.opponentStamina}` : '', playerStaminaBefore > fight.playerStamina ? `我方體力 -${playerStaminaBefore - fight.playerStamina}` : '', positionBefore !== fight.position ? `${positionLabel(positionBefore)} → ${positionLabel(fight.position)}` : ''].filter(Boolean)
+  const colorCommentary = buildColorCommentary(opponent.name, execution.name, opponentMoveExecution.name, outcome, option.matchup, damageEvents, positionBefore, fight.position, fight.sequenceStep)
+  const narrative = buildNarrativeBeat(opponent.name, execution.id, execution.name, opponentMoveExecution.name, outcome, positionBefore, fight.position, created, consumed, intent.category, option.matchup, impactTags, cornerNarrative, colorCommentary)
   fight.lastNarrative = narrative
   fight.commentary.push(narrative.paragraph)
+  fight.commentary.push(`解說台｜${colorCommentary}`)
   const fighter = structuredClone(state.fighter)
   if (option.unlockNode) {
     const mastery = fighter.mastery[option.unlockNode]
@@ -968,12 +1019,17 @@ function resolveCritical(state: GameState, optionId: string): GameState {
     const attemptFight = { ...fight, position: positionBefore }
     const outcomeAdjustment = outcome === 'clean' ? 8 : outcome === 'contested' ? -2 : -16
     const failurePosition = positionBefore === 'bottom' ? 'side-control-defense' : intent.counteredPosition ?? 'scramble'
-    const createdWindow = maybeCreateFinishWindow(
-      { ...state, fighter, rng }, attemptFight, finishOption, 'player', 'submission',
-      { force: true, opportunityAdjustment: outcomeAdjustment, sourcePosition: positionBefore, failurePosition },
-    )
-    window = createdWindow[0]
-    rng = createdWindow[1]
+    const submissionOpportunity = clamp(finishOpportunity({ ...state, fighter, rng }, attemptFight, finishOption, 'player', 'submission') + outcomeAdjustment)
+    if (submissionOpportunity >= 52) {
+      const createdWindow = maybeCreateFinishWindow(
+        { ...state, fighter, rng }, attemptFight, finishOption, 'player', 'submission',
+        { force: true, opportunityAdjustment: outcomeAdjustment, sourcePosition: positionBefore, failurePosition },
+      )
+      window = createdWindow[0]
+      rng = createdWindow[1]
+    } else {
+      fight.commentary.push(`解說台｜降服條件只有 ${submissionOpportunity}，抓握還沒鎖緊；${opponent.name}不會在沒有鋪墊時白白交出比賽！`)
+    }
   } else if (finishMove.category === 'offense' && (outcome !== 'contested' || finishOpportunity({ ...state, fighter }, fight, finishOption, attacker, finishKind) >= 64)) {
     const createdWindow = maybeCreateFinishWindow({ ...state, fighter, rng }, fight, finishOption, attacker, finishKind)
     window = createdWindow[0]
@@ -1004,7 +1060,7 @@ function resolveCritical(state: GameState, optionId: string): GameState {
 
 function buildNarrativeBeat(
   opponentName: string, executionId: string, executionName: string, opponentExecutionName: string, outcome: FightOutcome,
-  positionBefore: Position, positionAfter: Position, created: OpeningKey[], consumed: OpeningKey[], category: FightMoveDefinition['category'], matchup: TacticalMatchup, impactTags: string[],
+  positionBefore: Position, positionAfter: Position, created: OpeningKey[], consumed: OpeningKey[], category: FightMoveDefinition['category'], matchup: TacticalMatchup, impactTags: string[], cornerNarrative = '', colorCommentary = '',
 ): NarrativeBeat {
   const response = outcome === 'clean' ? `${opponentName}的${opponentExecutionName}慢了半拍。`
     : outcome === 'contested' ? `${opponentName}以${opponentExecutionName}正面相撞，雙方都付出代價。`
@@ -1017,7 +1073,44 @@ function buildNarrativeBeat(
   const opening = created.length ? `他的${created.map((key) => OPENING_LABELS[key]).join('、')}，成為下一段可以利用的破綻。`
     : consumed.length ? `你把${consumed.map((key) => OPENING_LABELS[key]).join('、')}轉化成了實際成果。`
       : outcome === 'countered' ? `你在反制中留下了新的防守空檔。` : `雙方迅速重整，下一段仍要重新製造缺口。`
-  return { executionId, executionName, outcome, paragraph: `你使出${executionName}，迎上${opponentName}的${opponentExecutionName}。${tactical}${response}${consequence}${position}${opening}`, positionBefore, positionAfter, openingsCreated: created, openingsConsumed: consumed, impactTags }
+  return { executionId, executionName, outcome, paragraph: `你使出${executionName}，迎上${opponentName}的${opponentExecutionName}。${tactical}${response}${consequence}${position}${opening}${cornerNarrative}`, positionBefore, positionAfter, openingsCreated: created, openingsConsumed: consumed, impactTags, colorCommentary }
+}
+
+function buildColorCommentary(
+  opponentName: string, executionName: string, opponentExecutionName: string, outcome: FightOutcome, matchup: TacticalMatchup,
+  damageEvents: DamageEvent[], positionBefore: Position, positionAfter: Position, step: 1 | 2 | 3 | 4,
+): string {
+  const playerImpact = damageEvents.filter((event) => event.side === 'opponent').reduce((sum, event) => sum + event.amount, 0)
+  const opponentImpact = damageEvents.filter((event) => event.side === 'player').reduce((sum, event) => sum + event.amount, 0)
+  if (outcome === 'clean' && playerImpact >= 10) return `漂亮！${executionName}完全吃準時機，${opponentName}這一下真的感受到了！`
+  if (outcome === 'countered' && opponentImpact >= 10) return `危險！${opponentExecutionName}迎面撞進來，這不是可以白白送掉的一拍！`
+  if (positionBefore !== positionAfter) return outcome === 'clean'
+    ? `位置拿到了！${executionName}不只奏效，還把整個攻防方向扭了過來。`
+    : outcome === 'countered' ? `局面翻面！${opponentName}把一次反制直接換成了位置優勢。`
+      : `兩個人一路纏到新位置，這段爭奪還沒有真正結束！`
+  if (matchup === 'favored' && outcome === 'clean') return `讀得太準了！但${opponentName}已經看過這個答案，下一次未必還會買單。`
+  if (matchup === 'favored' && outcome !== 'clean') return `紙面上是克制，場上卻沒有免費答案；${opponentName}硬是把節奏攪亂了！`
+  if (matchup === 'exposed' && outcome === 'countered') return `太貪了！${executionName}正好撞進${opponentExecutionName}準備好的陷阱。`
+  const pools: Record<FightOutcome, string[]> = {
+    clean: [
+      `${executionName}乾淨俐落，先手、落點、退出，一樣都沒少！`,
+      `${opponentName}慢了半拍，這種細小差距累積起來就會決定回合！`,
+      `這一下不花俏，但非常有效；${executionName}把主動權牢牢留住。`,
+    ],
+    contested: [
+      `兩邊都不肯退！${executionName}和${opponentExecutionName}正面交換，誰都沒能全身而退。`,
+      `好硬的一拍！這不是誰單方面得手，而是雙方一起付了代價。`,
+      `攻防黏在一起，裁判會記得這段，但兩個人的身體記得更清楚！`,
+    ],
+    countered: [
+      `${opponentName}等的就是這一下！${opponentExecutionName}把你的起手讀得清清楚楚。`,
+      `節奏被抓到了！再沿著同一條路走，代價只會越來越大。`,
+      `${executionName}沒能完成，${opponentName}把猶豫變成了自己的進攻時間。`,
+    ],
+  }
+  const pool = pools[outcome]
+  const index = (executionName.length + opponentExecutionName.length + step) % pool.length
+  return pool[index]
 }
 
 function finishThreat(opportunity: number): FinishThreat {
@@ -1254,11 +1347,13 @@ function continueRound(state: GameState): GameState {
   fight.lastSuccessfulBranch = undefined
   fight.lastSuccessfulAction = undefined
   fight.techniqueTriggersThisRound = []
-  const playerRecovery = fight.cornerAdjustment === 'recover' ? 15 : 8 + state.fighter.body.recovery * 0.05
+  const staminaBeforeRecovery = fight.playerStamina
+  const playerRecovery = fight.cornerAdjustment === 'recover' ? 22 : 8 + state.fighter.body.recovery * 0.05
   const playerBodyPenalty = [0, 2, 4, 6][severityTier(fight.playerDamageByPart.body)]
   const opponentBodyPenalty = [0, 2, 4, 6][severityTier(fight.opponentDamageByPart.body)]
   fight.playerStamina = clamp(fight.playerStamina + playerRecovery - playerBodyPenalty)
   fight.opponentStamina = clamp(fight.opponentStamina + 9 - opponentBodyPenalty)
+  if (fight.cornerAdjustment === 'recover') fight.commentary.push(`場角讓你把體力從 ${staminaBeforeRecovery} 拉回 ${fight.playerStamina}，但下回合將先讓出節奏。`)
   return { ...state, fight, phase: 'round-plan' }
 }
 
