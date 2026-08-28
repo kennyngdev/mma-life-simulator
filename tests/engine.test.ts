@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } from '../src/game/content'
 import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
 import { advance, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, mirrorPosition, offerRefreshCost, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
-import { migrateMatchmakingCredibility, migrateRankingCredibility, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
+import { migrateCareerEndings, migrateMatchmakingCredibility, migrateRankingCredibility, migrateRemovedSideControl, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
 import { EARNED_TRAITS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, movesForBranch, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
 import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, Position } from '../src/game/types'
 
@@ -272,9 +272,41 @@ describe('拳途人生模擬核心', () => {
     const migrated = migrateVersion8(legacy)
 
     expect(migrated.saveVersion).toBe(12)
-    expect(migrated.rulesVersion).toBe('0.9.3')
+    expect(migrated.rulesVersion).toBe('0.10.0')
     expect(migrated).not.toHaveProperty('campSharpness')
     expect(migrated.campDrillHistory).toEqual([])
+  })
+
+  it('舊存檔會移除隱藏場數上限並保留進行中的生涯', () => {
+    const legacy = structuredClone(createNewRun(input)) as unknown as {
+      fighter: GameState['fighter'] & { careerFightTarget: number }
+      rulesVersion: string
+    }
+    legacy.fighter.careerFightTarget = 12
+    legacy.rulesVersion = '0.9.3'
+
+    const migrated = migrateCareerEndings(legacy)
+
+    expect(migrated.rulesVersion).toBe('0.10.0')
+    expect(migrated.fighter).not.toHaveProperty('careerFightTarget')
+    expect(migrated.phase).toBe('reveal')
+  })
+
+  it('舊存檔會移除側控招式並把進行中的側控安全轉成騎乘', () => {
+    let legacy = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'REMOVE-SIDE-CONTROL' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    legacy.phase = 'critical'
+    legacy.fighter.learnedMoves.push('side-elbows', 'side-frame-reguard')
+    legacy.opponents[0].learnedMoves.push('side-control-pressure')
+    ;(legacy as unknown as { contentVersion: string }).contentVersion = '1.2.0'
+    ;(legacy.fight as unknown as { position: string }).position = 'side-control'
+
+    const migrated = migrateRemovedSideControl(legacy)
+
+    expect(migrated.contentVersion).toBe('1.3.0')
+    expect(migrated.phase).toBe('round-plan')
+    expect(migrated.fight?.position).toBe('mount')
+    expect(migrated.fighter.learnedMoves).not.toContain('side-elbows')
+    expect(migrated.opponents[0].learnedMoves).not.toContain('side-control-pressure')
   })
 
   it('舊存檔若停在已移除的對練，會退回訓練營並退還時段', () => {
@@ -354,7 +386,7 @@ describe('拳途人生模擬核心', () => {
     }
 
     const repaired = repairTitleCredibility(state)
-    expect(repaired.rulesVersion).toBe('0.9.3')
+    expect(repaired.rulesVersion).toBe('0.10.0')
     expect(repaired.offers[0].titleFight).toBe(false)
     expect(repaired.offers[0].purse).toBe(original.purse)
     expect(repaired.offers[0].purseBreakdown.titleBonus).toBe(0)
@@ -402,7 +434,7 @@ describe('拳途人生模擬核心', () => {
     })
 
     const migrated = migrateRankingCredibility(state)
-    expect(migrated.rulesVersion).toBe('0.9.3')
+    expect(migrated.rulesVersion).toBe('0.10.0')
     expect(migrated.fighter.ranking).toBe(12)
     expect(migrated.fighter.history.at(-1)?.summary).toContain('排名從 #59 修正為 #12')
   })
@@ -591,6 +623,35 @@ describe('拳途人生模擬核心', () => {
     expect(retired.phase).toBe('retirement')
   })
 
+  it('生涯不再生成或使用隱藏比賽場數上限', () => {
+    const initial = createNewRun({ ...input, startingExperience: 'normie', seed: 'NO-FIGHT-LIMIT' })
+    expect(initial.fighter).not.toHaveProperty('careerFightTarget')
+
+    let state = reachFirstFightResult(initial)
+    state.fighter.evidence.fights = 19
+    state.fighter.age = 27
+    state.fighter.health = { head: 100, hands: 100, knees: 100, torso: 100 }
+    state.fight!.playerDamage = 0
+    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+
+    expect(settled.fighter.evidence.fights).toBe(20)
+    expect(settled.growthDestination).toBe('offer')
+  })
+
+  it('賽後任一長期健康降至二十五或以下會明確因傷退役', () => {
+    let state = reachFirstFightResult(createNewRun({ ...input, seed: 'INJURY-RETIREMENT' }))
+    state.fighter.health.head = 25
+    state.fight!.playerDamage = 0
+    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    expect(settled.growthDestination).toBe('retirement')
+
+    const retired = apply(settled, { type: 'CONTINUE_GROWTH' })
+    expect(retired.phase).toBe('retirement')
+    expect(retired.lastMessage).toContain('強制退役線')
+    expect(retired.fighter.history.at(-1)?.id).toBe('retirement-injury')
+    expect(retired.fighter.history.at(-1)?.summary).toContain('25 或以下')
+  })
+
   it('姓名留空時會依出身地產生一致的隨機姓名', () => {
     const first = createNewRun({ ...input, name: '   ' })
     const second = createNewRun({ ...input, name: '' })
@@ -737,8 +798,8 @@ describe('拳途人生模擬核心', () => {
   it('晚期資金可以轉化為拳館傳承並寫進退休傳記，而不增加永久戰力', () => {
     let state = createNewRun({ ...input, seed: 'FINANCIAL-LEGACY' })
     state.phase = 'camp'
-    state.stage = 'world'
-    state.fighter.evidence.fights = state.fighter.careerFightTarget - 3
+    state.stage = 'legacy'
+    state.fighter.evidence.fights = 13
     state.fighter.money = 1_000_000
     const techniqueBefore = structuredClone(state.fighter.technique)
     state = completeCampDrill(state, 'recovery')
@@ -823,8 +884,8 @@ describe('拳途人生模擬核心', () => {
     delete legacy.trainingMoveSelections
 
     const migrated = migrateVersion12(legacy)
-    expect(migrated.rulesVersion).toBe('0.9.3')
-    expect(migrated.contentVersion).toBe('1.2.0')
+    expect(migrated.rulesVersion).toBe('0.10.0')
+    expect(migrated.contentVersion).toBe('1.3.0')
     expect(migrated.phase).toBe('training-reward')
     expect(migrated.trainingMoveChoices).toEqual(legacy.trainingMoveChoices)
     expect(migrated.trainingMoveSelections).toEqual([])
@@ -897,15 +958,14 @@ describe('拳途人生模擬核心', () => {
     expect(state.trainingMoveChoices).toBeUndefined()
   })
 
-  it('能完成一段 12–16 場人生並產生傳記', () => {
+  it('能在沒有比賽場數上限下完成一段人生並產生傳記', () => {
     const finished = completeCareer(createNewRun(input))
     expect(finished.phase).toBe('retirement')
-    expect(finished.fighter.evidence.fights).toBeGreaterThanOrEqual(12)
-    expect(finished.fighter.evidence.fights).toBeLessThanOrEqual(16)
+    expect(finished.fighter.evidence.fights).toBeGreaterThan(16)
     expect(finished.biography?.turningPoints.length).toBeGreaterThan(0)
     expect(finished.biography?.summary).toContain(finished.fighter.name)
     const fightOpponents = finished.fighter.history.filter((entry) => entry.tags.includes('比賽')).flatMap((entry) => entry.people)
-    expect(new Set(fightOpponents).size).toBeGreaterThanOrEqual(Math.ceil(fightOpponents.length * 0.4))
+    expect(new Set(fightOpponents).size).toBeGreaterThanOrEqual(10)
   })
 
   it('同一命令策略會重現相同完整人生', () => {
@@ -1010,7 +1070,7 @@ describe('拳途人生模擬核心', () => {
   it('特殊招式只在解鎖對應科技節點後出現', () => {
     expect(TECHNIQUE_NODES.find((node) => node.id === 'box-pull-counter')?.name).toBe('重擺拳')
     expect(TECHNIQUE_NODES.find((node) => node.id === 'kick-catch-counter')?.name).toBe('超人拳')
-    expect(TECHNIQUE_NODES.find((node) => node.id === 'ground-arm')?.name).toBe('十字架控制')
+    expect(TECHNIQUE_NODES.find((node) => node.id === 'ground-arm')?.name).toBe('上位困臂')
   })
 
   it('站立戰提供可直接辨認的拳法與踢法，而不是只藏在泛用指令裡', () => {
@@ -1227,10 +1287,10 @@ describe('拳途人生模擬核心', () => {
       'range', 'pocket', 'clinch', 'cage', 'cage-control', 'cage-defense',
       'thai-clinch', 'thai-clinch-defense', 'body-lock', 'body-lock-defense',
       'front-headlock-control', 'front-headlock-defense', 'top', 'bottom', 'scramble',
-      'side-control', 'side-control-defense', 'mount', 'mount-defense', 'back-control', 'back-defense',
+      'mount', 'mount-defense', 'back-control', 'back-defense',
     ]
-    const dominant: Position[] = ['cage-control', 'thai-clinch', 'body-lock', 'front-headlock-control', 'top', 'side-control', 'mount', 'back-control']
-    const defensive: Position[] = ['cage-defense', 'thai-clinch-defense', 'body-lock-defense', 'front-headlock-defense', 'bottom', 'side-control-defense', 'mount-defense', 'back-defense']
+    const dominant: Position[] = ['cage-control', 'thai-clinch', 'body-lock', 'front-headlock-control', 'top', 'mount', 'back-control']
+    const defensive: Position[] = ['cage-defense', 'thai-clinch-defense', 'body-lock-defense', 'front-headlock-defense', 'bottom', 'mount-defense', 'back-defense']
 
     for (const position of positions) {
       const legal = FIGHT_INTENTS.filter((intent) => intent.positions.includes(position))
@@ -1311,18 +1371,23 @@ describe('拳途人生模擬核心', () => {
     expect(mirrorPosition('cage-control')).toBe('cage-defense')
   })
 
-  it('地面位置形成防守架、側控、騎乘與背控的可玩推進鏈', () => {
+  it('地面位置省略側控並形成防守架、騎乘與背控的可玩推進鏈', () => {
     const byPosition = (position: Position) => FIGHT_INTENTS.filter((intent) => intent.positions.includes(position))
-    expect(byPosition('top').filter((intent) => intent.cleanPosition === 'side-control').map((intent) => intent.id))
+    expect(byPosition('top').filter((intent) => intent.cleanPosition === 'mount').map((intent) => intent.id))
       .toEqual(expect.arrayContaining(['improve-position', 'pass-guard']))
-    expect(byPosition('side-control').filter((intent) => intent.cleanPosition === 'mount').map((intent) => intent.id))
-      .toContain('mount-transition')
     expect(byPosition('mount').filter((intent) => intent.cleanPosition === 'back-control').map((intent) => intent.id))
       .toContain('take-back')
     expect(byPosition('back-control').filter((intent) => intent.submission).map((intent) => intent.id))
       .toEqual(expect.arrayContaining(['rear-naked-choke', 'back-armbar']))
     expect(byPosition('bottom').filter((intent) => intent.submission).map((intent) => intent.id))
       .toEqual(expect.arrayContaining(['bottom-submission', 'guard-armbar', 'guard-kimura']))
+    expect(JSON.stringify(FIGHT_INTENTS)).not.toContain('side-control')
+    const retiredMoves = [
+      'side-control-pressure', 'side-elbows', 'knee-on-belly', 'mount-transition', 'americana', 'side-kimura',
+      'north-south-choke', 'side-frame-reguard', 'side-underhook-knees', 'side-bridge-turn', 'side-wall-escape',
+      'side-shell', 'side-body-knees', 'crucifix-elbows',
+    ]
+    expect(FIGHT_INTENTS.every((intent) => !retiredMoves.includes(intent.id))).toBe(true)
   })
 
   it('上位打擊在每個支配位置都有傷頭、消耗或高風險終結路線', () => {
@@ -1332,7 +1397,6 @@ describe('拳途人生模擬核心', () => {
 
     expect(offensiveAt('front-headlock-control')).toContain('front-headlock-body-knees')
     expect(offensiveAt('top')).toEqual(expect.arrayContaining(['ground-strikes', 'guard-body-strikes', 'guard-hammerfists']))
-    expect(offensiveAt('side-control')).toEqual(expect.arrayContaining(['side-elbows', 'side-body-knees', 'crucifix-elbows']))
     expect(offensiveAt('mount')).toEqual(expect.arrayContaining(['mount-punches', 'mount-elbows', 'mount-barrage']))
     expect(offensiveAt('back-control')).toEqual(expect.arrayContaining(['back-strikes', 'back-hammerfists']))
 
@@ -1340,7 +1404,7 @@ describe('拳途人生模擬核心', () => {
       .map((id) => FIGHT_INTENTS.find((intent) => intent.id === id)!)
     expect(riskyFinishers.every((intent) => intent.counteredPosition && intent.effects.finishPressure >= 17)).toBe(true)
     expect(TECHNIQUE_COMBAT_RULES['style-ground-pound'].intents).toEqual(expect.arrayContaining([
-      'front-headlock-body-knees', 'guard-hammerfists', 'side-body-knees', 'crucifix-elbows', 'mount-barrage', 'back-hammerfists',
+      'front-headlock-body-knees', 'guard-hammerfists', 'mount-barrage', 'back-hammerfists',
     ]))
   })
 
@@ -1805,13 +1869,13 @@ describe('拳途人生模擬核心', () => {
     expect(state.fight!.commentary.at(-1)).toContain('抓握還沒鎖緊')
   })
 
-  it('低完成度的下位降服失敗會被過腿，額外消耗體力並送出控制分', () => {
+  it('低完成度的下位降服失敗會被直接壓進騎乘，額外消耗體力並送出控制分', () => {
     let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'BOTTOM-SUB-PENALTY' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
     state.phase = 'finish-minigame'
     state.fight!.position = 'bottom'
     state.fight!.activeFinishWindow = {
       attacker: 'player', kind: 'submission', opportunity: 24, threat: '勉強一搏', sourceAction: '防守架十字固', sourceStep: 1,
-      sourcePosition: 'bottom', failurePosition: 'side-control-defense', difficulty: finishDifficultyFor(24, { x: 0.5, y: 0.5 }),
+      sourcePosition: 'bottom', failurePosition: 'mount-defense', difficulty: finishDifficultyFor(24, { x: 0.5, y: 0.5 }),
     }
     const staminaBefore = state.fight!.playerStamina
     const controlBefore = state.fight!.opponentControl
@@ -1820,7 +1884,7 @@ describe('拳途人生模擬核心', () => {
     state = apply(state, { type: 'RESOLVE_FINISH_MINIGAME', result: { kind: 'submission', progress: 0.3, acceptedInputs: 3, elapsedMs: 3000 } })
 
     expect(state.phase).toBe('critical')
-    expect(state.fight!.position).toBe('side-control-defense')
+    expect(state.fight!.position).toBe('mount-defense')
     expect(state.fight!.playerStamina).toBe(staminaBefore - 18)
     expect(state.fight!.opponentControl).toBe(controlBefore + 10)
     expect(state.fight!.playerDamageByPart.body).toBe(bodyDamageBefore + 4)

@@ -210,6 +210,18 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: /支付費用，查看新邀約/ })).toBeEnabled()
   })
 
+  it('邀約畫面公開說明沒有場數上限及因傷退役線', async () => {
+    const game = createNewRun({ ...input, seed: 'VISIBLE-RETIREMENT-RULES' })
+    game.phase = 'offer'
+    game.fighter.health.knees = 39
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const rule = await screen.findByText(/生涯沒有比賽場數上限/)
+    expect(rule).toHaveTextContent('賽後降至 25 或以下就會因傷退役')
+    expect(rule).toHaveTextContent('目前最弱的是膝腿 39')
+  })
+
   it('付費人生選項資金不足時會停用並顯示門檻，免費替代仍可選', async () => {
     const game = createNewRun(input)
     game.phase = 'life'
@@ -305,6 +317,31 @@ describe('生涯重置', () => {
     expect(screen.getByLabelText('踢擊強度 大師')).toHaveTextContent('大師')
     expect(screen.getByText('已學招式')).toBeInTheDocument()
     expect(screen.getByText('特質')).toBeInTheDocument()
+  })
+
+  it('拳手狀態顯示每個部位與明確的強制退役門檻', async () => {
+    const game = createNewRun(input)
+    game.phase = 'offer'
+    game.fighter.health.head = 40
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '拳手狀態' }))
+    expect(screen.getByText('任何部位在賽後降至 25 或以下，職業生涯就會因傷結束。')).toBeInTheDocument()
+    expect(screen.getByText('接近強制退役線')).toBeInTheDocument()
+  })
+
+  it('因傷到達退役線時先解釋原因再進入生涯傳記', async () => {
+    const game = createNewRun(input)
+    game.phase = 'growth'
+    game.growthDestination = 'retirement'
+    game.fighter.health.torso = 25
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '傷勢終結了職業生涯' })).toBeInTheDocument()
+    expect(screen.getByText(/軀幹的長期健康已降至 25/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看退役生涯傳記' })).toBeInTheDocument()
   })
 
   it('狀態介面不再提供科技樹點數操作', async () => {

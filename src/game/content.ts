@@ -231,7 +231,7 @@ export const TECHNIQUE_NODES: TechniqueNode[] = [
   makeNode('ground-posture', '穩住上位', 'ground', 1, 'foundation', '練好髖部、頭位和平衡，在上位不再輕易被對手掀翻。', '上位控制更加穩定，也能更安全地出拳。', [], 'top-posture'),
   makeNode('ground-guard', '封閉式防守', 'ground', 1, 'response', '改善下位的防守架與腿部控制，必要時也能主動把對手拉進防守架。', '重建或拉防守被破解時，承傷最多 3 並留在下位。', ['ground-posture'], 'closed-guard'),
   makeNode('ground-escape', '籠邊起身', 'ground', 2, 'response', '反覆練習背靠鐵網起身，同時護住頭部避免挨打。', '貼籠起身更容易成功，過程中受到的傷害也會降低。', ['ground-guard'], 'wall-walk', { evidence: { key: 'bottomEscapes', amount: 1, label: '從下位脫困 1 次' } }),
-  makeNode('ground-arm', '十字架控制', 'ground', 2, 'chain', '用腿固定一側手臂，再以手臂控制頭部，形成十字架上位。', '學會十字架控制後，可以持續打擊對手，甚至迫使裁判終止比賽。', ['ground-posture'], 'crucifix'),
+  makeNode('ground-arm', '上位困臂', 'ground', 2, 'chain', '用膝線與手腕控制固定一側手臂，限制對手的防守選擇。', '上位困臂會提高隔離手臂與後續控位的穩定性。', ['ground-posture'], 'crucifix'),
   makeNode('ground-submission', '下位降服', 'ground', 3, 'response', '被壓制時，以三角鎖或十字固突然反攻。', '從下位嘗試降服時更容易成功，並能累積這項技術的精通。', ['ground-escape'], 'bottom-submission', { evidence: { key: 'bottomEscapes', amount: 2, label: '從下位脫困 2 次' }, tradeoff: '失敗時可能連防守位置都保不住。' }),
   makeNode('ground-hunter', '控位獵手', 'ground', 3, 'style', '不急著收尾，先一步步封死對手的每條退路。', '在上位轉換位置與連接降服時更加穩定。', ['ground-arm', 'ground-submission'], 'position-hunter', { tradeoff: '只顧著控制，可能因進攻不夠積極而輸掉回合。' }),
 

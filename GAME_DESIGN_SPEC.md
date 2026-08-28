@@ -1,7 +1,7 @@
 # Cage Life — Canonical Game Design Specification
 
 Status: accepted design baseline  
-Last consolidated: 2026-08-28
+Last consolidated: 2026-08-29
 
 ## 1. Purpose and authority
 
@@ -41,13 +41,13 @@ The primary progression fantasy is not “numbers go up.” It is “this fighte
 
 ### 3.1 Starting experiences — Accepted
 
-| Experience | Starting competence | Career entry | Target career length |
-|---|---|---|---|
-| Normie | All five skills at level 0; emergency moves only | Grassroots | 16–20 fights |
-| Hobbyist | Seeded background; primary and secondary skills at level 1; 3 and 2 learned moves respectively | Amateur | 12–16 fights |
-| Semi-pro | Primary level 3 with 8 moves; secondary level 2 with 5; every other branch level 1 with 2 moves | Regional | 10–13 fights |
+| Experience | Starting competence | Career entry |
+|---|---|---|
+| Normie | All five skills at level 0; emergency moves only | Grassroots |
+| Hobbyist | Seeded background; primary and secondary skills at level 1; 3 and 2 learned moves respectively | Amateur |
+| Semi-pro | Primary level 3 with 8 moves; secondary level 2 with 5; every other branch level 1 with 2 moves | Regional |
 
-All three experiences receive the same seeded body, aptitude, relationship, and 1–3 birth-trait systems. The Normie route is longer, not inherently better; the Semi-pro route trades early competence for less time to shape a legacy.
+All three experiences receive the same seeded body, aptitude, relationship, and 1–3 birth-trait systems. The Normie route begins earlier and provides more development runway before the same age and injury pressures; the Semi-pro route begins with greater competence at a later career stage. Starting experience never assigns a seeded fight-count limit.
 
 Normie opponents in the grassroots prologue should be low-skill, distinctive gym smokers and exhibitions. Keep this phase playful and aspirational; do not frame ordinary criminal assaults as the fighter's career ladder.
 
@@ -61,7 +61,20 @@ Normie opponents in the grassroots prologue should be low-skill, distinctive gym
 
 Stages must change opposition, stakes, money, reputation, and the interpretation of preparation. They must not be merely renamed number bands.
 
-### 3.3 World-title credibility — Accepted
+### 3.3 Career endings — Accepted
+
+Fight count never forces retirement. The retired seed-generated career-length target is not part of fighter state, matchmaking, progression, or ending logic, and older saves must discard it without ending the active career.
+
+A career ends automatically only when:
+
+- the fighter reaches age 38; or
+- after a fight, any long-term health value—head, hands, knees, or torso—is 25 or below.
+
+The player may also choose retirement from the offer screen after five fights or from age 34. Winning or losing a particular fight, including a world-title fight, does not itself end the career unless the fight also crosses an age or health boundary.
+
+The interface must state the exact health threshold, show the fighter's current weakest long-term health value in ordinary career context, warn when a value approaches the line, and name injury as the cause when it ends the career. A retirement trigger must never arrive as an unexplained seeded timer.
+
+### 3.4 World-title credibility — Accepted
 
 A world-title offer is earned through both results and credible competitive standing. It becomes available only after at least 10 fights and 8 wins, when the player is ranked in the top 20 and has a competitive rating of at least 70. The championship opponent must be ranked in the top 10 with a competitive rating of at least 70. A development opponent cannot be relabeled as a champion merely because the career has reached a fight-count threshold.
 
@@ -157,6 +170,8 @@ Trait activation must be causally legible in fight choices, narration, or result
 
 Combat is position-based. The player selects a round plan, learns why the opening position occurred, and then chooses legal learned or emergency moves under bounded uncertainty. Important actions can change damage, stamina, control, openings, position, finish pressure, later availability, and the opponent's response.
 
+The ground-position chain intentionally omits side control. Guard passes progress from defensive-guard top directly to mount, and failed bottom submissions may concede mount defense. Do not restore side-control positions or side-control-only attacks, submissions, transitions, escapes, visuals, or progression rewards without a new explicit decision.
+
 Preserve these constraints:
 
 - Show why the current position or major result was plausible, including tactics, relevant skill, traits, damage, and opponent behavior.
@@ -232,6 +247,7 @@ Gameplay changes should preserve or explicitly revise these tests:
 - Same seed plus same choices reproduces the same generated career inputs and outcomes for the same versions.
 - Each starting experience receives the correct entry stage, skill levels, moves, and career thresholds.
 - A level-0 fighter always has a legal action in every reachable position.
+- The reachable ground chain is guard, mount, and back control; side control and its dedicated moves are absent.
 - The first ground technique session can teach an escape and reaches level 1.
 - A Normie's first technique session in every branch offers its functional foundation; the first ground session offers both an escape and a submission, and the first wrestling session offers a real takedown.
 - A technique reward offers up to four moves, requires two selections when available, and learns both only after confirmation.
@@ -239,6 +255,8 @@ Gameplay changes should preserve or explicitly revise these tests:
 - Unlearned non-emergency moves never appear in combat.
 - Trait evidence uses the correct finish method and move attribution, awards once, and persists to history and biography.
 - All three starting experiences remain viable; the longest route is not automatically optimal.
+- Fight count never triggers retirement, while age 38 and post-fight health at 25 or below do.
+- Offer, status, and injury-retirement surfaces state the health ending rule and current relevant condition.
 - Retired practical-sparring state migrates back to a playable camp without losing a slot.
 - The primary gameplay path remains usable at a 320 px viewport without horizontal scrolling or hidden essential actions.
 
@@ -252,9 +270,11 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 |---|---|---|
 | 2026-08-28 | Accepted | Replace talent points and the tech tree with five level 0–5 XP skills. Progress should produce learned moves and a recognizable fighting identity. |
 | 2026-08-28 | Accepted | Technique training always culminates in a real move choice; levels gate the pool but do not ration one move per level. |
-| 2026-08-28 | Accepted | Offer Normie, Hobbyist, and Semi-pro starts with different competence, entry stages, and career lengths so the opening changes the life question. |
+| 2026-08-28 | Accepted | Offer Normie, Hobbyist, and Semi-pro starts with different competence and entry stages so the opening changes the life question. |
 | 2026-08-28 | Accepted | Use seeded birth traits plus performance-earned traits with visible evidence thresholds; traits replace passive tree-node identity. |
 | 2026-08-28 | Deprecated | Remove `實戰對練`; playtesting showed scripted follow-up exchanges, conflicting reading/timing demands, and an insufficiently consequential reward. |
 | 2026-08-28 | Accepted | Make combat causality explicit through position-entry explanations, legal learned moves, transition routes, injury effects, and clear climax presentation. |
 | 2026-08-28 | Accepted | Treat money as career optionality: risk-priced purses, derived runway labels, one paid offer replacement per cycle, affordable/free medical and logistics alternatives, and late-career legacy spending. Money cannot gate the core loop or buy permanent combat power. |
 | 2026-08-28 | Accepted | Technique training now teaches two of up to four offered moves. Each branch guarantees an early functional foundation, while authored move levels make basic submissions, takedowns, and clinch entries available before mastery. This prevents a Normie from repeatedly investing in a style without gaining its defining combat route. |
+| 2026-08-29 | Accepted | Remove the hidden seeded fight-count retirement limit. Careers now end only by voluntary retirement, age 38, or a visible post-fight long-term health threshold of 25 or below; the UI must explain the threshold and the cause of injury retirement. |
+| 2026-08-29 | Accepted | Remove side control and its dedicated move family. Ground progression now goes directly from guard passing to mount, keeping fewer positions with clearer strategic roles. |

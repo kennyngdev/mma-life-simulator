@@ -20,7 +20,6 @@ export type Position =
   | 'body-lock' | 'body-lock-defense'
   | 'front-headlock-control' | 'front-headlock-defense'
   | 'top' | 'bottom' | 'scramble'
-  | 'side-control' | 'side-control-defense'
   | 'mount' | 'mount-defense'
   | 'back-control' | 'back-defense'
 export type FightStageName = 'contact' | 'exchange' | 'turn' | 'finish'
@@ -204,7 +203,6 @@ export interface FighterState {
   ranking: number
   reputation: number
   promoterTrust: number
-  careerFightTarget: number
   wins: number
   losses: number
   draws: number
@@ -650,8 +648,8 @@ export interface RngStreams {
 
 export interface GameState {
   saveVersion: 12
-  rulesVersion: '0.9.3'
-  contentVersion: '1.2.0'
+  rulesVersion: '0.10.0'
+  contentVersion: '1.3.0'
   seed: string
   phase: GamePhase
   stage: Stage

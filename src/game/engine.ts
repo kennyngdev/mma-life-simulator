@@ -80,6 +80,7 @@ import type {
 } from './types'
 
 const HEALTH_PARTS: HealthPart[] = ['head', 'hands', 'knees', 'torso']
+export const CAREER_HEALTH_RETIREMENT_THRESHOLD = 25
 const INTERNATIONAL_HOMETOWNS: Record<string, string> = {
   巴西: '聖保羅', 日本: '東京', 南韓: '首爾', 俄羅斯: '莫斯科', 哈薩克: '阿拉木圖', 吉爾吉斯: '比什凱克',
   美國: '拉斯維加斯', 孟加拉: '達卡', 印度: '孟買', 巴基斯坦: '拉合爾', 葡萄牙: '里斯本', 匈牙利: '布達佩斯',
@@ -254,10 +255,7 @@ export function createNewRun(input: NewRunInput): GameState {
     primary: 'boxing' as Branch, secondary: 'ground' as Branch,
   } : seededBackground
   let naturalWeight: number
-  let targetFights: number
   ;[naturalWeight, rng] = drawInt(rng, 'identity', 64, 94)
-  const targetRange = startingExperience === 'normie' ? [16, 20] as const : startingExperience === 'semi-pro' ? [10, 13] as const : [12, 16] as const
-  ;[targetFights, rng] = drawInt(rng, 'world', targetRange[0], targetRange[1])
   const anthropometrics = getAnthropometrics(input.seed.trim().toUpperCase(), naturalWeight)
   const skills = {} as FighterState['skills']
   for (const branch of BRANCHES) {
@@ -302,7 +300,7 @@ export function createNewRun(input: NewRunInput): GameState {
     mind: { fightIQ: 36, composure: 40 }, health: { head: 100, hands: 100, knees: 100, torso: 100 },
     fatigue: 0, readiness: 82, insight: 0, money: startingExperience === 'normie' ? 2_000 : startingExperience === 'semi-pro' ? 14_000 : 8_000,
     ranking: startingExperience === 'semi-pro' ? 70 : 99, reputation: startingExperience === 'semi-pro' ? 15 : 5,
-    promoterTrust: 50, careerFightTarget: targetFights, wins: 0, losses: 0, draws: 0,
+    promoterTrust: 50, wins: 0, losses: 0, draws: 0,
     unlockedNodes, mastery, evidence: { fights: 0, wins: 0, finishes: 0, takedowns: 0, submissions: 0,
       bottomEscapes: 0, knockdowns: 0, cageMinutes: 0, decisions: 0, punchKos: 0, kickKos: 0, comebackWins: 0, survivedFinishWindows: 0 }, relationships, history,
   }
@@ -311,7 +309,7 @@ export function createNewRun(input: NewRunInput): GameState {
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 12, rulesVersion: '0.9.3', contentVersion: '1.2.0', seed: input.seed.trim().toUpperCase(),
+    saveVersion: 12, rulesVersion: '0.10.0', contentVersion: '1.3.0', seed: input.seed.trim().toUpperCase(),
     phase: 'reveal', stage: stageFor(0, startingExperience), fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
     offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
@@ -511,7 +509,7 @@ function createLifeEvent(state: GameState): [LifeEvent, RngStreams] {
   let rng = state.rng
   const selectedOffer = state.offers.find((offer) => offer.id === state.selectedOfferId)
   const historyHasTag = (tag: string) => state.fighter.history.some((entry) => entry.tags.includes(tag))
-  const lateCareer = state.fighter.evidence.fights >= Math.max(7, state.fighter.careerFightTarget - 3)
+  const lateCareer = stageFor(state.fighter.evidence.fights, state.fighter.startingExperience) === 'legacy' || state.fighter.age >= 34
   if (!state.offerRefreshUsed && lateCareer && !historyHasTag('傳承')) return [createLegacyLifeEvent(state), rng]
   if (!state.offerRefreshUsed && selectedOffer && (selectedOffer.shortNotice || (!isLocalStage(state.stage) && !historyHasTag('客場後勤')))) {
     return [createLogisticsLifeEvent(state), rng]
@@ -1065,8 +1063,6 @@ export function mirrorPosition(position: Position): Position {
   if (position === 'body-lock-defense') return 'body-lock'
   if (position === 'front-headlock-control') return 'front-headlock-defense'
   if (position === 'front-headlock-defense') return 'front-headlock-control'
-  if (position === 'side-control') return 'side-control-defense'
-  if (position === 'side-control-defense') return 'side-control'
   if (position === 'mount') return 'mount-defense'
   if (position === 'mount-defense') return 'mount'
   if (position === 'back-control') return 'back-defense'
@@ -1141,9 +1137,9 @@ function opponentExecution(intent: FightMoveDefinition) {
 function threatLevelFor(fight: FightState, intent: FightMoveDefinition): OpponentIntent['threatLevel'] {
   const target = moveTarget(intent)
   const current = target ? fight.playerDamageByPart[target] : 0
-  if (intent.submission && ['front-headlock-control', 'front-headlock-defense', 'top', 'bottom', 'side-control', 'side-control-defense', 'mount', 'mount-defense', 'back-control', 'back-defense'].includes(fight.position)) return 'critical'
+  if (intent.submission && ['front-headlock-control', 'front-headlock-defense', 'top', 'bottom', 'mount', 'mount-defense', 'back-control', 'back-defense'].includes(fight.position)) return 'critical'
   if (target && damageSeverity(current + Math.max(intent.effects.headDamage, intent.effects.bodyDamage, intent.effects.legDamage), target) === 'critical') return 'critical'
-  if (intent.effects.finishPressure >= 10 || ['top', 'side-control', 'mount', 'back-control'].includes(intent.cleanPosition ?? '') || intent.category === 'transition') return 'danger'
+  if (intent.effects.finishPressure >= 10 || ['top', 'mount', 'back-control'].includes(intent.cleanPosition ?? '') || intent.category === 'transition') return 'danger'
   return 'watch'
 }
 
@@ -1303,7 +1299,6 @@ function positionLabel(position: Position): string {
     'body-lock': '抱腰控制', 'body-lock-defense': '被抱腰',
     'front-headlock-control': '前頸控制', 'front-headlock-defense': '被控前頸',
     top: '防守架上位', bottom: '防守架下位', scramble: '混戰',
-    'side-control': '側控', 'side-control-defense': '側控下位',
     mount: '騎乘位', 'mount-defense': '騎乘下位',
     'back-control': '背後控制', 'back-defense': '背部被控',
   } as const)[position]
@@ -1313,8 +1308,8 @@ function chanceFor(state: GameState, opponent: Opponent, branch: Branch, categor
   const health = Object.values(state.fighter.health).reduce((sum, value) => sum + value, 0) / 4
   const playerSkill = branchSkill(state.fighter.technique[branch], state.fighter.mind.fightIQ) - damageSkillPenalty(fight.playerDamageByPart, branch, category)
   const opponentSkill = branchSkill(opponent.technique[branch], opponent.composure) - damageSkillPenalty(fight.opponentDamageByPart, branch, category)
-  const defensiveGround = ['bottom', 'side-control-defense', 'mount-defense', 'back-defense', 'front-headlock-defense'].includes(position)
-  const dominantGround = ['side-control', 'mount', 'back-control', 'front-headlock-control'].includes(position)
+  const defensiveGround = ['bottom', 'mount-defense', 'back-defense', 'front-headlock-defense'].includes(position)
+  const dominantGround = ['mount', 'back-control', 'front-headlock-control'].includes(position)
   const clinchPosition = ['clinch', 'cage', 'cage-control', 'cage-defense', 'thai-clinch', 'thai-clinch-defense', 'body-lock', 'body-lock-defense'].includes(position)
   const positional = defensiveGround && branch !== 'ground' && branch !== 'wrestling' ? -12
     : dominantGround && branch === 'ground' ? 10
@@ -1601,8 +1596,8 @@ function resolveCritical(state: GameState, optionId: string): GameState {
     }
   }
   if (outcome === 'clean' && intent.cleanPosition === 'top' && positionBefore !== 'back-defense') fighter.evidence.takedowns += 1
-  const disadvantagedGroundPositions: Position[] = ['bottom', 'side-control-defense', 'mount-defense', 'back-defense', 'front-headlock-defense']
-  const groundEscapeMoves = ['wall-walk', 'side-wall-escape', 'elbow-knee-escape', 'backdoor-escape', 'clear-back-hooks', 'back-wall-escape', 'front-headlock-sitout']
+  const disadvantagedGroundPositions: Position[] = ['bottom', 'mount-defense', 'back-defense', 'front-headlock-defense']
+  const groundEscapeMoves = ['wall-walk', 'elbow-knee-escape', 'backdoor-escape', 'clear-back-hooks', 'back-wall-escape', 'front-headlock-sitout']
   if (outcome === 'clean' && disadvantagedGroundPositions.includes(positionBefore) && groundEscapeMoves.includes(intent.id)) fighter.evidence.bottomEscapes += 1
   // A three-minute round has four tactical beats, so a successful control beat represents 45 seconds.
   if (outcome === 'clean' && ['cage', 'cage-control'].includes(positionBefore) && intent.effects.control >= 6) fighter.evidence.cageMinutes += 0.75
@@ -1624,7 +1619,7 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   if (directSubmissionAttempt) {
     const attemptFight = { ...fight, position: positionBefore }
     const outcomeAdjustment = outcome === 'clean' ? 8 : outcome === 'contested' ? -2 : -16
-    const failurePosition = positionBefore === 'bottom' ? 'side-control-defense' : intent.counteredPosition ?? 'scramble'
+    const failurePosition = positionBefore === 'bottom' ? 'mount-defense' : intent.counteredPosition ?? 'scramble'
     const submissionOpportunity = clamp(finishOpportunity({ ...state, fighter, rng }, attemptFight, finishOption, 'player', 'submission') + outcomeAdjustment)
     if (submissionOpportunity >= 52) {
       const createdWindow = maybeCreateFinishWindow(
@@ -1763,13 +1758,13 @@ export function finishOpportunity(state: GameState, fight: FightState, option: C
     : opponent.technique[option.branch ?? 'boxing'] + opponent.composure * 0.22
   const attackerPosition = attacker === 'player' ? fight.position : mirrorPosition(fight.position)
   const positionBonus = kind === 'submission'
-    ? (attackerPosition === 'back-control' ? 22 : attackerPosition === 'mount' ? 18 : attackerPosition === 'side-control' ? 14 : attackerPosition === 'front-headlock-control' ? 12 : attackerPosition === 'top' ? 8 : attackerPosition === 'bottom' ? -8 : attackerPosition === 'clinch' || attackerPosition === 'scramble' ? 0 : -4)
-    : (attackerPosition === 'mount' ? 17 : attackerPosition === 'pocket' || attackerPosition === 'cage' || attackerPosition === 'cage-control' ? 14 : attackerPosition === 'thai-clinch' ? 13 : attackerPosition === 'top' || attackerPosition === 'side-control' || attackerPosition === 'back-control' ? 12 : 3)
+    ? (attackerPosition === 'back-control' ? 22 : attackerPosition === 'mount' ? 18 : attackerPosition === 'front-headlock-control' ? 12 : attackerPosition === 'top' ? 8 : attackerPosition === 'bottom' ? -8 : attackerPosition === 'clinch' || attackerPosition === 'scramble' ? 0 : -4)
+    : (attackerPosition === 'mount' ? 17 : attackerPosition === 'pocket' || attackerPosition === 'cage' || attackerPosition === 'cage-control' ? 14 : attackerPosition === 'thai-clinch' ? 13 : attackerPosition === 'top' || attackerPosition === 'back-control' ? 12 : 3)
   const finishingActions = [
     'risky-power', 'haymaker', 'head-kick', 'question-mark-kick', 'spinning-back-kick', 'spinning-elbow',
     'cage-body-head', 'cage-knee-elbow', 'plum-head-knee', 'plum-slicing-elbow',
-    'ground-strikes', 'side-elbows', 'mount-punches', 'mount-elbows', 'back-strikes',
-    'front-headlock-guillotine', 'front-headlock-anaconda', 'bottom-submission', 'guard-armbar', 'guard-kimura', 'americana', 'side-kimura', 'north-south-choke', 'seek-choke',
+    'ground-strikes', 'mount-punches', 'mount-elbows', 'back-strikes',
+    'front-headlock-guillotine', 'front-headlock-anaconda', 'bottom-submission', 'guard-armbar', 'guard-kimura', 'seek-choke',
     'arm-triangle', 'mounted-armbar', 'rear-naked-choke', 'back-armbar',
   ]
   const actionBonus = finishingActions.includes(option.actionKey) ? 14 : option.conservative ? -22 : 3
@@ -1896,10 +1891,10 @@ function resolveFinishMinigame(state: GameState, result: FinishMinigameResult): 
         fight.position = 'bottom'
         fight.commentary.push(`就差最後一點！你從下位幾乎完成降服，但也額外消耗 ${extraCost} 點體力；${opponent.name}驚險脫身，重新壓穩防守架。`)
       } else {
-        fight.position = finishWindow.failurePosition ?? 'side-control-defense'
+        fight.position = finishWindow.failurePosition ?? 'mount-defense'
         fight.playerDamage = clamp(fight.playerDamage + 4)
         fight.playerDamageByPart.body = clamp(fight.playerDamageByPart.body + 4)
-        fight.commentary.push(`降服沒能鎖住！${opponent.name}趁機過腿搶下側控；你額外消耗 ${extraCost} 點體力，軀幹也承受更多壓力。`)
+        fight.commentary.push(`降服沒能鎖住！${opponent.name}趁機越過雙腿搶下騎乘；你額外消耗 ${extraCost} 點體力，軀幹也承受更多壓力。`)
       }
     } else {
       const extraCost = nearFinish ? 6 : 10
@@ -2053,7 +2048,7 @@ function processFightResult(state: GameState): GameState {
     const trait = traitDefinition(id)!
     updatedFighter.history.push({ id: `trait-${id}`, year: updatedFighter.year, age: updatedFighter.age, title: `獲得特質：${trait.name}`, summary: `${trait.condition}；${trait.effect}`, people: [], importance: 2, tags: ['特質', trait.rarity] })
   }
-  const shouldRetire = updatedFighter.evidence.fights >= updatedFighter.careerFightTarget || updatedFighter.age >= 38 || Math.min(...Object.values(updatedFighter.health)) <= 25
+  const shouldRetire = updatedFighter.age >= 38 || Math.min(...Object.values(updatedFighter.health)) <= CAREER_HEALTH_RETIREMENT_THRESHOLD
   const offerResult = generateOffers(updatedFighter, opponents, state.rng)
   return {
     ...state,
@@ -2101,18 +2096,21 @@ function makeBiography(state: GameState): Biography {
   }
 }
 
-export function retireGame(state: GameState, reason: 'voluntary' | 'age-limit' = 'voluntary'): GameState {
+export function retireGame(state: GameState, reason: 'voluntary' | 'age-limit' | 'injury' = 'voluntary'): GameState {
   if (state.phase === 'retirement') return state
   const fighter = structuredClone(state.fighter)
-  const entryId = reason === 'age-limit' ? 'retirement-age-limit' : 'retirement-voluntary'
+  const weakestHealth = (Object.entries(fighter.health) as Array<[HealthPart, number]>).sort((a, b) => a[1] - b[1])[0]
+  const entryId = reason === 'age-limit' ? 'retirement-age-limit' : reason === 'injury' ? 'retirement-injury' : 'retirement-voluntary'
   if (!fighter.history.some((entry) => entry.id === entryId)) {
     fighter.history.push({
       id: entryId,
       year: fighter.year,
       age: fighter.age,
-      title: reason === 'age-limit' ? '拒絕最後一份合約' : '在自己選定的時刻退役',
+      title: reason === 'age-limit' ? '拒絕最後一份合約' : reason === 'injury' ? '傷勢讓籠門關上' : '在自己選定的時刻退役',
       summary: reason === 'age-limit'
         ? '三十八歲這年，你不再接受新的邀約。籠門最後一次關上，職業生涯就此結束。'
+        : reason === 'injury'
+          ? `${healthLabel(weakestHealth[0])}的長期健康降到 ${weakestHealth[1]}，達到 ${CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下的強制退役線。這場比賽成為你的職業生涯終點。`
         : '你沒有等到傷勢或合約替你做決定，而是親自選擇在這一刻結束職業生涯。',
       people: fighter.relationships.filter((relationship) => relationship.role !== 'partner').map((relationship) => relationship.name),
       importance: 3,
@@ -2120,7 +2118,12 @@ export function retireGame(state: GameState, reason: 'voluntary' | 'age-limit' =
     })
   }
   const retired = { ...state, fighter, phase: 'retirement' as const, fight: undefined, selectedOfferId: undefined, campActions: [] }
-  return { ...retired, biography: makeBiography(retired), lastMessage: reason === 'age-limit' ? '三十八歲是職業生涯的最後界線。' : '你決定結束職業生涯。' }
+  const lastMessage = reason === 'age-limit'
+    ? '三十八歲是職業生涯的最後界線。'
+    : reason === 'injury'
+      ? `${healthLabel(weakestHealth[0])}健康降至 ${weakestHealth[1]}，已達強制退役線。`
+      : '你決定結束職業生涯。'
+  return { ...retired, biography: makeBiography(retired), lastMessage }
 }
 
 function selectOffer(state: GameState, offerId: string): GameState {
@@ -2219,8 +2222,8 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
     next = { ...state, lastMessage: '科技樹已被訓練與招式學習系統取代。' }
   } else if (command.type === 'CONTINUE_GROWTH' && state.phase === 'growth') {
     if (state.growthDestination === 'retirement') {
-      const retiring = { ...state, phase: 'retirement' as const, growthDestination: undefined, insightGained: undefined }
-      next = { ...retiring, biography: makeBiography(retiring), lastMessage: '你帶著多年磨練出的打法，正式告別職業賽場。' }
+      const reason = Math.min(...Object.values(state.fighter.health)) <= CAREER_HEALTH_RETIREMENT_THRESHOLD ? 'injury' : 'age-limit'
+      next = retireGame({ ...state, growthDestination: undefined, insightGained: undefined }, reason)
     } else {
       next = { ...state, phase: state.growthDestination === 'offer' ? 'offer' : 'weight', growthDestination: undefined, insightGained: undefined, traitAwards: undefined }
     }

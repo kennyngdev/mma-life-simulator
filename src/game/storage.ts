@@ -1,7 +1,7 @@
 import { openDB } from 'idb'
 import { BACKGROUNDS, REGION_PROFILES } from './content'
 import { generateOffers, rankingAfterWin } from './engine'
-import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LoadGameResult, SaveEnvelope } from './types'
+import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LoadGameResult, Position, SaveEnvelope } from './types'
 
 const DATABASE = 'cage-life'
 const STORE = 'records'
@@ -31,22 +31,128 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
-  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.3' && envelope.contentVersion === '1.2.0') {
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.10.0' && envelope.contentVersion === '1.3.0') {
     return { game: restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)) }
   }
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.10.0' && envelope.contentVersion === '1.2.0') {
+    return { game: migrateRemovedSideControl(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))) }
+  }
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.3' && envelope.contentVersion === '1.2.0') {
+    return { game: migrateRemovedSideControl(migrateCareerEndings(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
+  }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.2' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
+    return { game: migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.1' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
+    return { game: migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.0' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))) }
+    return { game: migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.8.0' && envelope.contentVersion === '1.1.0') return { game: migrateVersion12(envelope.game) }
   if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion11(envelope.game) }
   if (envelope.saveVersion === 10 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion10(envelope.game) }
   return { resetReason: 'combat-rules-upgrade' }
+}
+
+type FightLimitGame = Omit<GameState, 'fighter' | 'rulesVersion'> & {
+  fighter: GameState['fighter'] & { careerFightTarget?: number }
+  rulesVersion: string
+}
+
+/** Removes the hidden seed-generated fight cap without disrupting an active career. */
+export function migrateCareerEndings(game: unknown): GameState {
+  const legacy = structuredClone(game) as FightLimitGame
+  if (!legacy.fighter) throw new Error('無法讀取舊生涯存檔')
+  const { careerFightTarget: _retiredFightLimit, ...fighter } = legacy.fighter
+  return { ...legacy, fighter, rulesVersion: '0.10.0' } as GameState
+}
+
+const RETIRED_SIDE_CONTROL_MOVES = new Set([
+  'side-control-pressure', 'side-elbows', 'knee-on-belly', 'mount-transition', 'americana', 'side-kimura',
+  'north-south-choke', 'side-frame-reguard', 'side-underhook-knees', 'side-bridge-turn', 'side-wall-escape',
+  'side-shell', 'side-body-knees', 'crucifix-elbows',
+])
+
+type RetiredSidePosition = Position | 'side-control' | 'side-control-defense'
+
+function migrateSidePosition(position: RetiredSidePosition | undefined): Position | undefined {
+  if (position === 'side-control') return 'mount'
+  if (position === 'side-control-defense') return 'mount-defense'
+  return position
+}
+
+/** Removes side-control content while keeping older careers and in-progress fights playable. */
+export function migrateRemovedSideControl(game: unknown): GameState {
+  const legacy = structuredClone(game) as GameState
+  if (!legacy.fighter || !legacy.opponents) throw new Error('無法讀取舊生涯存檔')
+  const keepMove = (moveId: string) => !RETIRED_SIDE_CONTROL_MOVES.has(moveId)
+  legacy.fighter.learnedMoves = legacy.fighter.learnedMoves.filter(keepMove)
+  legacy.opponents = legacy.opponents.map((opponent) => ({ ...opponent, learnedMoves: opponent.learnedMoves.filter(keepMove) }))
+  legacy.trainingMoveChoices = legacy.trainingMoveChoices?.filter(keepMove)
+  legacy.trainingMoveSelections = legacy.trainingMoveSelections?.filter(keepMove)
+  if (legacy.biography) legacy.biography = { ...legacy.biography, learnedMoves: legacy.biography.learnedMoves.filter(keepMove) }
+  if (legacy.phase === 'training-reward' && !legacy.trainingMoveChoices?.length) {
+    legacy.phase = legacy.campActions.length >= 3 ? 'life' : 'camp'
+    legacy.trainingMoveChoices = undefined
+    legacy.trainingMoveSelections = undefined
+    legacy.trainingMoveBranch = undefined
+  }
+
+  const invalidDrill = legacy.activeCampDrill?.kind === 'technique' && legacy.activeCampDrill.mode === 'combo'
+    && legacy.activeCampDrill.steps.some((step) => RETIRED_SIDE_CONTROL_MOVES.has(step.moveId))
+  if (invalidDrill) {
+    legacy.phase = 'camp'
+    legacy.activeCampDrill = undefined
+    legacy.campDrillOutcome = undefined
+  }
+
+  if (legacy.fight) {
+    const fight = legacy.fight
+    const legacyPosition = (fight as unknown as { position: RetiredSidePosition }).position
+    const retiredPosition = legacyPosition === 'side-control' || legacyPosition === 'side-control-defense'
+    fight.position = migrateSidePosition(legacyPosition)!
+    if (fight.positionEntry) fight.positionEntry.position = migrateSidePosition(fight.positionEntry.position as RetiredSidePosition)!
+    if (fight.prompt) fight.prompt.position = migrateSidePosition(fight.prompt.position as RetiredSidePosition)!
+    if (fight.opponentIntent.predictedPosition) fight.opponentIntent.predictedPosition = migrateSidePosition(fight.opponentIntent.predictedPosition as RetiredSidePosition)
+    if (fight.activeFinishWindow) {
+      fight.activeFinishWindow.sourcePosition = migrateSidePosition(fight.activeFinishWindow.sourcePosition as RetiredSidePosition)
+      fight.activeFinishWindow.failurePosition = migrateSidePosition(fight.activeFinishWindow.failurePosition as RetiredSidePosition)
+    }
+    if (fight.lastNarrative) {
+      fight.lastNarrative.positionBefore = migrateSidePosition(fight.lastNarrative.positionBefore as RetiredSidePosition)!
+      fight.lastNarrative.positionAfter = migrateSidePosition(fight.lastNarrative.positionAfter as RetiredSidePosition)!
+    }
+    fight.beatHistory = fight.beatHistory.map((beat) => ({
+      ...beat,
+      position: migrateSidePosition(beat.position as RetiredSidePosition)!,
+      narrative: {
+        ...beat.narrative,
+        positionBefore: migrateSidePosition(beat.narrative.positionBefore as RetiredSidePosition)!,
+        positionAfter: migrateSidePosition(beat.narrative.positionAfter as RetiredSidePosition)!,
+      },
+    }))
+    for (const moveId of RETIRED_SIDE_CONTROL_MOVES) {
+      delete fight.opponentAdaptation[moveId]
+      delete fight.opponentMoveHistory[moveId]
+    }
+    const retiredPrompt = fight.prompt?.allOptions.some((option) => RETIRED_SIDE_CONTROL_MOVES.has(option.intentId ?? option.actionKey))
+    const retiredFinish = Boolean(fight.activeFinishWindow?.sourceMoveId && RETIRED_SIDE_CONTROL_MOVES.has(fight.activeFinishWindow.sourceMoveId))
+    if (fight.lastSuccessfulIntentId && RETIRED_SIDE_CONTROL_MOVES.has(fight.lastSuccessfulIntentId)) fight.lastSuccessfulIntentId = undefined
+    if (fight.finishingMoveId && RETIRED_SIDE_CONTROL_MOVES.has(fight.finishingMoveId)) fight.finishingMoveId = undefined
+    const activeFightDecision = legacy.phase === 'critical' || legacy.phase === 'finish-minigame'
+    if (activeFightDecision && (retiredPosition || retiredPrompt || retiredFinish)) {
+      legacy.phase = 'round-plan'
+      fight.prompt = undefined
+      fight.activeFinishWindow = undefined
+      fight.positionEntry = undefined
+      fight.sequenceStep = 1
+      fight.commentary.push('規則更新移除了側控位置；本回合從新的戰術選擇重新開始。')
+    }
+  }
+
+  legacy.contentVersion = '1.3.0'
+  return legacy
 }
 
 function storedCompetitiveRating(technique: Record<Branch, number>, mind: number): number {
@@ -56,7 +162,7 @@ function storedCompetitiveRating(technique: Record<Branch, number>, mind: number
 
 /** Removes impossible paper-title labels from an active offer screen while preserving the career. */
 export function repairTitleCredibility(game: GameState): GameState {
-  if (game.phase !== 'offer') return { ...game, rulesVersion: '0.9.3' }
+  if (game.phase !== 'offer') return { ...game, rulesVersion: '0.10.0' }
   const fighterRating = storedCompetitiveRating(game.fighter.technique, game.fighter.mind.fightIQ)
   const playerEligible = game.fighter.evidence.fights >= 10 && game.fighter.wins >= 8
     && game.fighter.ranking <= 20 && fighterRating >= 70
@@ -74,15 +180,15 @@ export function repairTitleCredibility(game: GameState): GameState {
       purseBreakdown: { ...offer.purseBreakdown, titleBonus: 0 },
     }
   })
-  return { ...game, rulesVersion: '0.9.3', offers }
+  return { ...game, rulesVersion: '0.10.0', offers }
 }
 
 /** Rebuilds unsigned offers around the fighter's actual ranking under the rank-led matchmaking rules. */
 export function migrateMatchmakingCredibility(game: GameState): GameState {
   const canReplaceOffers = !game.selectedOfferId && (game.phase === 'reveal' || game.phase === 'offer' || game.phase === 'growth')
-  if (!canReplaceOffers) return { ...game, rulesVersion: '0.9.3' }
+  if (!canReplaceOffers) return { ...game, rulesVersion: '0.10.0' }
   const generated = generateOffers(game.fighter, game.opponents, game.rng)
-  return { ...game, rulesVersion: '0.9.3', rng: generated.rng, offers: generated.offers }
+  return { ...game, rulesVersion: '0.10.0', rng: generated.rng, offers: generated.offers }
 }
 
 function oldRankReward(currentRank: number, opponentRank: number): number {
@@ -91,7 +197,7 @@ function oldRankReward(currentRank: number, opponentRank: number): number {
 
 /** Repairs the latest result produced by the retired six-place ranking cap. */
 export function migrateRankingCredibility(game: GameState): GameState {
-  const migrated = { ...game, rulesVersion: '0.9.3' as const }
+  const migrated = { ...game, rulesVersion: '0.10.0' as const }
   const lastFight = [...game.fighter.history].reverse().find((entry) => entry.tags.includes('比賽'))
   if (!lastFight?.tags.includes('勝利') || lastFight.year !== game.fighter.year) return migrated
   const opponent = game.opponents.find((item) => lastFight.people.includes(item.name))
@@ -273,12 +379,12 @@ type Version12Game = Omit<GameState, 'rulesVersion' | 'contentVersion' | 'traini
 export function migrateVersion12(game: unknown): GameState {
   const legacy = structuredClone(game) as Version12Game
   if (!legacy.fighter || !legacy.offers) throw new Error('無法讀取舊生涯存檔')
-  return migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring({
+  return migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring({
     ...legacy,
     trainingMoveSelections: legacy.phase === 'training-reward' ? legacy.trainingMoveSelections ?? [] : undefined,
-    rulesVersion: '0.9.3',
-    contentVersion: '1.2.0',
-  } as GameState)))))
+    rulesVersion: '0.10.0',
+    contentVersion: '1.3.0',
+  } as GameState)))))))
 }
 
 /** Backwards-compatible name used by legacy callers and migration tests. */

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
-import { advance, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, getWeightOptions, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
+import { advance, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, getWeightOptions, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
 import { aptitudeLabel, minimumMoveLevel, nextSkillThreshold, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
@@ -303,6 +303,7 @@ function OfferView({ game, dispatch }: ViewProps) {
   const coach = game.fighter.relationships.find((relationship) => relationship.role === 'coach')
   const refreshCost = offerRefreshCost(game.fighter)
   const canRefresh = !game.offerRefreshUsed && game.fighter.money >= refreshCost
+  const weakestHealth = weakestHealthEntry(game.fighter)
   return (
     <Screen title="下一場戰鬥" kicker={`${game.fighter.year} · 排名 #${game.fighter.ranking}`}>
       <ContextStrip fighter={game.fighter} />
@@ -340,7 +341,7 @@ function OfferView({ game, dispatch }: ViewProps) {
         <p>支付 {formatRegionalMoney(refreshCost, game.fighter.region)} 處理合約與營隊空窗，不讓年齡前進；聯盟信任會小幅下降。本輪只能使用一次。</p>
         <button type="button" className="choice-confirm" disabled={!canRefresh} onClick={() => dispatch({ type: 'PURCHASE_OFFER_REFRESH' })}>{game.offerRefreshUsed ? '本輪已經換過邀約' : game.fighter.money < refreshCost ? `資金不足，還差 ${formatRegionalMoney(refreshCost - game.fighter.money, game.fighter.region)}` : '支付費用，查看新邀約'}</button>
       </section>
-      {game.fighter.age >= 34 && <p className="memory-callout">你的職業生涯已進入尾聲。到了三十八歲就得退役，你也可以選擇現在收手。</p>}
+      <p className={`memory-callout${weakestHealth[1] <= 40 ? ' danger-callout' : ''}`}>生涯沒有比賽場數上限。任何部位在賽後降至 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下就會因傷退役；目前最弱的是{healthPartLabel(weakestHealth[0])} {weakestHealth[1]}。{game.fighter.age >= 34 ? '到了三十八歲也必須退役。' : ''}</p>
       <button className="secondary-action" onClick={() => dispatch({ type: 'DECLINE_OFFERS' })}>{game.fighter.age >= 37 ? '拒絕邀約，結束職業生涯' : '拒絕邀約，讓時間前進一年'}</button>
       {(game.fighter.evidence.fights >= 5 || game.fighter.age >= 34) && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>現在退役</button>}
     </Screen>
@@ -686,12 +687,15 @@ function LifeView({ game, dispatch }: ViewProps) {
 
 function GrowthView({ game, dispatch }: ViewProps) {
   const awards = (game.traitAwards ?? []).map((id) => traitDefinition(id)).filter(Boolean)
+  const weakestHealth = weakestHealthEntry(game.fighter)
+  const injuryRetirement = game.growthDestination === 'retirement' && weakestHealth[1] <= CAREER_HEALTH_RETIREMENT_THRESHOLD
   return (
-    <Screen title={awards.length ? '打法成為了特質' : '實戰留下的痕跡'} kicker={awards.length ? `${awards.length} 項新特質` : '生涯進度'}>
+    <Screen title={injuryRetirement ? '傷勢終結了職業生涯' : awards.length ? '打法成為了特質' : '實戰留下的痕跡'} kicker={injuryRetirement ? `${healthPartLabel(weakestHealth[0])}健康 ${weakestHealth[1]}` : awards.length ? `${awards.length} 項新特質` : '生涯進度'}>
+      {injuryRetirement && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康已降至 {weakestHealth[1]}。任何部位在賽後達到 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下都必須退役；剛才那場比賽是你的職業生涯終點。</p>}
       {awards.length ? <div className="trait-awards">{awards.map((trait) => trait && <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity)}</span><h2>{trait.name}</h2><p>{trait.description}</p><strong>{trait.effect}</strong><small>生效：{trait.condition}</small></article>)}</div>
         : <div className="growth-complete"><span>✓</span><div><strong>沒有憑空出現的新能力</strong><small>真正的招式來自訓練；重複的實戰行為則會逐步形成特質。</small></div></div>}
       {game.fighter.traitProgress.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="第一次做出符合條件的表現後，進度會保持可見。" /><TraitProgressList fighter={game.fighter} /></>}
-      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>繼續生涯</button></ActionDock>
+      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : '繼續生涯'}</button></ActionDock>
     </Screen>
   )
 }
@@ -1298,8 +1302,6 @@ const POSITION_VISUALS: Record<Position, PositionVisual> = {
   'front-headlock-defense': { family: 'clinch', player: { x: 55, y: 37, pose: 'crouched' }, opponent: { x: 44, y: 31, pose: 'leaning', flip: true }, owner: 'opponent', connection: 'head', detail: '你的頭頸被控制，起身前必須先處理抓握與角度。' },
   top: { family: 'ground', player: { x: 48, y: 28, pose: 'kneeling' }, opponent: { x: 52, y: 38, pose: 'grounded', rotate: -8 }, owner: 'player', connection: 'ground', detail: '你在對手防守架上方；可以穩固上位、過腿或進行地面打擊。' },
   bottom: { family: 'ground', player: { x: 52, y: 38, pose: 'grounded', rotate: 8 }, opponent: { x: 48, y: 28, pose: 'kneeling', flip: true }, owner: 'opponent', connection: 'ground', detail: '你在防守架下位；能掃摔或降服反攻，但裁判得分通常偏向上方控制者。' },
-  'side-control': { family: 'ground', player: { x: 46, y: 29, pose: 'grounded', rotate: 12 }, opponent: { x: 54, y: 38, pose: 'grounded', rotate: -5 }, owner: 'player', connection: 'ground', detail: '你越過雙腿取得側控，能孤立手臂、轉騎乘或尋找絞技。' },
-  'side-control-defense': { family: 'ground', player: { x: 54, y: 38, pose: 'grounded', rotate: 5 }, opponent: { x: 46, y: 29, pose: 'grounded', flip: true, rotate: -12 }, owner: 'opponent', connection: 'ground', detail: '對手已取得側控；你的髖部與肩線都受到壓制。' },
   mount: { family: 'ground', player: { x: 50, y: 27, pose: 'kneeling' }, opponent: { x: 50, y: 39, pose: 'grounded' }, owner: 'player', connection: 'ground', detail: '你跨坐在對手軀幹上，是地面打擊與降服威脅都很高的位置。' },
   'mount-defense': { family: 'ground', player: { x: 50, y: 39, pose: 'grounded' }, opponent: { x: 50, y: 27, pose: 'kneeling', flip: true }, owner: 'opponent', connection: 'ground', detail: '對手取得騎乘位，你必須先保護頭部並創造橋式或髖逃空間。' },
   'back-control': { family: 'ground', player: { x: 47, y: 34, pose: 'seated' }, opponent: { x: 54, y: 35, pose: 'seated', flip: true }, owner: 'player', connection: 'waist', detail: '你控制對手背部並建立鉤腿，裸絞與背後打擊威脅最高。' },
@@ -1382,7 +1384,6 @@ function positionLabel(position: string) {
     'body-lock': '抱腰控制', 'body-lock-defense': '被抱腰',
     'front-headlock-control': '前頸控制', 'front-headlock-defense': '被控前頸',
     top: '防守架上位', bottom: '防守架下位', scramble: '混戰',
-    'side-control': '側控', 'side-control-defense': '側控下位',
     mount: '騎乘位', 'mount-defense': '騎乘下位',
     'back-control': '背後控制', 'back-defense': '背部被控',
   } as Record<string, string>)[position]
@@ -1391,7 +1392,7 @@ function positionLabel(position: string) {
 function ContextStrip({ fighter }: { fighter: FighterState }) {
   const minHealth = Math.min(...Object.values(fighter.health))
   const best = Math.max(...BRANCHES.map((branch) => skillLevel(fighter.skills[branch].xp)))
-  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="身體" value={`${minHealth}`} note={minHealth < 60 ? '舊傷復發' : '沒有嚴重傷勢'} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={`${careerRunwayLabel(fighter)} · ${REGION_PROFILES[fighter.region].economyLabel}`} /></div>
+  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="最低健康" value={`${minHealth}`} note={`賽後 ${CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下退役`} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={`${careerRunwayLabel(fighter)} · ${REGION_PROFILES[fighter.region].economyLabel}`} /></div>
 }
 
 function StatusBar({ label, value, tone }: { label: string; value: number; tone: string }) {
@@ -1534,8 +1535,8 @@ function StatusDetails({ game }: { game: GameState; dispatch: (command: GameComm
     <SectionTitle title="特質" subtitle="天生條件與實戰留下的身份會一起影響比賽。" />
     <TraitGrid traits={fighter.traits} />
     {fighter.traitProgress.length > 0 && <><SectionTitle title="特質進度" /><TraitProgressList fighter={fighter} /></>}
-    <SectionTitle title="身體狀況" />
-    <div className="health-grid">{(Object.keys(fighter.health) as HealthPart[]).map((part) => <Metric key={part} label={healthPartLabel(part)} value={`${fighter.health[part]}`} note={fighter.health[part] < 60 ? '需要留意' : '狀況良好'} />)}</div>
+    <SectionTitle title="身體狀況" subtitle={`任何部位在賽後降至 ${CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下，職業生涯就會因傷結束。`} />
+    <div className="health-grid">{(Object.keys(fighter.health) as HealthPart[]).map((part) => <Metric key={part} label={healthPartLabel(part)} value={`${fighter.health[part]}`} note={fighter.health[part] <= CAREER_HEALTH_RETIREMENT_THRESHOLD ? '已達強制退役線' : fighter.health[part] <= 40 ? '接近強制退役線' : fighter.health[part] < 60 ? '需要留意' : '狀況良好'} />)}</div>
     <SectionTitle title="重要關係" />
     <div className="relationship-list">{fighter.relationships.map((relationship) => {
       const benefit = getRelationshipBenefit(relationship)
@@ -1545,6 +1546,10 @@ function StatusDetails({ game }: { game: GameState; dispatch: (command: GameComm
 }
 
 function healthPartLabel(part: HealthPart) { return ({ head: '頭部', hands: '雙手', knees: '膝腿', torso: '軀幹' } as const)[part] }
+
+function weakestHealthEntry(fighter: FighterState): [HealthPart, number] {
+  return (Object.entries(fighter.health) as Array<[HealthPart, number]>).sort((a, b) => a[1] - b[1])[0]
+}
 
 function HistoryDetails({ game }: { game: GameState }) {
   return <div className="timeline full">{[...game.fighter.history].reverse().map((entry) => <div key={entry.id}><span>{entry.year}<small>{entry.age} 歲</small></span><article><strong>{entry.title}</strong><p>{entry.summary}</p>{entry.people.filter(Boolean).length > 0 && <em>{entry.people.join('、')}</em>}</article></div>)}</div>

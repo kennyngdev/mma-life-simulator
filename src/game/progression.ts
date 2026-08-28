@@ -51,7 +51,7 @@ export function aptitudeLabel(aptitude: number): string {
 export const UNIVERSAL_MOVE_IDS = new Set([
   'probe-range', 'double-jab-entry', 'outside-angle-step', 'angle-away', 'shell-counter', 'frame-space', 'sprawl-circle',
   'pummel-center', 'wall-turn', 'top-control', 'safe-bottom', 'wall-walk',
-  'scramble-stand', 'base-balance', 'side-shell', 'mount-shell', 'hand-fight-rnc',
+  'scramble-stand', 'base-balance', 'mount-shell', 'hand-fight-rnc',
   'plum-frame-escape', 'body-lock-frame', 'front-headlock-hand-fight',
 ])
 

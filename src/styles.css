@@ -180,6 +180,7 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .contract-freedom p { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .contract-freedom .choice-confirm:disabled { opacity: .64; }
 .memory-callout { margin: 12px 0 !important; padding: 10px 12px; border-left: 2px solid var(--gold); color: #d5c6a7 !important; background: rgb(215 189 131 / .06); line-height: 1.5; }
+.memory-callout.danger-callout { border-left-color: var(--danger); color: #edb1a6 !important; background: rgb(219 82 62 / .1); }
 .status-region-card { padding: 15px; border: 1px solid rgb(215 189 131 / .3); border-radius: 12px; background: rgb(215 189 131 / .06); }
 .status-region-card > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .status-region-card span { color: var(--gold); font-size: 12px; font-weight: 800; }
