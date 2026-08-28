@@ -183,6 +183,23 @@ describe('生涯重置', () => {
     expect(screen.getByText('通用訓練')).toBeInTheDocument()
   })
 
+  it('訓練營會預告每段關係目前帶來的實際效果', async () => {
+    const game = createNewRun(input)
+    game.phase = 'camp'
+    game.fighter.relationships.find((item) => item.role === 'coach')!.trust = 75
+    game.fighter.relationships.find((item) => item.role === 'family')!.trust = 35
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    const support = await screen.findByRole('region', { name: '關係支援' })
+    expect(support).toHaveTextContent('關係會改變訓練結果')
+    expect(support).toHaveTextContent('每次技術訓練提升 3 點技術')
+    expect(support).toHaveTextContent('家庭壓力干擾休養：疲勞只減 14')
+    expect(screen.getByRole('button', { name: /技術訓練/ })).toHaveTextContent('深厚信任')
+    expect(screen.getByRole('button', { name: /休養治療/ })).toHaveTextContent('關係緊張')
+  })
+
   it('人生事件選擇後顯示故事與效果結果彈窗', async () => {
     const game = createNewRun(input)
     game.phase = 'life'

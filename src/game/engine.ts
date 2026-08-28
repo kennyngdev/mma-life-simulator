@@ -393,14 +393,56 @@ export function getUnlockStatus(state: GameState, nodeId: string): { ok: boolean
   return canUnlock(state, nodeId)
 }
 
+export type RelationshipTier = 'strained' | 'steady' | 'trusted'
+
+export function relationshipTier(trust: number): RelationshipTier {
+  return trust >= 70 ? 'trusted' : trust < 40 ? 'strained' : 'steady'
+}
+
+function relationshipStatus(role: Relationship['role'], tier: RelationshipTier): string {
+  if (role === 'coach') {
+    return tier === 'trusted' ? '願意把最完整的技術細節交給你' : tier === 'strained' ? '只維持最低限度的指導' : '願意指導，但仍在觀察你的職業態度'
+  }
+  if (role === 'family') {
+    return tier === 'trusted' ? '願意替你扛起訓練之外的生活' : tier === 'strained' ? '失望累積，彼此很少再談比賽' : '支持你的生涯，也期待你履行承諾'
+  }
+  return tier === 'trusted' ? '陪練默契成熟，知道怎麼逼你又不傷你' : tier === 'strained' ? '陪練失去默契，受傷風險正在上升' : '願意陪練，安全默契仍在建立'
+}
+
+export function getRelationshipBenefit(relationship: Relationship) {
+  const tier = relationshipTier(relationship.trust)
+  const tierLabel = tier === 'trusted' ? '深厚信任' : tier === 'strained' ? '關係緊張' : '穩定關係'
+  if (relationship.role === 'coach') {
+    return {
+      tier, tierLabel, action: '技術訓練',
+      effect: tier === 'trusted' ? '每次技術訓練提升 3 點技術、7 點招式熟練。' : tier === 'strained' ? '每次技術訓練只提升 1 點技術、3 點招式熟練。' : '每次技術訓練提升 2 點技術、5 點招式熟練。',
+    }
+  }
+  if (relationship.role === 'family') {
+    return {
+      tier, tierLabel, action: '休養治療',
+      effect: tier === 'trusted' ? '家人分擔生活壓力：疲勞 -26、所有傷處 +3。' : tier === 'strained' ? '家庭壓力干擾休養：疲勞只減 14、所有傷處 +1。' : '正常休養：疲勞 -20、所有傷處 +2。',
+    }
+  }
+  return {
+    tier, tierLabel, action: '實戰對練',
+    effect: tier === 'trusted' ? '默契陪練提升 4 點技術，受傷率 -8%、傷害 -2。' : tier === 'strained' ? '失去默契只提升 2 點技術，受傷率 +10%、傷害 +2。' : '正常陪練提升 3 點技術，維持標準受傷風險。',
+  }
+}
+
 function updateRelationship(fighter: FighterState, id: string, delta: number, memory?: string): FighterState {
   return {
     ...fighter,
-    relationships: fighter.relationships.map((relationship) => relationship.id === id ? {
-      ...relationship, trust: clamp(relationship.trust + delta),
-      status: relationship.trust + delta >= 72 ? '無論你怎麼選都會支持你' : relationship.trust + delta < 40 ? '和你越來越疏遠' : relationship.status,
-      memories: memory ? [...relationship.memories, memory] : relationship.memories,
-    } : relationship),
+    relationships: fighter.relationships.map((relationship) => {
+      if (relationship.id !== id) return relationship
+      const trust = clamp(relationship.trust + delta)
+      return {
+        ...relationship,
+        trust,
+        status: relationshipStatus(relationship.role, relationshipTier(trust)),
+        memories: memory ? [...relationship.memories, memory] : relationship.memories,
+      }
+    }),
   }
 }
 
@@ -408,29 +450,37 @@ function takeCampAction(state: GameState, action: CampAction, branch?: Branch): 
   if (state.phase !== 'camp' || state.campActions.length >= 3) return state
   const repeats = state.campActions.filter((item) => item === action).length
   const fighter = structuredClone(state.fighter)
+  const coachTier = relationshipTier(fighter.relationships.find((item) => item.role === 'coach')?.trust ?? 50)
+  const familyTier = relationshipTier(fighter.relationships.find((item) => item.role === 'family')?.trust ?? 50)
+  const partnerTier = relationshipTier(fighter.relationships.find((item) => item.role === 'partner')?.trust ?? 50)
   let rng = state.rng
   let message = ''
   if (action === 'technique') {
     const focus = branch ?? 'boxing'
-    fighter.technique[focus] = clamp(fighter.technique[focus] + (fighter.technique[focus] < fighter.techniquePotential[focus] ? 2 : 0))
+    const techniqueGain = coachTier === 'trusted' ? 3 : coachTier === 'strained' ? 1 : 2
+    const masteryGain = coachTier === 'trusted' ? 7 : coachTier === 'strained' ? 3 : 5
+    fighter.technique[focus] = clamp(fighter.technique[focus] + (fighter.technique[focus] < fighter.techniquePotential[focus] ? techniqueGain : 0))
     for (const nodeId of fighter.unlockedNodes) {
       const node = TECHNIQUE_NODES.find((item) => item.id === nodeId)
-      if (node?.branch === focus) fighter.mastery[nodeId].value = clamp(fighter.mastery[nodeId].value + 5)
+      if (node?.branch === focus) fighter.mastery[nodeId].value = clamp(fighter.mastery[nodeId].value + masteryGain)
     }
     fighter.fatigue = clamp(fighter.fatigue + 7 + repeats * 4)
-    message = `${BRANCH_META[focus].name}技術得到整理。`
+    message = coachTier === 'trusted' ? `教練毫無保留地拆解細節，${BRANCH_META[focus].name}技術進步格外明顯。` : coachTier === 'strained' ? `你和教練的隔閡限制了指導，${BRANCH_META[focus].name}只完成基本整理。` : `${BRANCH_META[focus].name}技術得到整理。`
   } else if (action === 'sparring') {
     const focus = branch ?? 'wrestling'
-    fighter.technique[focus] = clamp(fighter.technique[focus] + (fighter.technique[focus] < fighter.techniquePotential[focus] ? 3 : 0))
+    const techniqueGain = partnerTier === 'trusted' ? 4 : partnerTier === 'strained' ? 2 : 3
+    const injuryModifier = partnerTier === 'trusted' ? -0.08 : partnerTier === 'strained' ? 0.1 : 0
+    const injuryDamageModifier = partnerTier === 'trusted' ? -2 : partnerTier === 'strained' ? 2 : 0
+    fighter.technique[focus] = clamp(fighter.technique[focus] + (fighter.technique[focus] < fighter.techniquePotential[focus] ? techniqueGain : 0))
     fighter.fatigue = clamp(fighter.fatigue + 14 + repeats * 6)
     let injuryRoll: number
     ;[injuryRoll, rng] = draw(rng, 'events')
-    if (injuryRoll < 0.16 + repeats * 0.08) {
+    if (injuryRoll < 0.16 + repeats * 0.08 + injuryModifier) {
       let part: HealthPart
       ;[part, rng] = pick(rng, 'events', HEALTH_PARTS)
-      fighter.health[part] = clamp(fighter.health[part] - 4 - repeats * 2)
-      message = `高強度對練帶來成長，也讓${healthLabel(part)}留下不適。`
-    } else message = '高強度對練讓你發現不少技術上的漏洞。'
+      fighter.health[part] = clamp(fighter.health[part] - 4 - repeats * 2 - injuryDamageModifier)
+      message = partnerTier === 'strained' ? `失去默契的對練越過了界線，${healthLabel(part)}明顯受傷。` : `高強度對練帶來成長，也讓${healthLabel(part)}留下不適。`
+    } else message = partnerTier === 'trusted' ? '默契十足的陪練把你逼到極限，又在危險前及時收手。' : '高強度對練讓你發現不少技術上的漏洞。'
   } else if (action === 'conditioning') {
     const order = (Object.keys(fighter.body) as Array<keyof typeof fighter.body>).sort((a, b) => fighter.body[a] - fighter.body[b])
     const focus = order[0]
@@ -442,10 +492,12 @@ function takeCampAction(state: GameState, action: CampAction, branch?: Branch): 
     fighter.fatigue = clamp(fighter.fatigue + 3)
     message = '你從比賽影片中看出了對手幾個固定習慣。'
   } else {
-    fighter.fatigue = clamp(fighter.fatigue - 20)
+    const fatigueRecovery = familyTier === 'trusted' ? 26 : familyTier === 'strained' ? 14 : 20
+    const healthRecovery = familyTier === 'trusted' ? 3 : familyTier === 'strained' ? 1 : 2
+    fighter.fatigue = clamp(fighter.fatigue - fatigueRecovery)
     fighter.readiness = clamp(fighter.readiness + 6)
-    for (const part of HEALTH_PARTS) fighter.health[part] = clamp(fighter.health[part] + 2)
-    message = '你暫停訓練，讓疲憊的身體好好休息。'
+    for (const part of HEALTH_PARTS) fighter.health[part] = clamp(fighter.health[part] + healthRecovery)
+    message = familyTier === 'trusted' ? '家人扛下生活瑣事，讓你得到一段真正完整的休息。' : familyTier === 'strained' ? '家庭關係帶來的壓力讓這次休養很難真正放鬆。' : '你暫停訓練，讓疲憊的身體好好休息。'
   }
   fighter.readiness = clamp(100 - fighter.fatigue * 0.55 + fighter.body.recovery * 0.25)
   const actions = [...state.campActions, action]

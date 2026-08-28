@@ -214,6 +214,36 @@ describe('拳途人生模擬核心', () => {
     expect(state.lifeEventResult).toBeUndefined()
   })
 
+  it('教練、家人與陪練的信任會實際改變訓練結果', () => {
+    const campWithTrust = (role: 'coach' | 'family' | 'partner', trust: number) => {
+      const state = createNewRun(input)
+      state.phase = 'camp'
+      state.fighter.technique.boxing = 20
+      state.fighter.techniquePotential.boxing = 90
+      state.fighter.fatigue = 60
+      state.fighter.health.head = 80
+      state.fighter.relationships.find((item) => item.role === role)!.trust = trust
+      return state
+    }
+
+    const trustedCoach = apply(campWithTrust('coach', 75), { type: 'TAKE_CAMP_ACTION', action: 'technique', branch: 'boxing' })
+    const strainedCoach = apply(campWithTrust('coach', 35), { type: 'TAKE_CAMP_ACTION', action: 'technique', branch: 'boxing' })
+    expect(trustedCoach.fighter.technique.boxing).toBe(23)
+    expect(strainedCoach.fighter.technique.boxing).toBe(21)
+
+    const trustedPartner = apply(campWithTrust('partner', 75), { type: 'TAKE_CAMP_ACTION', action: 'sparring', branch: 'boxing' })
+    const strainedPartner = apply(campWithTrust('partner', 35), { type: 'TAKE_CAMP_ACTION', action: 'sparring', branch: 'boxing' })
+    expect(trustedPartner.fighter.technique.boxing).toBe(24)
+    expect(strainedPartner.fighter.technique.boxing).toBe(22)
+
+    const trustedFamily = apply(campWithTrust('family', 75), { type: 'TAKE_CAMP_ACTION', action: 'recovery' })
+    const strainedFamily = apply(campWithTrust('family', 35), { type: 'TAKE_CAMP_ACTION', action: 'recovery' })
+    expect(trustedFamily.fighter.fatigue).toBe(34)
+    expect(trustedFamily.fighter.health.head).toBe(83)
+    expect(strainedFamily.fighter.fatigue).toBe(46)
+    expect(strainedFamily.fighter.health.head).toBe(81)
+  })
+
   it('離開自動成長畫面後仍可從狀態介面學習技術', () => {
     let state = createNewRun(input)
     state.phase = 'offer'

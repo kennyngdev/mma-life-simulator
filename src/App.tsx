@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, MOTIVES, REGION_LABELS, TECHNIQUE_NODES } from './game/content'
 import { OPENING_LABELS } from './game/fight-content'
-import { advance, createNewRun, getOpponent, getPotentialLabel, getUnlockStatus, getWeightOptions, STAGE_LABELS } from './game/engine'
+import { advance, createNewRun, getOpponent, getPotentialLabel, getRelationshipBenefit, getUnlockStatus, getWeightOptions, relationshipTier, STAGE_LABELS } from './game/engine'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
@@ -280,6 +280,11 @@ function OfferView({ game, dispatch }: ViewProps) {
 
 function CampView({ game, dispatch }: ViewProps) {
   const [branch, setBranch] = useState<Branch>('boxing')
+  const benefitFor = (action: CampAction) => {
+    const role = action === 'technique' ? 'coach' : action === 'sparring' ? 'partner' : action === 'recovery' ? 'family' : undefined
+    const relationship = game.fighter.relationships.find((item) => item.role === role)
+    return relationship ? getRelationshipBenefit(relationship) : undefined
+  }
   const techniqueActions: Array<{ id: CampAction; name: string; detail: string; risk: string }> = [
     { id: 'technique', name: '技術訓練', detail: `打磨${BRANCH_META[branch].name}基本功與已學會的招式`, risk: '疲勞低' },
     { id: 'sparring', name: '實戰對練', detail: `在對練中快速提升${BRANCH_META[branch].name}，但可能受傷`, risk: '風險高' },
@@ -292,20 +297,21 @@ function CampView({ game, dispatch }: ViewProps) {
   return (
     <Screen title="訓練營" kicker={`第 ${game.fighter.evidence.fights + 1} 場比賽`}>
       <ContextStrip fighter={game.fighter} />
+      <RelationshipSupport relationships={game.fighter.relationships} />
       <div className="budget-row"><span>本次營隊</span><div>{[0, 1, 2].map((slot) => <i key={slot} className={slot < game.campActions.length ? 'spent' : ''} />)}</div><strong>剩餘 {3 - game.campActions.length}</strong></div>
       <fieldset className="branch-selector">
         <legend>技術焦點</legend>
         <div className="branch-tabs five">{BRANCHES.map((value) => <button key={value} className={branch === value ? 'selected' : ''} onClick={() => setBranch(value)}>{BRANCH_META[value].short}<small>{BRANCH_META[value].name}</small></button>)}</div>
         <div className="choice-list">
           {techniqueActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'TAKE_CAMP_ACTION', action: action.id, branch })}>
-            <strong>{action.name}</strong><span>{action.detail}</span><em>{action.risk}</em>
+            <strong>{action.name}</strong><span>{action.detail}</span><small>{benefitFor(action.id)?.effect}</small><em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
           </button>)}
         </div>
       </fieldset>
       <SectionTitle title="通用訓練" subtitle="不論本次主練哪一門技術，都可以安排以下項目。" />
       <div className="choice-list">
         {generalActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'TAKE_CAMP_ACTION', action: action.id })}>
-          <strong>{action.name}</strong><span>{action.detail}</span><em>{action.risk}</em>
+          <strong>{action.name}</strong><span>{action.detail}</span>{benefitFor(action.id) && <small>{benefitFor(action.id)?.effect}</small>}<em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
         </button>)}
       </div>
       <div className="camp-log">已完成：{game.campActions.length ? game.campActions.map(campLabel).join(' → ') : '尚未安排'}</div>
@@ -317,6 +323,20 @@ function campLabel(action: CampAction) {
   return ({ technique: '技術', sparring: '對練', conditioning: '體能', film: '研究', recovery: '恢復' } as const)[action]
 }
 
+function RelationshipSupport({ relationships }: { relationships: FighterState['relationships'] }) {
+  return <section className="support-network" aria-label="關係支援">
+    <div className="support-network-head"><strong>關係會改變訓練結果</strong><small>你的選擇決定誰願意在備戰時幫你。</small></div>
+    <div>{relationships.map((relationship) => {
+      const benefit = getRelationshipBenefit(relationship)
+      return <article key={relationship.id} className={benefit.tier}>
+        <span>{relationship.role === 'coach' ? '教練' : relationship.role === 'family' ? '家人' : '陪練'}</span>
+        <strong>{benefit.tierLabel}</strong>
+        <small>{benefit.action}：{benefit.effect}</small>
+      </article>
+    })}</div>
+  </section>
+}
+
 function LifeView({ game, dispatch }: ViewProps) {
   const event = game.lifeEvent!
   const person = game.fighter.relationships.find((item) => item.id === event.personId)!
@@ -325,7 +345,16 @@ function LifeView({ game, dispatch }: ViewProps) {
       <div className="person-chip"><span>{person.role === 'coach' ? '教' : person.role === 'family' ? '家' : '伴'}</span><div><strong>{person.name}</strong><small>{person.status}</small></div></div>
       <p className="story-copy">{event.description}</p>
       <div className="choice-list">
-        {event.options.map((option) => <button className="choice-row" key={option.id} onClick={() => dispatch({ type: 'RESOLVE_LIFE', optionId: option.id })}><strong>{option.label}</strong><span>{option.detail}</span></button>)}
+        {event.options.map((option) => {
+          const trustDelta = option.effects.trust ?? 0
+          const nextTrust = Math.max(0, Math.min(100, person.trust + trustDelta))
+          const nextBenefit = getRelationshipBenefit({ ...person, trust: nextTrust })
+          const tierChanges = relationshipTier(person.trust) !== nextBenefit.tier
+          return <button className="choice-row" key={option.id} onClick={() => dispatch({ type: 'RESOLVE_LIFE', optionId: option.id })}>
+            <strong>{option.label}</strong><span>{option.detail}</span>
+            <em className={tierChanges ? 'relationship-change' : ''}>信任 {trustDelta >= 0 ? '+' : ''}{trustDelta} → {nextTrust}。{tierChanges ? `關係將變為「${nextBenefit.tierLabel}」：` : `之後仍是「${nextBenefit.tierLabel}」：`}{nextBenefit.effect}</em>
+          </button>
+        })}
       </div>
     </Screen>
   )
@@ -1088,7 +1117,10 @@ function StatusDetails({ game, dispatch }: { game: GameState; dispatch: (command
     <SectionTitle title="身體狀況" />
     <div className="health-grid">{(Object.keys(fighter.health) as HealthPart[]).map((part) => <Metric key={part} label={healthPartLabel(part)} value={`${fighter.health[part]}`} note={fighter.health[part] < 60 ? '需要留意' : '狀況良好'} />)}</div>
     <SectionTitle title="重要關係" />
-    <div className="relationship-list">{fighter.relationships.map((relationship) => <div className="relationship" key={relationship.id}><strong>{relationship.name}</strong><span>{relationship.status}</span><small>信任 {relationship.trust} · {relationship.memories.at(-1)}</small></div>)}</div>
+    <div className="relationship-list">{fighter.relationships.map((relationship) => {
+      const benefit = getRelationshipBenefit(relationship)
+      return <div className={`relationship ${benefit.tier}`} key={relationship.id}><strong>{relationship.name} · {benefit.tierLabel}</strong><span>{benefit.action}：{benefit.effect}</span><small>信任 {relationship.trust} · {relationship.status} · {relationship.memories.at(-1)}</small></div>
+    })}</div>
     {fighter.insight === 0 && <><SectionTitle title="已學技術" subtitle="取得新的技術領悟後，科技樹會在這裡重新開放。" /><div className="unlocked-summary">{TECHNIQUE_NODES.filter((node) => fighter.unlockedNodes.includes(node.id)).map((node) => <span key={node.id}>{node.name}</span>)}</div></>}
   </>
 }
