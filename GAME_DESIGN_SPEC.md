@@ -61,6 +61,14 @@ Normie opponents in the grassroots prologue should be low-skill, distinctive gym
 
 Stages must change opposition, stakes, money, reputation, and the interpretation of preparation. They must not be merely renamed number bands.
 
+### 3.3 World-title credibility — Accepted
+
+A world-title offer is earned through both results and credible competitive standing. It becomes available only after at least 10 fights and 8 wins, when the player is ranked in the top 20 and has a competitive rating of at least 70. The championship opponent must be ranked in the top 10 with a competitive rating of at least 70. A development opponent cannot be relabeled as a champion merely because the career has reached a fight-count threshold.
+
+Ordinary matchmaking is led by career ranking rather than competitive rating alone. Each offer cycle should center its three choices around an opponent roughly 10 places below the player, a peer near the player's rank, and an opponent roughly 10 places above the player, subject to roster boundaries and rematch availability. Competitive-rating differences remain visible as risk; a fighter whose ranking has outpaced their ability should face a legibly dangerous slate rather than being silently matched far down the rankings.
+
+Ranking movement must reflect the defeated opponent's standing. Beating a peer or lower-ranked opponent produces a modest two-place climb. Beating a higher-ranked opponent places the winner at or just behind that opponent: zero places behind for a gap below 10, one for 10–19, two for 20–29, and three for a gap of 30 or more. Thus a #59 fighter who defeats #9 becomes #12; the result cannot be compressed into a generic six-place gain.
+
 ## 4. Skills, training, and moves
 
 ### 4.1 Canonical skill model — Accepted

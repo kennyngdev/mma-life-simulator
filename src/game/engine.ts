@@ -311,7 +311,7 @@ export function createNewRun(input: NewRunInput): GameState {
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 12, rulesVersion: '0.9.0', contentVersion: '1.2.0', seed: input.seed.trim().toUpperCase(),
+    saveVersion: 12, rulesVersion: '0.9.3', contentVersion: '1.2.0', seed: input.seed.trim().toUpperCase(),
     phase: 'reveal', stage: stageFor(0, startingExperience), fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
     offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
@@ -405,36 +405,43 @@ function riskPurseMultiplier(risk: RiskLabel): number {
   return ({ '低風險': 0.85, '中度風險': 1, '高風險': 1.15, '極高風險': 1.3, '絕望': 1.5 } as const)[risk]
 }
 
-function generateOffers(fighter: FighterState, opponents: Opponent[], streams: RngStreams, excludedOpponentIds: string[] = []): { offers: FightOffer[]; rng: RngStreams } {
+export function generateOffers(fighter: FighterState, opponents: Opponent[], streams: RngStreams, excludedOpponentIds: string[] = []): { offers: FightOffer[]; rng: RngStreams } {
   let rng = streams
   const fights = fighter.evidence.fights
   const rating = averageRating(fighter)
   const eligible = opponents.filter((opponent) => opponent.meetings < 2 || opponent.relationship > 25)
   const alternatives = eligible.filter((opponent) => !excludedOpponentIds.includes(opponent.id))
   const replacementPool = alternatives.length >= 3 ? alternatives : eligible
-  const fresh = replacementPool.filter((opponent) => opponent.meetings === 0)
-  const candidatePool = fresh.length >= 3 ? fresh : replacementPool
   const selected: Opponent[] = []
-  const roles: Array<{ min: number; max: number; target: number }> = [
-    { min: -6, max: -1, target: -3.5 },
-    { min: -2, max: 4, target: 1 },
-    { min: 5, max: 10, target: 7.5 },
+  const titleShotEligible = fights >= 10 && fighter.wins >= 8 && fighter.ranking <= 20 && rating >= 70
+  const titleOpponent = titleShotEligible
+    ? alternatives
+      .filter((opponent) => opponent.rank <= 10 && competitiveRatingForOpponent(opponent) >= 70)
+      .sort((a, b) => Math.abs(competitiveRatingForOpponent(a) - rating) - Math.abs(competitiveRatingForOpponent(b) - rating)
+        || a.rank - b.rank)[0]
+    : undefined
+  const roles: Array<{ rankOffset: number; ratingTarget: number }> = [
+    { rankOffset: 10, ratingTarget: -3.5 },
+    { rankOffset: 0, ratingTarget: 1 },
+    { rankOffset: -10, ratingTarget: 7.5 },
   ]
   for (const role of roles) {
-    const remaining = candidatePool.filter((opponent) => !selected.includes(opponent))
-    const inBand = remaining.filter((opponent) => {
-      const gap = opponent.rating - rating
-      return gap >= role.min && gap <= role.max
-    })
-    const pool = (inBand.length ? inBand : remaining)
-      .sort((a, b) => Math.abs((a.rating - rating) - role.target) - Math.abs((b.rating - rating) - role.target)
-        || Math.abs(a.rank - fighter.ranking) - Math.abs(b.rank - fighter.ranking))
-      .slice(0, 3)
+    const remaining = replacementPool.filter((opponent) => !selected.includes(opponent))
+    const targetRank = clamp(fighter.ranking + role.rankOffset, 1, 99)
+    const pool = remaining
+      .sort((a, b) => Math.abs(a.rank - targetRank) + a.meetings * 6
+        - (Math.abs(b.rank - targetRank) + b.meetings * 6)
+        || Math.abs((a.rating - rating) - role.ratingTarget) - Math.abs((b.rating - rating) - role.ratingTarget))
+      .slice(0, 2)
     if (pool.length) {
       let chosen: Opponent
       ;[chosen, rng] = pick(rng, 'offers', pool)
       selected.push(chosen)
     }
+  }
+  if (titleOpponent && !selected.includes(titleOpponent)) {
+    if (selected.length >= 3) selected[selected.length - 1] = titleOpponent
+    else selected.push(titleOpponent)
   }
   const stage = stageFor(fights, fighter.startingExperience)
   const localStage = isLocalStage(stage)
@@ -444,7 +451,7 @@ function generateOffers(fighter: FighterState, opponents: Opponent[], streams: R
   const promotion = localPromotions?.[fights % localPromotions.length] ?? (stage === 'asia' ? '東亞戰線' : '世界鐵籠系列')
   const offers = selected.map((opponent, index): FightOffer => {
     const gap = opponent.rating - rating
-    const titleFight = fights >= 10 && fighter.wins >= 8 && index === 0
+    const titleFight = opponent.id === titleOpponent?.id
     const shortNotice = index === 1 && fights > 2
     const riskLabel = riskLabelForGap(gap)
     const base = typicalPurseForFighter(fighter)
@@ -455,7 +462,7 @@ function generateOffers(fighter: FighterState, opponents: Opponent[], streams: R
       id: `offer-${fights}-${opponent.id}`, opponentId: opponent.id, promotion,
       purse: Math.max(500, base + riskAdjustment + shortNoticePremium + titleBonus),
       purseBreakdown: { base, riskAdjustment, shortNoticePremium, titleBonus },
-      rankReward: clamp(2 + (fighter.ranking - opponent.rank) * 0.22, 2, 6), riskLabel,
+      rankReward: fighter.ranking - rankingAfterWin(fighter.ranking, opponent.rank), riskLabel,
       titleFight, shortNotice,
       venueRegion: localStage ? fighter.region : undefined,
       opponentIsLocal: localStage && opponent.originRegion === fighter.region,
@@ -479,6 +486,13 @@ export function competitiveRatingForOpponent(opponent: Opponent): number {
 
 export function expectedRatingForRank(rank: number): number {
   return clamp(36 + (99 - rank) * 0.42, 32, 82)
+}
+
+export function rankingAfterWin(currentRank: number, opponentRank: number): number {
+  if (opponentRank >= currentRank) return clamp(currentRank - 2, 1, 99)
+  const upsetGap = currentRank - opponentRank
+  const placementBehindOpponent = clamp(Math.floor(upsetGap / 10), 0, 3)
+  return clamp(opponentRank + placementBehindOpponent, 1, 99)
 }
 
 function averageRating(fighter: FighterState): number {
@@ -2005,7 +2019,9 @@ function processFightResult(state: GameState): GameState {
   if (won && fight.method === 'ko' && fight.finishingStrikeKind === 'kick') fighter.evidence.kickKos += 1
   if (won && fight.openingRoundLost) fighter.evidence.comebackWins += 1
   fighter.money += fight.offer.purse
-  fighter.ranking = clamp(fighter.ranking - (won ? fight.offer.rankReward : drawResult ? 1 : -3), 1, 99)
+  const rankingBefore = fighter.ranking
+  fighter.ranking = won ? rankingAfterWin(fighter.ranking, opponent.rank)
+    : clamp(fighter.ranking - (drawResult ? 1 : -3), 1, 99)
   fighter.reputation = clamp(fighter.reputation + (won ? 7 : drawResult ? 2 : 3))
   fighter.promoterTrust = clamp(fighter.promoterTrust + (won ? 5 : -2))
   fighter.age += fighter.evidence.fights % 2 === 0 ? 1 : 0
@@ -2019,9 +2035,9 @@ function processFightResult(state: GameState): GameState {
   const closeFight = Math.abs(fight.scores.reduce((sum, item) => sum + item.player - item.opponent, 0)) <= 2
   const title = won ? (fight.offer.titleFight ? '世界冠軍之夜' : `擊敗 ${opponent.name}`) : drawResult ? `與 ${opponent.name} 戰成平手` : `敗給 ${opponent.name}`
   const summary = won
-    ? `${fight.method === 'decision' ? '你按照自己的節奏贏下了更多回合' : `你在第 ${fight.finishRound} 回合終結了對手`}，也靠這場勝利獲得更高層級的比賽機會。`
+    ? `${fight.method === 'decision' ? '你按照自己的節奏贏下了更多回合' : `你在第 ${fight.finishRound} 回合終結了對手`}，排名從 #${rankingBefore} 升至 #${fighter.ranking}。`
     : drawResult ? '裁判無法分出勝負。終場鐘聲才剛響起，重賽的話題就已經出現。' : `這場失利讓你看清：即使抓到對手在${BRANCH_META[opponent.weakness].name}方面的弱點，你的技術仍不夠全面。`
-  fighter.history.push({ id: `fight-${fighter.evidence.fights}`, year: fighter.year, age: fighter.age, title, summary, people: [opponent.name], importance: fight.offer.titleFight || closeFight ? 3 : 2, tags: ['比賽', won ? '勝利' : drawResult ? '平手' : '失敗'] })
+  fighter.history.push({ id: `fight-${fighter.evidence.fights}`, year: fighter.year, age: fighter.age, title, summary, people: [opponent.name], importance: fight.offer.titleFight || closeFight ? 3 : 2, tags: ['比賽', won ? '勝利' : drawResult ? '平手' : '失敗', ...(fight.offer.titleFight ? ['冠軍戰'] : [])] })
   let updatedFighter = updateRelationship(fighter, 'coach', won ? 3 : closeFight ? 1 : -1, `${title}時站在你的場邊`)
   if (closeFight) updatedFighter = updateRelationship(updatedFighter, 'family', 1, `看完你與${opponent.name}的苦戰`)
   const opponents = state.opponents.map((item) => item.id === opponent.id ? {
@@ -2068,7 +2084,7 @@ function makeBiography(state: GameState): Biography {
   const hybrid = TECHNIQUE_NODES.find((node) => node.branch === 'hybrid' && fighter.unlockedNodes.includes(node.id))
   const weakestHealth = (Object.entries(fighter.health) as Array<[HealthPart, number]>).sort((a, b) => a[1] - b[1])[0]
   const important = [...fighter.history].sort((a, b) => b.importance - a.importance || a.year - b.year).slice(0, 4)
-  const title = fighter.wins >= 11 ? '在國際舞台登頂的冠軍' : fighter.wins > fighter.losses ? '打出自己風格的職業拳手' : '一次次敗退，卻從未停止上場的人'
+  const title = fighter.history.some((entry) => entry.title === '世界冠軍之夜') ? '在國際舞台登頂的冠軍' : fighter.wins > fighter.losses ? '打出自己風格的職業拳手' : '一次次敗退，卻從未停止上場的人'
   const definingPerson = fighter.relationships.sort((a, b) => b.trust - a.trust)[0]
   const style = hybrid?.name ?? `${BRANCH_META[(Object.entries(fighter.technique) as Array<[Branch, number]>).sort((a, b) => b[1] - a[1])[0][0]].name}專家`
   const financialLegacy = [...fighter.history].reverse().find((entry) => entry.tags.includes('傳承'))?.summary

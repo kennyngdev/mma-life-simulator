@@ -1,5 +1,6 @@
 import { openDB } from 'idb'
 import { BACKGROUNDS, REGION_PROFILES } from './content'
+import { generateOffers, rankingAfterWin } from './engine'
 import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LoadGameResult, SaveEnvelope } from './types'
 
 const DATABASE = 'cage-life'
@@ -30,13 +31,81 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
-  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.0' && envelope.contentVersion === '1.2.0') {
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.3' && envelope.contentVersion === '1.2.0') {
     return { game: restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)) }
+  }
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.2' && envelope.contentVersion === '1.2.0') {
+    return { game: migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
+  }
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.1' && envelope.contentVersion === '1.2.0') {
+    return { game: migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
+  }
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.0' && envelope.contentVersion === '1.2.0') {
+    return { game: migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.8.0' && envelope.contentVersion === '1.1.0') return { game: migrateVersion12(envelope.game) }
   if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion11(envelope.game) }
   if (envelope.saveVersion === 10 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion10(envelope.game) }
   return { resetReason: 'combat-rules-upgrade' }
+}
+
+function storedCompetitiveRating(technique: Record<Branch, number>, mind: number): number {
+  const [strongest, second] = [...Object.values(technique)].sort((a, b) => b - a)
+  return Math.max(0, Math.min(100, Math.round(strongest * 0.55 + second * 0.25 + mind * 0.2)))
+}
+
+/** Removes impossible paper-title labels from an active offer screen while preserving the career. */
+export function repairTitleCredibility(game: GameState): GameState {
+  if (game.phase !== 'offer') return { ...game, rulesVersion: '0.9.3' }
+  const fighterRating = storedCompetitiveRating(game.fighter.technique, game.fighter.mind.fightIQ)
+  const playerEligible = game.fighter.evidence.fights >= 10 && game.fighter.wins >= 8
+    && game.fighter.ranking <= 20 && fighterRating >= 70
+  const offers = game.offers.map((offer) => {
+    if (!offer.titleFight) return offer
+    const opponent = game.opponents.find((item) => item.id === offer.opponentId)
+    const opponentEligible = Boolean(opponent && opponent.rank <= 10
+      && storedCompetitiveRating(opponent.technique, opponent.composure) >= 70)
+    if (playerEligible && opponentEligible) return offer
+    const titleBonus = offer.purseBreakdown.titleBonus
+    return {
+      ...offer,
+      titleFight: false,
+      purse: Math.max(500, offer.purse - titleBonus),
+      purseBreakdown: { ...offer.purseBreakdown, titleBonus: 0 },
+    }
+  })
+  return { ...game, rulesVersion: '0.9.3', offers }
+}
+
+/** Rebuilds unsigned offers around the fighter's actual ranking under the rank-led matchmaking rules. */
+export function migrateMatchmakingCredibility(game: GameState): GameState {
+  const canReplaceOffers = !game.selectedOfferId && (game.phase === 'reveal' || game.phase === 'offer' || game.phase === 'growth')
+  if (!canReplaceOffers) return { ...game, rulesVersion: '0.9.3' }
+  const generated = generateOffers(game.fighter, game.opponents, game.rng)
+  return { ...game, rulesVersion: '0.9.3', rng: generated.rng, offers: generated.offers }
+}
+
+function oldRankReward(currentRank: number, opponentRank: number): number {
+  return Math.max(2, Math.min(6, Math.round(2 + (currentRank - opponentRank) * 0.22)))
+}
+
+/** Repairs the latest result produced by the retired six-place ranking cap. */
+export function migrateRankingCredibility(game: GameState): GameState {
+  const migrated = { ...game, rulesVersion: '0.9.3' as const }
+  const lastFight = [...game.fighter.history].reverse().find((entry) => entry.tags.includes('比賽'))
+  if (!lastFight?.tags.includes('勝利') || lastFight.year !== game.fighter.year) return migrated
+  const opponent = game.opponents.find((item) => lastFight.people.includes(item.name))
+  if (!opponent) return migrated
+  const previousRank = Array.from({ length: 99 }, (_, index) => index + 1)
+    .filter((rank) => Math.max(1, rank - oldRankReward(rank, opponent.rank)) === game.fighter.ranking)
+    .at(-1)
+  if (previousRank === undefined) return migrated
+  const correctedRank = rankingAfterWin(previousRank, opponent.rank)
+  if (correctedRank >= game.fighter.ranking) return migrated
+  const history = game.fighter.history.map((entry) => entry.id === lastFight.id
+    ? { ...entry, summary: `${entry.summary} 排名從 #${previousRank} 修正為 #${correctedRank}。` }
+    : entry)
+  return { ...migrated, fighter: { ...game.fighter, ranking: correctedRank, history } }
 }
 
 /** Restores authored background techniques that older move-based saves could omit. */
@@ -204,12 +273,12 @@ type Version12Game = Omit<GameState, 'rulesVersion' | 'contentVersion' | 'traini
 export function migrateVersion12(game: unknown): GameState {
   const legacy = structuredClone(game) as Version12Game
   if (!legacy.fighter || !legacy.offers) throw new Error('無法讀取舊生涯存檔')
-  return restoreBackgroundStartingMoves(removeRetiredSparring({
+  return migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring({
     ...legacy,
     trainingMoveSelections: legacy.phase === 'training-reward' ? legacy.trainingMoveSelections ?? [] : undefined,
-    rulesVersion: '0.9.0',
+    rulesVersion: '0.9.3',
     contentVersion: '1.2.0',
-  } as GameState))
+  } as GameState)))))
 }
 
 /** Backwards-compatible name used by legacy callers and migration tests. */

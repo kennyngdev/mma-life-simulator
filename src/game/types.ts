@@ -650,7 +650,7 @@ export interface RngStreams {
 
 export interface GameState {
   saveVersion: 12
-  rulesVersion: '0.9.0'
+  rulesVersion: '0.9.3'
   contentVersion: '1.2.0'
   seed: string
   phase: GamePhase

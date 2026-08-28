@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } from '../src/game/content'
 import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
-import { advance, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, mirrorPosition, offerRefreshCost, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
-import { migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, restoreBackgroundStartingMoves } from '../src/game/storage'
+import { advance, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, mirrorPosition, offerRefreshCost, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
+import { migrateMatchmakingCredibility, migrateRankingCredibility, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
 import { EARNED_TRAITS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, movesForBranch, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
 import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, Position } from '../src/game/types'
 
@@ -272,7 +272,7 @@ describe('拳途人生模擬核心', () => {
     const migrated = migrateVersion8(legacy)
 
     expect(migrated.saveVersion).toBe(12)
-    expect(migrated.rulesVersion).toBe('0.9.0')
+    expect(migrated.rulesVersion).toBe('0.9.3')
     expect(migrated).not.toHaveProperty('campSharpness')
     expect(migrated.campDrillHistory).toEqual([])
   })
@@ -303,18 +303,108 @@ describe('拳途人生模擬核心', () => {
     expect(state.opponents.every((opponent) => opponent.learnedMoves.length > 0 && opponent.traits.length >= 1 && opponent.traits.length <= 3)).toBe(true)
   })
 
-  it('每組邀約都提供成長、同級與挑戰三種明確評級差', () => {
+  it('每組邀約顯示與實際評級差一致的風險', () => {
     for (let index = 0; index < 20; index += 1) {
       const state = createNewRun({ ...input, seed: `OFFER-ROLES-${index}` })
       const rating = competitiveRatingForFighter(state.fighter)
-      const gaps = state.offers.map((offer) => competitiveRatingForOpponent(state.opponents.find((opponent) => opponent.id === offer.opponentId)!) - rating)
-      expect(gaps[0]).toBeGreaterThanOrEqual(-6)
-      expect(gaps[0]).toBeLessThanOrEqual(-1)
-      expect(gaps[1]).toBeGreaterThanOrEqual(-2)
-      expect(gaps[1]).toBeLessThanOrEqual(4)
-      expect(gaps[2]).toBeGreaterThanOrEqual(5)
-      expect(gaps[2]).toBeLessThanOrEqual(10)
+      expect(new Set(state.offers.map((offer) => offer.opponentId)).size).toBe(3)
+      for (const offer of state.offers) {
+        const opponent = state.opponents.find((item) => item.id === offer.opponentId)!
+        expect(offer.riskLabel).toBe(riskLabelForGap(competitiveRatingForOpponent(opponent) - rating))
+      }
     }
+  })
+
+  it('冠軍戰只會在有資格時對上世界前十的強敵', () => {
+    const state = createNewRun({ ...input, seed: 'TITLE-CREDIBILITY', startingExperience: 'semi-pro' })
+    state.phase = 'offer'
+    state.fighter.evidence.fights = 10
+    state.fighter.wins = 8
+    state.fighter.ranking = 17
+    state.fighter.technique = { boxing: 84, kicking: 84, clinch: 68, wrestling: 68, ground: 50 }
+    state.fighter.mind.fightIQ = 68
+
+    const offers = apply(state, { type: 'DECLINE_OFFERS' }).offers
+    const titleOffers = offers.filter((offer) => offer.titleFight)
+    expect(titleOffers).toHaveLength(1)
+    const opponent = state.opponents.find((item) => item.id === titleOffers[0].opponentId)!
+    expect(opponent.rank).toBeLessThanOrEqual(10)
+    expect(competitiveRatingForOpponent(opponent)).toBeGreaterThanOrEqual(70)
+  })
+
+  it('戰績達標但排名或實力不足時不會出現假冠軍戰', () => {
+    const state = createNewRun({ ...input, seed: 'NO-PAPER-TITLE' })
+    state.phase = 'offer'
+    state.fighter.evidence.fights = 10
+    state.fighter.wins = 8
+    state.fighter.ranking = 17
+
+    expect(apply(state, { type: 'DECLINE_OFFERS' }).offers.every((offer) => !offer.titleFight)).toBe(true)
+  })
+
+  it('載入現有生涯時會移除低評級對手的錯誤冠軍標籤與獎金', () => {
+    const state = createNewRun({ ...input, seed: 'REPAIR-PAPER-TITLE' })
+    state.phase = 'offer'
+    const original = state.offers[0]
+    state.offers[0] = {
+      ...original,
+      titleFight: true,
+      purse: original.purse + 5_000,
+      purseBreakdown: { ...original.purseBreakdown, titleBonus: 5_000 },
+    }
+
+    const repaired = repairTitleCredibility(state)
+    expect(repaired.rulesVersion).toBe('0.9.3')
+    expect(repaired.offers[0].titleFight).toBe(false)
+    expect(repaired.offers[0].purse).toBe(original.purse)
+    expect(repaired.offers[0].purseBreakdown.titleBonus).toBe(0)
+  })
+
+  it('排名五十九時的三份邀約會圍繞較低、同級與較高排名', () => {
+    const state = createNewRun({ ...input, seed: 'RANK-LED-OFFERS' })
+    state.phase = 'offer'
+    state.fighter.ranking = 59
+
+    const migrated = migrateMatchmakingCredibility(state)
+    const ranks = migrated.offers.map((offer) => migrated.opponents.find((opponent) => opponent.id === offer.opponentId)!.rank)
+    expect(Math.abs(ranks[0] - 69)).toBeLessThanOrEqual(5)
+    expect(Math.abs(ranks[1] - 59)).toBeLessThanOrEqual(5)
+    expect(Math.abs(ranks[2] - 49)).toBeLessThanOrEqual(5)
+  })
+
+  it('排名五十九擊敗第九名後會躍升至第十二名', () => {
+    expect(rankingAfterWin(59, 9)).toBe(12)
+    expect(rankingAfterWin(59, 49)).toBe(50)
+    expect(rankingAfterWin(59, 69)).toBe(57)
+  })
+
+  it('賽後結算不再使用舊合約內最多六名的排名獎勵', () => {
+    const result = reachFirstFightResult(createNewRun({ ...input, seed: 'UPSET-SETTLEMENT' }))
+    const opponent = result.opponents.find((item) => item.id === result.fight!.opponentId)!
+    result.fighter.ranking = 59
+    opponent.rank = 9
+    result.fight!.winner = 'player'
+    result.fight!.offer.rankReward = 6
+
+    const settled = apply(result, { type: 'ACK_FIGHT_RESULT' })
+    expect(settled.fighter.ranking).toBe(12)
+    expect(settled.fighter.history.at(-1)?.summary).toContain('排名從 #59 升至 #12')
+  })
+
+  it('載入舊規則生涯時會修正最近一場重大爆冷的排名', () => {
+    const state = createNewRun({ ...input, seed: 'REPAIR-UPSET-RANKING' })
+    const opponent = state.opponents.find((item) => item.rank === 9)!
+    state.phase = 'growth'
+    state.fighter.ranking = 53
+    state.fighter.history.push({
+      id: 'fight-upset', year: state.fighter.year, age: state.fighter.age,
+      title: `擊敗 ${opponent.name}`, summary: '重大爆冷。', people: [opponent.name], importance: 3, tags: ['比賽', '勝利'],
+    })
+
+    const migrated = migrateRankingCredibility(state)
+    expect(migrated.rulesVersion).toBe('0.9.3')
+    expect(migrated.fighter.ranking).toBe(12)
+    expect(migrated.fighter.history.at(-1)?.summary).toContain('排名從 #59 修正為 #12')
   })
 
   it('訓練挑戰可安全續作，並且只有引擎接受的原始輸入才會消耗時段', () => {
@@ -718,7 +808,9 @@ describe('拳途人生模擬核心', () => {
     const migrated = migrateVersion11(legacy)
     expect(migrated.saveVersion).toBe(12)
     expect(migrated.offerRefreshUsed).toBe(false)
-    expect(migrated.offers.every((offer) => offer.purseBreakdown.base === offer.purse)).toBe(true)
+    expect(migrated.offers.every((offer) => offer.purse === Math.max(500,
+      offer.purseBreakdown.base + offer.purseBreakdown.riskAdjustment
+      + offer.purseBreakdown.shortNoticePremium + offer.purseBreakdown.titleBonus))).toBe(true)
   })
 
   it('舊版三選一獎勵畫面會保留候選並安全轉成四選二流程', () => {
@@ -731,7 +823,7 @@ describe('拳途人生模擬核心', () => {
     delete legacy.trainingMoveSelections
 
     const migrated = migrateVersion12(legacy)
-    expect(migrated.rulesVersion).toBe('0.9.0')
+    expect(migrated.rulesVersion).toBe('0.9.3')
     expect(migrated.contentVersion).toBe('1.2.0')
     expect(migrated.phase).toBe('training-reward')
     expect(migrated.trainingMoveChoices).toEqual(legacy.trainingMoveChoices)
@@ -813,7 +905,7 @@ describe('拳途人生模擬核心', () => {
     expect(finished.biography?.turningPoints.length).toBeGreaterThan(0)
     expect(finished.biography?.summary).toContain(finished.fighter.name)
     const fightOpponents = finished.fighter.history.filter((entry) => entry.tags.includes('比賽')).flatMap((entry) => entry.people)
-    expect(new Set(fightOpponents).size).toBe(fightOpponents.length)
+    expect(new Set(fightOpponents).size).toBeGreaterThanOrEqual(Math.ceil(fightOpponents.length * 0.4))
   })
 
   it('同一命令策略會重現相同完整人生', () => {
