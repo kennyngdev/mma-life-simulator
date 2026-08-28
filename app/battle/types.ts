@@ -116,6 +116,6 @@ export type BattleRules = {
 };
 
 export type BattleSetup = Omit<BattleState, 'turn' | 'tick' | 'readyActorId' | 'selectedTargetId' | 'actionSerial' | 'tauntActorId' | 'result' | 'intents' | 'events' | 'consumedPassives'>;
-export type BattleCommand = { type: 'advance'; elapsedMs?: number } | { type: 'select-target'; targetId: string } | { type: 'use-action'; actionId: string; targetId?: string };
+export type BattleCommand = { type: 'advance' } | { type: 'select-target'; targetId: string } | { type: 'use-action'; actionId: string; targetId?: string };
 export type BattleTransition = { state: BattleState; events: BattleEvent[]; result: BattleResult; resourceChanges: { money: number; flagsAdded: string[] }; rngIndex: number };
 export type BattleMoveSelection = { slot: MoveSlot; actionId: string };

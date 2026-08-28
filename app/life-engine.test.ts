@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advance, choiceChanceDetailFor, choiceChanceFor, choiceFailureFor, choiceRewardFor, choiceSucceededFor, chooseInsight, endingFor, eventChoiceCopy, eventFor, hasTalent, identityDetail, identityRarity, insightChoicesFor, insightDefinitions, isComplete, newLife, nextInsightTier, performMove, preparationFeedbackFor, rarities, resolveBattle, resolvedSectFor, rulesFor, sects, startBattle, traits, type ChoiceTag, type LifeChoice, type LifeRun } from './life-engine';
+import { advance, choiceChanceDetailFor, choiceChanceFor, choiceFailureFor, choiceRewardFor, choiceSucceededFor, chooseBattleUpgrade, chooseInsight, describeUpgrade, endingFor, eventChoiceCopy, eventFor, hasTalent, identityDetail, identityRarity, insightChoicesFor, insightDefinitions, isComplete, newLife, nextInsightTier, performMove, preparationFeedbackFor, rarities, resolveBattle, resolvedSectFor, rulesFor, sects, startBattle, traits, upgradeChoicesFor, type ChoiceTag, type LifeChoice, type LifeRun, type UpgradeId } from './life-engine';
 import type { BattleEffect } from './battle';
 
 const effectRoute = (effect: BattleEffect) => {
@@ -170,8 +170,8 @@ describe('大俠模擬器 life engine', () => {
   });
 
   it('makes every preparation roll visible, stat-based, talent-sensitive, and deterministic', () => {
-    const base = { ...newLife('probabilistic-choice', '小滿'), stats: { strength: 5, agility: 5, constitution: 5, wisdom: 5, will: 5, luck: 5 } };
-    const study = choiceWithTag(base, 'study'); const bargain = choiceWithTag(base, 'bargain'); const protect = choiceWithTag(base, 'protect');
+    const base = { ...newLife('probabilistic-choice', '小滿'), turn: 3, stats: { strength: 5, agility: 5, constitution: 5, wisdom: 5, will: 5, luck: 5 } };
+    const study = choiceWithTag(base, 'study'); const bargain = choiceWithTag(base, 'bargain', (choice) => choice.commitEffects.length === 0 && choice.failureEffects.some((effect) => effect.type === 'resource' && effect.resource === 'money' && effect.amount === -2)); const protect = choiceWithTag(base, 'protect');
     expect(choiceChanceFor(base, study)).toBe(60);
     expect(choiceChanceFor(base, bargain)).toBe(60);
     expect(choiceChanceFor(base, protect)).toBe(60);
@@ -203,7 +203,7 @@ describe('大俠模擬器 life engine', () => {
   });
 
   it('creates deterministic, causal feedback for every preparation outcome before battle', () => {
-    const run = { ...newLife('feedback-fate', '小滿'), sectId: 'huashan' as const };
+    const run = { ...newLife('feedback-fate', '小滿'), sectId: 'huashan' as const, turn: 3 };
     const event = eventFor(run);
     for (const choice of event.choices) {
       const success = preparationFeedbackFor(run, event, choice, true);
@@ -394,7 +394,7 @@ describe('大俠模擬器 life engine', () => {
   });
 
   it('replaces the contextual third choice when persistent state changes', () => {
-    const base = { ...newLife('dynamic-third', '小滿'), sectId: 'emei' as const, money: 0, friendship: 0, rivalry: 0, injury: 0 };
+    const base = { ...newLife('dynamic-third', '小滿'), sectId: 'emei' as const, turn: 3, money: 0, friendship: 0, rivalry: 0, injury: 0 };
     const sectChoice = eventFor(base).choices[2];
     const friendChoice = eventFor({ ...base, friendship: 3 }).choices[2];
     const rivalChoice = eventFor({ ...base, rivalry: 2 }).choices[2];
@@ -402,6 +402,39 @@ describe('大俠模擬器 life engine', () => {
     expect(friendChoice.sourceLabel).toContain('交情 3');
     expect(rivalChoice.sourceLabel).toContain('芥蒂 2');
     expect(new Set([sectChoice.id, friendChoice.id, rivalChoice.id]).size).toBe(3);
+  });
+
+  it('offers three deterministic, distinct post-battle upgrades with varied rarity', () => {
+    const run = { ...newLife('upgrade-fate', '小滿'), sectId: 'huashan' as const, turn: 5, pendingUpgrade: true };
+    const first = upgradeChoicesFor(run);
+    const replay = upgradeChoicesFor({ ...run });
+    expect(first).toEqual(replay);
+    expect(first).toHaveLength(3);
+    expect(new Set(first.map((item) => item.id)).size).toBe(3);
+    expect(new Set(first.map((item) => item.rarity)).size).toBeGreaterThanOrEqual(2);
+    expect(first.every((item) => item.effect.includes('+'))).toBe(true);
+    expect(upgradeChoicesFor({ ...run, pendingUpgrade: false })).toEqual([]);
+  });
+
+  it('applies every upgrade family permanently and consumes exactly one pending choice', () => {
+    const ids: UpgradeId[] = ['force', 'armor', 'vitality', 'breath', 'opening-guard', 'footwork'];
+    for (const id of ids) {
+      let run: LifeRun | undefined;
+      for (let seedIndex = 0; seedIndex < 500 && !run; seedIndex += 1) {
+        const candidate = { ...newLife(`upgrade-${id}-${seedIndex}`, '小滿'), sectId: 'huashan' as const, turn: 2, pendingUpgrade: true };
+        if (upgradeChoicesFor(candidate).some((item) => item.id === id)) run = candidate;
+      }
+      expect(run, `missing offer for ${id}`).toBeDefined();
+      const before = run!;
+      const chosen = chooseBattleUpgrade(before, id);
+      expect(chosen.pendingUpgrade).toBe(false);
+      expect(chosen.upgrades).toHaveLength(1);
+      expect(chosen.upgrades[0].id).toBe(id);
+      expect(describeUpgrade(chosen.upgrades[0]).effect).toContain('+');
+      expect(chosen.chronicle.at(-1)).toContain('戰後領悟');
+      expect(chosen.shopAttack + chosen.shopDefense + chosen.shopGuard + chosen.shopMaxHp + chosen.shopMaxQi + chosen.upgradeSpeed).toBeGreaterThan(before.shopAttack + before.shopDefense + before.shopGuard + before.shopMaxHp + before.shopMaxQi + before.upgradeSpeed);
+      expect(chooseBattleUpgrade(chosen, id)).toBe(chosen);
+    }
   });
 
   it('defines and applies all thirty-six sect insight choices', () => {

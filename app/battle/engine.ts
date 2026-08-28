@@ -7,10 +7,8 @@ const hash = (input: string) => {
 };
 const clone = <T,>(value: T): T => structuredClone(value);
 const TOXIN_TURN_DAMAGE_PER_STACK = 9;
-const BATTLE_TICK_MS = 450;
-const TIMELINE_PRECISION = 1_000_000_000;
-const TIMELINE_EPSILON = 1 / TIMELINE_PRECISION;
-const timelineValue = (value: number) => Math.round(value * TIMELINE_PRECISION) / TIMELINE_PRECISION;
+export const TURN_THRESHOLD = 100;
+export const MAX_PROGRESS = 150;
 const living = (state: BattleState, side: BattleActor['side']) => state.actors.filter((actor) => actor.side === side && actor.hp > 0);
 const weakest = (actors: BattleActor[]) => [...actors].sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
 const actorFor = (state: BattleState, id: string | null | undefined) => state.actors.find((actor) => actor.id === id);
@@ -179,10 +177,8 @@ function finish(state: BattleState, rules: BattleRules, events: BattleEvent[]) {
 export function createBattle(setup: BattleSetup, rules: BattleRules): BattleState {
   const state: BattleState = { ...clone(setup), turn: 1, tick: 0, readyActorId: null, selectedTargetId: null, actionSerial: 0, tauntActorId: null, result: null, intents: [], events: [], consumedPassives: [] };
   refreshSpeeds(state, rules);
-  const availableStartingProgress = Array.from({ length: 63 }, (_, index) => index + 8);
   for (const actor of state.actors) {
-    const progressIndex = roll(state, 0, availableStartingProgress.length - 1);
-    actor.progress = availableStartingProgress.splice(progressIndex, 1)[0];
+    actor.progress = roll(state, 8, 70);
   }
   state.intents = reconcileIntents(state, rules);
   return state;
@@ -195,23 +191,10 @@ export function reduceBattle(previous: BattleState, command: BattleCommand, rule
   }
   if (command.type === 'advance' && state.readyActorId !== 'player') {
     refreshSpeeds(state, rules); const actors = state.actors.filter((actor) => actor.hp > 0);
-    let ready: BattleActor | undefined;
-    if (command.elapsedMs === undefined) {
-      actors.forEach((actor) => { actor.progress = Math.min(150, actor.progress + actor.speed); }); state.tick += 1;
-      ready = [...actors].sort((a, b) => b.progress - a.progress)[0];
-    } else {
-      const elapsedTicks = Math.max(0, command.elapsedMs) / BATTLE_TICK_MS;
-      let ticksToReady = Infinity;
-      for (const actor of actors) {
-        const candidate = Math.max(0, (100 - actor.progress) / actor.speed);
-        if (candidate < ticksToReady - TIMELINE_EPSILON) { ticksToReady = candidate; ready = actor; }
-      }
-      const advancedTicks = Math.min(elapsedTicks, ticksToReady);
-      actors.forEach((actor) => { actor.progress = timelineValue(Math.min(150, actor.progress + actor.speed * advancedTicks)); }); state.tick = timelineValue(state.tick + advancedTicks);
-      if (ticksToReady > elapsedTicks + TIMELINE_EPSILON) ready = undefined;
-    }
-    if (ready && ready.progress >= 100) {
-      ready.progress -= 100; state.readyActorId = ready.id;
+    actors.forEach((actor) => { actor.progress = Math.min(MAX_PROGRESS, actor.progress + actor.speed); }); state.tick += 1;
+    const ready = [...actors].sort((a, b) => b.progress - a.progress)[0];
+    if (ready && ready.progress >= TURN_THRESHOLD) {
+      ready.progress -= TURN_THRESHOLD; state.readyActorId = ready.id;
       if (ready.id === 'player') { state.selectedTargetId = targetFor(state, ready, 'weakest-enemy')?.id ?? null; events.push({ type: 'ready', actorId: ready.id, actorName: ready.name, side: ready.side }); }
       else {
         state.intents = reconcileIntents(state, rules);

@@ -18,18 +18,18 @@ describe('battle engine', () => {
     const state = createBattle(promisedSetup, rules);
     const promisedTarget = state.intents.find((intent) => intent.actorId === 'enemy')?.targetId;
     state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
-    const next = reduceBattle(state, { type: 'advance', elapsedMs: 0 }, rules);
+    const next = reduceBattle(state, { type: 'advance' }, rules);
     expect(next.events).toContainEqual(expect.objectContaining({ type: 'action', actorId: 'enemy', targetId: promisedTarget }));
   });
 
   it('does not replay the last action when a later actor only becomes ready', () => {
     const state = createBattle(setup(), rules);
     state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
-    const acted = reduceBattle(state, { type: 'advance', elapsedMs: 0 }, rules).state;
+    const acted = reduceBattle(state, { type: 'advance' }, rules).state;
     expect(acted.actionSerial).toBe(1);
     const lastAction = acted.events.find((event) => event.type === 'action');
     acted.actors.forEach((item) => { item.progress = item.id === 'player' ? 100 : 0; });
-    const ready = reduceBattle(acted, { type: 'advance', elapsedMs: 0 }, rules);
+    const ready = reduceBattle(acted, { type: 'advance' }, rules);
     expect(ready.events).toContainEqual(expect.objectContaining({ type: 'ready', actorId: 'player' }));
     expect(ready.state.actionSerial).toBe(1);
     expect(ready.state.events.find((event) => event.type === 'action')).toEqual(lastAction);
@@ -43,7 +43,7 @@ describe('battle engine', () => {
     state.actors.find((item) => item.id === intent.targetId)!.hp = 0;
     state.tauntActorId = 'tank';
     state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
-    const next = reduceBattle(state, { type: 'advance', elapsedMs: 0 }, rules);
+    const next = reduceBattle(state, { type: 'advance' }, rules);
     expect(next.events).toContainEqual(expect.objectContaining({ type: 'action', actorId: 'enemy', targetId: 'tank' }));
   });
 
@@ -53,14 +53,14 @@ describe('battle engine', () => {
     const enemy = state.actors.find((item) => item.id === 'enemy')!;
     enemy.actionIds = ['heavy', 'basic']; enemy.qi = 20; state.intents = [];
     state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
-    const planned = reduceBattle(state, { type: 'advance', elapsedMs: 0 }, actionRules).state;
+    const planned = reduceBattle(state, { type: 'advance' }, actionRules).state;
     expect(planned.events.at(-1)).toEqual(expect.objectContaining({ type: 'action', actionId: 'heavy' }));
 
     const exhausted = createBattle(setup(), actionRules);
     const exhaustedEnemy = exhausted.actors.find((item) => item.id === 'enemy')!;
     exhaustedEnemy.actionIds = ['heavy', 'basic']; exhaustedEnemy.qi = 0; exhausted.intents = [];
     exhausted.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
-    const replanned = reduceBattle(exhausted, { type: 'advance', elapsedMs: 0 }, actionRules).state;
+    const replanned = reduceBattle(exhausted, { type: 'advance' }, actionRules).state;
     expect(replanned.events.at(-1)).toEqual(expect.objectContaining({ type: 'action', actionId: 'basic' }));
   });
 
@@ -78,7 +78,7 @@ describe('battle engine', () => {
     const state = createBattle(setup(), guardRules);
     const enemy = state.actors.find((item) => item.id === 'enemy')!; enemy.actionIds = ['enemyGuard']; state.intents = [];
     state.actors.forEach((item) => { item.progress = item.id === 'enemy' ? 100 : 0; });
-    const next = reduceBattle(state, { type: 'advance', elapsedMs: 0 }, guardRules);
+    const next = reduceBattle(state, { type: 'advance' }, guardRules);
     expect(next.state.actors.find((item) => item.id === 'enemy')?.guard).toBe(8);
     expect(next.state.actors.find((item) => item.id === 'player')?.guard).toBe(0);
     expect(next.events.at(-1)).toEqual(expect.objectContaining({ outcomes: expect.arrayContaining([expect.objectContaining({ type: 'guard', recipientId: 'enemy', amount: 8 })]) }));
@@ -109,7 +109,7 @@ describe('battle engine', () => {
     const screened = reduceBattle(state, { type: 'use-action', actionId: 'screen' }, counterRules).state;
     const player = screened.actors.find((item) => item.id === 'player')!; player.guard = 6; player.progress = 0;
     screened.actors.find((item) => item.id === 'enemy')!.progress = 100;
-    const next = reduceBattle(screened, { type: 'advance', elapsedMs: 0 }, counterRules);
+    const next = reduceBattle(screened, { type: 'advance' }, counterRules);
     const action = next.events.find((event) => event.type === 'action');
     expect(action).toEqual(expect.objectContaining({ outcomes: expect.arrayContaining([
       expect.objectContaining({ type: 'damage', sourceId: 'enemy', recipientId: 'player', guardAbsorbed: 6 }),
@@ -117,7 +117,7 @@ describe('battle engine', () => {
     ]) }));
   });
 
-  it('gives every actor a distinct deterministic starting position', () => {
+  it('gives every actor a deterministic seeded starting position from 8 to 70', () => {
     for (let seedIndex = 0; seedIndex < 100; seedIndex += 1) {
       const distinctSetup = setup();
       distinctSetup.seed = `starting-position-${seedIndex}`;
@@ -125,17 +125,43 @@ describe('battle engine', () => {
       const first = createBattle(distinctSetup, rules);
       const second = createBattle(distinctSetup, rules);
       expect(first.actors.map((item) => item.progress)).toEqual(second.actors.map((item) => item.progress));
-      expect(new Set(first.actors.map((item) => item.progress)).size).toBe(first.actors.length);
+      expect(first.actors.every((item) => item.progress >= 8 && item.progress <= 70)).toBe(true);
     }
   });
 
-  it('advances fractional progress from elapsed real time independent of frame size', () => {
+  it('advances exactly one speed step per tick and preserves overflow', () => {
     const initial = createBattle(setup(), rules);
-    initial.actors.forEach((item) => { item.progress = 0; });
-    const oneFrame = reduceBattle(initial, { type: 'advance', elapsedMs: 90 }, rules).state;
-    const sixFrames = Array.from({ length: 6 }).reduce<ReturnType<typeof createBattle>>((state) => reduceBattle(state, { type: 'advance', elapsedMs: 15 }, rules).state, initial);
-    sixFrames.actors.forEach((item, index) => expect(item.progress).toBeCloseTo(oneFrame.actors[index].progress, 8));
-    oneFrame.actors.forEach((item) => expect(item.progress).toBeCloseTo(2, 8));
+    initial.actors.find((item) => item.id === 'player')!.progress = 92;
+    initial.actors.find((item) => item.id === 'enemy')!.progress = 88;
+    const next = reduceBattle(initial, { type: 'advance' }, rules).state;
+    expect(next.readyActorId).toBe('player');
+    expect(next.actors.find((item) => item.id === 'player')?.progress).toBe(2);
+    expect(next.actors.find((item) => item.id === 'enemy')?.progress).toBe(98);
+    expect(next.tick).toBe(initial.tick + 1);
+  });
+
+  it('freezes every actor while the player is waiting to choose', () => {
+    const state = createBattle(setup(), rules);
+    state.readyActorId = 'player';
+    const before = state.actors.map((item) => item.progress);
+    const next = reduceBattle(state, { type: 'advance' }, rules).state;
+    expect(next.actors.map((item) => item.progress)).toEqual(before);
+    expect(next.tick).toBe(state.tick);
+    expect(next.readyActorId).toBe('player');
+  });
+
+  it('excludes dead actors, caps stored progress, and selects only the highest living actor', () => {
+    const crowdedSetup = setup();
+    crowdedSetup.actors.push(actor('enemy-2', 'enemy', 'warrior'));
+    const state = createBattle(crowdedSetup, rules);
+    state.actors.find((item) => item.id === 'player')!.progress = 139;
+    state.actors.find((item) => item.id === 'enemy')!.progress = 141;
+    const dead = state.actors.find((item) => item.id === 'enemy-2')!;
+    dead.hp = 0; dead.progress = 149;
+    const next = reduceBattle(state, { type: 'advance' }, rules).state;
+    expect(next.actors.find((item) => item.id === 'enemy')?.actionsTaken).toBe(1);
+    expect(next.actors.find((item) => item.id === 'player')?.progress).toBe(149);
+    expect(next.actors.find((item) => item.id === 'enemy-2')?.progress).toBe(149);
   });
 
   it('lets tied enemies act once each instead of starving the second actor', () => {
@@ -145,8 +171,8 @@ describe('battle engine', () => {
     state.readyActorId = null;
     state.actors.find((item) => item.id === 'player')!.progress = 0;
     state.actors.filter((item) => item.side === 'enemy').forEach((item) => { item.progress = 100; });
-    const first = reduceBattle(state, { type: 'advance', elapsedMs: 0 }, rules);
-    const second = reduceBattle(first.state, { type: 'advance', elapsedMs: 0 }, rules);
+    const first = reduceBattle(state, { type: 'advance' }, rules);
+    const second = reduceBattle(first.state, { type: 'advance' }, rules);
     expect(first.events).toContainEqual(expect.objectContaining({ type: 'action', actorId: 'enemy' }));
     expect(second.events).toContainEqual(expect.objectContaining({ type: 'action', actorId: 'enemy-2' }));
     expect(second.state.actors.filter((item) => item.side === 'enemy').map((item) => item.actionsTaken)).toEqual([1, 1]);

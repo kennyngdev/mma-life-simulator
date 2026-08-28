@@ -27,6 +27,7 @@ The player is an ordinary person who is not chosen, secretly invincible, or guar
 - Recurring people need something to protect, a weakness, a recognizable habit, and the ability to change the player's costs or options.
 - Show affection and rivalry through actions and shared history, not labels alone.
 - Martial arts reveal character and circumstance: show who moves, how the situation changes, and what the action costs.
+- Post-battle upgrades are named as habits, techniques, or bodily understanding earned from the fight. Their copy states the exact permanent effect without claiming destiny, bloodline, or divine selection.
 - Endings should answer what kind of person this life became while preserving unresolved possibilities and relationships.
 
 ## Avoid

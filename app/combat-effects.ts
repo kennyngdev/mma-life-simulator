@@ -19,15 +19,16 @@ const glyphs: Record<SectId, string> = { huashan: '劍', shaolin: '拳', wudang:
 export function effectForAction(actionId: string): CombatEffectKind { return moveKinds[actionId] ?? 'swift'; }
 export function effectGlyph(sectId: SectId, actorId: string) { return actorId === 'player' ? glyphs[sectId] : actorId === 'friend' ? '援' : '擊'; }
 
-const visibleTimelineProgress = (actor: Pick<BattleActor, 'id' | 'progress'>, readyActorId?: string | null, actingActorId?: string | null) => actor.id === readyActorId || actor.id === actingActorId ? 100 : Math.max(0, Math.min(100, actor.progress));
+const visibleTimelineProgress = (actor: Pick<BattleActor, 'progress'>) => Math.max(0, Math.min(100, actor.progress));
 
-export function timelineMarkerPresentation(actors: Array<Pick<BattleActor, 'id' | 'progress'>>, actorId: string, readyActorId?: string | null, actingActorId?: string | null) {
+export function timelineMarkerPresentation(actors: Array<Pick<BattleActor, 'id' | 'progress'>>, actorId: string, _readyActorId?: string | null) {
+  void _readyActorId;
   const actor = actors.find((item) => item.id === actorId);
   if (!actor) return { progress: 0, shift: 0 };
-  const progress = visibleTimelineProgress(actor, readyActorId, actingActorId);
+  const progress = visibleTimelineProgress(actor);
   const cluster = actors
-    .filter((item) => Math.abs(visibleTimelineProgress(item, readyActorId, actingActorId) - progress) < 5)
-    .sort((left, right) => visibleTimelineProgress(left, readyActorId, actingActorId) - visibleTimelineProgress(right, readyActorId, actingActorId) || actors.findIndex((item) => item.id === left.id) - actors.findIndex((item) => item.id === right.id));
+    .filter((item) => Math.abs(visibleTimelineProgress(item) - progress) < 5)
+    .sort((left, right) => visibleTimelineProgress(left) - visibleTimelineProgress(right) || actors.findIndex((item) => item.id === left.id) - actors.findIndex((item) => item.id === right.id));
   const rank = cluster.findIndex((item) => item.id === actorId);
   return { progress, shift: (rank - (cluster.length - 1) / 2) * 20 };
 }
