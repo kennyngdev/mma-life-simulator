@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { createNewRun, getWeightOptions } from '../src/game/engine'
+import { advance, createNewRun, getWeightOptions } from '../src/game/engine'
+import { FIGHT_INTENTS, OPENING_LABELS } from '../src/game/fight-content'
 import type { CampAction, CampDrillChallenge, CriticalOption, FinishKind, GameState } from '../src/game/types'
 
 const storage = vi.hoisted(() => ({
@@ -16,6 +17,10 @@ const storage = vi.hoisted(() => ({
 vi.mock('../src/game/storage', () => storage)
 
 const input = { name: '林致遠', region: 'taiwan' as const, motive: 'prove' as const, seed: 'TESTCAGE01' }
+
+function drillTestLabel(value: string): string {
+  return FIGHT_INTENTS.find((move) => move.id === value)?.label ?? OPENING_LABELS[value as keyof typeof OPENING_LABELS] ?? value
+}
 
 function gameAtFinishMinigame(kind: FinishKind): GameState {
   const game = createNewRun(input)
@@ -66,6 +71,7 @@ function gameAtCounteredTakedownEntry(): GameState {
   const opponent = game.opponents.find((item) => item.id === game.fight!.opponentId)!
   Object.assign(game.fight!, {
     position: 'bottom', plan: 'takedown', sequenceStep: 1, stageName: 'contact', beatHistory: [],
+    positionEntry: { round: 1, plan: 'takedown', position: 'bottom', explanation: `你壓低重心射出雙腿抱摔，但${opponent.name}後撤髖部避開切入，順勢壓住你的上身；你在重新起身前落到防守架下位。` },
     commentary: [`第 1 回合，你主動尋找抱摔機會。你壓低重心射出雙腿抱摔，但${opponent.name}後撤髖部避開切入，順勢壓住上身；你落到防守架下位。`],
     prompt: { ...game.fight!.prompt!, title: '接觸｜防守架下位', position: 'bottom' },
   })
@@ -87,6 +93,13 @@ function gameAtCampDrill(kind: CampAction): GameState {
   game.phase = 'camp-drill'
   game.activeCampDrill = challenge
   return game
+}
+
+function gameAtGeneratedCampDrill(kind: CampAction, branch: 'boxing' = 'boxing'): GameState {
+  const game = createNewRun(input)
+  game.phase = 'camp'
+  game.selectedOfferId = game.offers[0].id
+  return advance(game, { type: 'START_CAMP_DRILL', action: kind, branch: kind === 'technique' || kind === 'sparring' ? branch : undefined }).state
 }
 
 describe('生涯重置', () => {
@@ -138,7 +151,25 @@ describe('生涯重置', () => {
     expect(label.closest('.metric')).toHaveTextContent('依減重策略而定')
   })
 
-  it('沒有可用技術領悟時收起科技樹', async () => {
+  it('切換遊戲畫面時將內容捲動位置重設到頂部', async () => {
+    render(<App />)
+
+    await screen.findByRole('heading', { name: '命運揭曉' })
+    const gameScroll = document.querySelector<HTMLElement>('.game-scroll')!
+    gameScroll.scrollTop = 600
+    document.documentElement.scrollTop = 300
+    document.body.scrollTop = 300
+
+    fireEvent.click(screen.getByRole('button', { name: '從這裡開始' }))
+
+    await waitFor(() => {
+      expect(gameScroll.scrollTop).toBe(0)
+      expect(document.documentElement.scrollTop).toBe(0)
+      expect(document.body.scrollTop).toBe(0)
+    })
+  })
+
+  it('沒有新特質時顯示實戰進度而非科技樹', async () => {
     const game = createNewRun(input)
     game.phase = 'growth'
     game.fighter.insight = 0
@@ -147,32 +178,25 @@ describe('生涯重置', () => {
 
     render(<App />)
 
-    expect(await screen.findByText('本次成長完成')).toBeInTheDocument()
-    expect(screen.queryByText('跨分支流派')).not.toBeInTheDocument()
+    expect(await screen.findByText('沒有憑空出現的新能力')).toBeInTheDocument()
+    expect(screen.queryByText('技術領悟')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '繼續生涯' })).toBeInTheDocument()
   })
 
-  it('離開成長畫面後可從拳手狀態使用技術領悟', async () => {
+  it('拳手狀態顯示技能、招式與天生特質', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
-    game.fighter.insight = 2
-    if (!game.fighter.unlockedNodes.includes('box-foot-jab')) {
-      game.fighter.unlockedNodes.push('box-foot-jab')
-      game.fighter.mastery['box-foot-jab'] = { value: 18, gainedThisFight: 0 }
-    }
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: '拳手狀態' }))
-    expect(screen.getByText('可用技術領悟')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /重擊軀幹/ }))
-    fireEvent.click(screen.getByRole('button', { name: '學習技術 · 1 點' }))
-
-    expect(screen.getByText('1 點')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /重擊軀幹 精通/ })).toBeInTheDocument()
+    expect(screen.getByText('技能與訓練')).toBeInTheDocument()
+    expect(screen.getByText('已學招式')).toBeInTheDocument()
+    expect(screen.getByText('特質')).toBeInTheDocument()
+    expect(screen.getAllByText(/Lv\./).length).toBeGreaterThanOrEqual(5)
   })
 
-  it('狀態介面在零點領悟時不顯示科技樹操作', async () => {
+  it('狀態介面不再提供科技樹點數操作', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
     game.fighter.insight = 0
@@ -180,8 +204,9 @@ describe('生涯重置', () => {
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: '拳手狀態' }))
-    expect(screen.queryByRole('button', { name: /重擊軀幹/ })).not.toBeInTheDocument()
-    expect(screen.getByText('已學技術')).toBeInTheDocument()
+    expect(screen.queryByText('可用技術領悟')).not.toBeInTheDocument()
+    expect(screen.queryByText('跨分支流派')).not.toBeInTheDocument()
+    expect(screen.getByText('已學招式')).toBeInTheDocument()
   })
 
   it('只把技術相關訓練放在技術焦點內', async () => {
@@ -214,6 +239,64 @@ describe('生涯重置', () => {
     expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
   })
 
+  it('靶訓組合會示範三拍並接受實際招式輸入', async () => {
+    localStorage.setItem('cage-life:training-tutorial:combo-v1', 'true')
+    const game = gameAtGeneratedCampDrill('technique')
+    const challenge = game.activeCampDrill!
+    expect(challenge.mode).toBe('combo')
+    if (challenge.mode !== 'combo') return
+    challenge.previewMs = 0
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByText('教練示範')).toBeInTheDocument()
+    for (const step of challenge.steps) {
+      const label = FIGHT_INTENTS.find((move) => move.id === step.moveId)!.label
+      fireEvent.click(await screen.findByRole('button', { name: label }))
+    }
+    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+  })
+
+  it('實戰對練會完成三段威脅、選招、時機與結果回饋', async () => {
+    localStorage.setItem('cage-life:training-tutorial:sparring-v1', 'true')
+    const game = gameAtGeneratedCampDrill('sparring')
+    const challenge = game.activeCampDrill!
+    expect(challenge.mode).toBe('sparring')
+    if (challenge.mode !== 'sparring') return
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByLabelText('實戰對練小遊戲')).toBeInTheDocument()
+    for (let index = 0; index < challenge.exchanges.length; index += 1) {
+      const favored = challenge.exchanges[index].options.find((option) => option.matchup === 'favored')!
+      const label = FIGHT_INTENTS.find((move) => move.id === favored.moveId)!.label
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(label) }))
+      fireEvent.click(screen.getByRole('button', { name: '在窗口出手' }))
+      expect(screen.getByText(/乾淨奏效|互有得失/)).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: index === challenge.exchanges.length - 1 ? '完成對練' : '進入下一段攻防' }))
+    }
+    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+  })
+
+  it('影片研究先呈現對手三段攻防，再詢問具體招式與破綻', async () => {
+    localStorage.setItem('cage-life:training-tutorial:film-v1', 'true')
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })
+    const game = gameAtGeneratedCampDrill('film')
+    const challenge = game.activeCampDrill!
+    expect(challenge.mode).toBe('film-study')
+    if (challenge.mode !== 'film-study') return
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByText('對手影片')).toBeInTheDocument()
+    expect(screen.getAllByText(FIGHT_INTENTS.find((move) => move.id === challenge.sequenceMoveIds[0])!.label)).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: '看完了，開始分析' }))
+    for (const prompt of challenge.prompts) fireEvent.click(screen.getByRole('button', { name: drillTestLabel(prompt.answer) }))
+    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+    window.matchMedia = originalMatchMedia
+  })
+
   it('恢復訓練可用三次按住與放開循環完成', async () => {
     storage.loadGame.mockResolvedValue({ game: gameAtCampDrill('recovery') })
     render(<App />)
@@ -226,16 +309,17 @@ describe('生涯重置', () => {
     expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
   })
 
-  it('寬鬆訓練節奏會產生更長的挑戰窗口，但仍保留最高獎勵資格', async () => {
+  it('標頭提供不降低最高獎勵的寬鬆訓練節奏', async () => {
     const game = createNewRun(input)
     game.phase = 'camp'
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: '開啟寬鬆訓練節奏' }))
-    expect(screen.getByText(/更長的讀取與呼吸窗口/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /技術訓練/ }))
-    expect(await screen.findByText(/最高獎勵不變/)).toBeInTheDocument()
+    await screen.findByRole('heading', { name: '訓練營' })
+    const toggle = screen.getByRole('button', { name: '開啟寬鬆訓練節奏' })
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: '關閉寬鬆訓練節奏' })).toBeInTheDocument()
+    expect(screen.getByText(/最高獎勵不變/)).toBeInTheDocument()
   })
 
   it('訓練營會預告每段關係目前帶來的實際效果', async () => {
@@ -311,7 +395,7 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: '亮區內按住' })).toBeInTheDocument()
   })
 
-  it('第一次進入小遊戲時顯示玩法教學，確認後不再顯示', async () => {
+  it('第一次進入同一種小遊戲時顯示玩法教學，確認後不再顯示', async () => {
     storage.loadGame.mockResolvedValue({ game: gameAtFinishMinigame('strike') })
     const first = render(<App />)
 
@@ -322,12 +406,28 @@ describe('生涯重置', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '我明白了，開始挑戰' }))
     expect(screen.queryByRole('dialog', { name: '終結小遊戲怎麼玩？' })).not.toBeInTheDocument()
-    expect(localStorage.getItem('cage-life:minigame-tutorial-seen-v1')).toBe('true')
+    expect(localStorage.getItem('cage-life:minigame-tutorial-seen-v2:strike')).toBe('true')
 
     first.unmount()
     render(<App />)
     expect(await screen.findByText('終結一擊')).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '終結小遊戲怎麼玩？' })).not.toBeInTheDocument()
+  })
+
+  it('玩過降服小遊戲後第一次進入 TKO 小遊戲仍顯示教學', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtFinishMinigame('submission') })
+    const submissionGame = render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '我明白了，開始挑戰' }))
+    expect(localStorage.getItem('cage-life:minigame-tutorial-seen-v2:submission')).toBe('true')
+    expect(localStorage.getItem('cage-life:minigame-tutorial-seen-v2:strike')).toBeNull()
+
+    submissionGame.unmount()
+    storage.loadGame.mockResolvedValue({ game: gameAtFinishMinigame('strike') })
+    render(<App />)
+
+    const tutorial = await screen.findByRole('dialog', { name: '終結小遊戲怎麼玩？' })
+    expect(tutorial).toHaveTextContent('這次是重擊操作')
   })
 
   it('背後控制在戰鬥介面顯示獨立位置、裸絞、十字固與背後打擊', async () => {
@@ -341,6 +441,41 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: /裸絞（RNC）/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /背後十字固/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /背後短拳/ })).toBeInTheDocument()
+  })
+
+  it('在戰鬥中選擇招式後將內容捲回頂部', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtBackControl() })
+    render(<App />)
+
+    const move = await screen.findByRole('button', { name: /背後短拳/ })
+    const gameScroll = document.querySelector<HTMLElement>('.game-scroll')!
+    gameScroll.scrollTop = 600
+    document.documentElement.scrollTop = 300
+    document.body.scrollTop = 300
+
+    fireEvent.click(move)
+
+    await waitFor(() => {
+      expect(gameScroll.scrollTop).toBe(0)
+      expect(document.documentElement.scrollTop).toBe(0)
+      expect(document.body.scrollTop).toBe(0)
+    })
+  })
+
+  it('用玩家能直接理解的文字標示招式是否有利', async () => {
+    const game = gameAtBackControl()
+    const options = game.fight!.prompt!.featuredOptions
+    options[0].matchup = 'favored'
+    options[1].matchup = 'exposed'
+    options[2].matchup = 'neutral'
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByText('有利選擇')).toBeInTheDocument()
+    expect(screen.getByText('容易被反制')).toBeInTheDocument()
+    expect(screen.getByText('勝負均等')).toBeInTheDocument()
+    expect(screen.queryByText('克制')).not.toBeInTheDocument()
+    expect(screen.queryByText('受制')).not.toBeInTheDocument()
   })
 
   it('關鍵選擇畫面只顯示一次上一段攻防', async () => {
@@ -357,14 +492,17 @@ describe('生涯重置', () => {
     expect(await screen.findAllByText('這段攻防不應在場景下方重複。')).toHaveLength(1)
   })
 
-  it('抱摔開局被破解落入下位時顯示醒目的原因說明', async () => {
+  it('選擇戰術後用彈窗說明如何落到目前位置', async () => {
     const game = gameAtCounteredTakedownEntry()
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
-    const event = await screen.findByRole('status')
-    expect(event).toHaveTextContent('抱摔被破解')
-    expect(event).toHaveTextContent('後撤髖部避開切入')
-    expect(event).toHaveTextContent('你落到防守架下位')
+    const dialog = await screen.findByRole('dialog', { name: '你怎麼來到這個位置？' })
+    expect(dialog).toHaveTextContent('尋找抱摔')
+    expect(dialog).toHaveTextContent('防守架下位')
+    expect(dialog).toHaveTextContent('後撤髖部避開切入')
+    expect(dialog).toHaveTextContent('對手先取得主動位置')
+    fireEvent.click(screen.getByRole('button', { name: '明白，開始攻防' }))
+    expect(screen.queryByRole('dialog', { name: '你怎麼來到這個位置？' })).not.toBeInTheDocument()
   })
 })

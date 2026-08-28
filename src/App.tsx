@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { BRANCH_META, MOTIVES, REGION_LABELS, TECHNIQUE_NODES } from './game/content'
-import { OPENING_LABELS } from './game/fight-content'
-import { advance, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, getOpponent, getPotentialLabel, getRelationshipBenefit, getUnlockStatus, getWeightOptions, relationshipTier, STAGE_LABELS } from './game/engine'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { BRANCH_META, MOTIVES, REGION_LABELS } from './game/content'
+import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
+import { advance, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, getWeightOptions, relationshipTier, STAGE_LABELS, trainingSparringOutcome } from './game/engine'
+import { aptitudeLabel, minimumMoveLevel, nextSkillThreshold, skillLevel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
@@ -25,13 +26,13 @@ import type {
   Region,
   RiskLabel,
   RoundPlan,
-  TechniqueNode,
+  StartingExperience,
   WeightPlan,
 } from './game/types'
 import { t } from './i18n'
 
 const BRANCHES: Branch[] = ['boxing', 'kicking', 'clinch', 'wrestling', 'ground']
-const MINIGAME_TUTORIAL_KEY = 'cage-life:minigame-tutorial-seen-v1'
+const minigameTutorialKey = (kind: 'strike' | 'submission') => `cage-life:minigame-tutorial-seen-v2:${kind}`
 
 export default function App() {
   const [game, setGame] = useState<GameState>()
@@ -46,6 +47,7 @@ export default function App() {
   const [relaxedDrills, setRelaxedDrills] = useState(() => localStorage.getItem('cage-life:relaxed-drills') === 'on')
   const saveQueue = useRef<Promise<void>>(Promise.resolve())
   const playedCue = useRef<string | undefined>(undefined)
+  const gameScroll = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     Promise.all([loadGame(), listBiographies()]).then(([saved, archived]) => {
@@ -75,6 +77,17 @@ export default function App() {
     else if (game.phase === 'critical') playThreatCue(fight.opponentIntent.threatLevel)
   }, [game, sfxEnabled])
 
+  useLayoutEffect(() => {
+    if (gameScroll.current) {
+      gameScroll.current.scrollTop = 0
+      gameScroll.current.scrollLeft = 0
+    }
+    document.documentElement.scrollTop = 0
+    document.documentElement.scrollLeft = 0
+    document.body.scrollTop = 0
+    document.body.scrollLeft = 0
+  }, [game, loading])
+
   const dispatch = (command: GameCommand) => {
     if (sfxEnabled) unlockAudio()
     setGame((current) => current ? advance(current, command).state : current)
@@ -88,11 +101,9 @@ export default function App() {
   }
 
   const toggleRelaxedDrills = () => {
-    setRelaxedDrills((current) => {
-      const next = !current
-      localStorage.setItem('cage-life:relaxed-drills', next ? 'on' : 'off')
-      return next
-    })
+    const next = !relaxedDrills
+    setRelaxedDrills(next)
+    localStorage.setItem('cage-life:relaxed-drills', next ? 'on' : 'off')
   }
 
   const resetRun = async () => {
@@ -117,7 +128,7 @@ export default function App() {
   return (
     <main className="game-shell">
       <GameHeader game={game} onOverlay={setOverlay} onReset={() => setShowResetConfirmation(true)} sfxEnabled={sfxEnabled} onToggleSfx={toggleSfx} relaxedDrills={relaxedDrills} onToggleRelaxedDrills={toggleRelaxedDrills} />
-      <div className="game-scroll" aria-live="polite">
+      <div ref={gameScroll} className="game-scroll" aria-live="polite">
         {game.lastMessage && <div className="notice"><span>最新</span>{game.lastMessage}</div>}
         <GameView game={game} dispatch={dispatch} onNew={resetRun} relaxedDrills={relaxedDrills} />
       </div>
@@ -132,6 +143,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
   const [name, setName] = useState('')
   const [region, setRegion] = useState<Region>('taiwan')
   const [motive, setMotive] = useState<Motive>('prove')
+  const [startingExperience, setStartingExperience] = useState<StartingExperience>('hobbyist')
   const [seed, setSeed] = useState(randomSeed())
   const [showHall, setShowHall] = useState(false)
 
@@ -166,13 +178,26 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
           </div>
         </fieldset>
 
+        <fieldset>
+          <legend>你的起點</legend>
+          <div className="choice-list compact experience-list">
+            {([
+              ['normie', '普通人', '五項技能都是 Lv.0，從帶點荒謬的草根試煉開始。'],
+              ['hobbyist', '業餘愛好者', '帶著一項隨 Seed 揭曉的武術背景，從正式業餘賽起步。'],
+              ['semi-pro', '半職業選手', '已經有成形打法與較多招式，直接進入地區職業舞台。'],
+            ] as Array<[StartingExperience, string, string]>).map(([value, label, detail]) => <button key={value} type="button" className={`choice-row ${startingExperience === value ? 'selected' : ''}`} onClick={() => setStartingExperience(value)}>
+              <strong>{label}</strong><span>{detail}</span>
+            </button>)}
+          </div>
+        </fieldset>
+
         <div className="seed-row">
           <label className="field-label" htmlFor="seed">世界 Seed</label>
           <div><input id="seed" value={seed} maxLength={16} onChange={(event) => setSeed(event.target.value.toUpperCase())} /><button type="button" className="icon-button" onClick={() => setSeed(randomSeed())} aria-label="重新產生 Seed">換</button></div>
           <small>遊戲版本、Seed 和選擇都相同，就會走出同一段人生。</small>
         </div>
 
-        <button className="primary-action" disabled={!seed.trim()} onClick={() => onStart(createNewRun({ name: name.trim(), region, motive, seed }))}>
+        <button className="primary-action" disabled={!seed.trim()} onClick={() => onStart(createNewRun({ name: name.trim(), region, motive, seed, startingExperience }))}>
           <span>開始拳手生涯</span><small>開始後將揭曉武術背景與先天條件</small>
         </button>
         <button type="button" className="text-button" onClick={() => setShowHall((value) => !value)}>生涯殿堂 · {biographies.length}</button>
@@ -194,8 +219,8 @@ function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx, relaxed
         <small>{fighter.age} 歲 · {fighter.weightClass} · {fighter.wins}-{fighter.losses}-{fighter.draws}</small>
       </div>
       <div className="header-actions">
-        <button type="button" onClick={onToggleSfx} aria-label={sfxEnabled ? '關閉音效' : '開啟音效'} title={sfxEnabled ? '音效開啟' : '音效關閉'}>{sfxEnabled ? '聲效' : '靜音'}</button>
         <button type="button" onClick={onToggleRelaxedDrills} aria-label={relaxedDrills ? '關閉寬鬆訓練節奏' : '開啟寬鬆訓練節奏'} title="訓練操作節奏">{relaxedDrills ? '寬鬆' : '節奏'}</button>
+        <button type="button" onClick={onToggleSfx} aria-label={sfxEnabled ? '關閉音效' : '開啟音效'} title={sfxEnabled ? '音效開啟' : '音效關閉'}>{sfxEnabled ? '聲效' : '靜音'}</button>
         <button type="button" onClick={() => onOverlay('status')} aria-label={t('status')}>狀態</button>
         <button type="button" onClick={() => onOverlay('history')} aria-label={t('history')}>歷程</button>
         <button type="button" className="reset-button" onClick={onReset}>重置</button>
@@ -210,6 +235,7 @@ function GameView({ game, dispatch, onNew, relaxedDrills }: { game: GameState; d
     case 'offer': return <OfferView game={game} dispatch={dispatch} />
     case 'camp': return <CampView game={game} dispatch={dispatch} relaxedDrills={relaxedDrills} />
     case 'camp-drill': return <CampDrillView game={game} dispatch={dispatch} />
+    case 'training-reward': return <TrainingRewardView game={game} dispatch={dispatch} />
     case 'life': return <LifeView game={game} dispatch={dispatch} />
     case 'growth': return <GrowthView game={game} dispatch={dispatch} />
     case 'weight': return <WeightView game={game} dispatch={dispatch} />
@@ -225,7 +251,7 @@ function GameView({ game, dispatch, onNew, relaxedDrills }: { game: GameState; d
 
 function RevealView({ game, dispatch }: ViewProps) {
   const fighter = game.fighter
-  const initialNodes = TECHNIQUE_NODES.filter((node) => fighter.unlockedNodes.includes(node.id))
+  const initialMoves = FIGHT_INTENTS.filter((move) => fighter.learnedMoves.includes(move.id))
   const weightClasses = [...getWeightOptions(fighter.naturalWeight)].sort((a, b) => a.limit - b.limit)
   const expectedWeightRange = weightClasses[0].name === weightClasses.at(-1)!.name
     ? weightClasses[0].name
@@ -234,7 +260,7 @@ function RevealView({ game, dispatch }: ViewProps) {
     <Screen title="命運揭曉" kicker={`${REGION_LABELS[fighter.region]} · ${game.seed}`}>
       <div className="reveal-card">
         <span className="stamp">18 歲</span>
-        <p className="eyebrow">你的武術背景</p>
+        <p className="eyebrow">{fighter.startingExperience === 'normie' ? '你的起點' : '你的武術背景'}</p>
         <h2>{fighter.background}</h2>
         <p>{fighter.backgroundDescription}</p>
       </div>
@@ -242,14 +268,16 @@ function RevealView({ game, dispatch }: ViewProps) {
         <Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} />
         <Metric label="身高" value={`${fighter.heightCm} cm`} note="影響站立距離與重心" />
         <Metric label="臂展" value={`${fighter.reachCm} cm`} note={`${fighter.reachCm - fighter.heightCm >= 4 ? '遠距覆蓋較長' : fighter.reachCm - fighter.heightCm <= -2 ? '近身結構緊湊' : '接近身高比例'}`} />
-        <Metric label="目前評估" value={getPotentialLabel(Math.max(...Object.values(fighter.technique)), Math.max(...Object.values(fighter.techniquePotential)))} note="這只是教練現階段的判斷" />
+        <Metric label="生涯起點" value={experienceLabel(fighter.startingExperience)} note={STAGE_LABELS[game.stage]} />
         <Metric label="預期量級區間" value={expectedWeightRange} note="依減重策略而定" />
       </div>
-      <section>
-        <SectionTitle title="起步技術" subtitle="這兩項技術由武術背景決定，無法更換。" />
-        <div className="initial-nodes">
-          {initialNodes.map((node) => <div className="mini-node unlocked" key={node.id}><span>{BRANCH_META[node.branch as Branch].short}</span><div><strong>{node.name}</strong><small>{node.effect}</small></div></div>)}
-        </div>
+      <SkillOverview fighter={fighter} />
+      <section><SectionTitle title="天生特質" subtitle="稀有度影響力量；每項效果都有明確生效條件。" /><TraitGrid traits={fighter.traits} /></section>
+      <section><SectionTitle title="共同基本動作" subtitle="每位拳手都會保有足以繼續比賽的基礎動作，不需要花費技能 XP 解鎖。" />
+        <div className="empty-progression">站立觀察、移動防守、防摔繞開、籠邊脫困、下位防護與安全起身，會依當下位置自動加入戰鬥選單。</div>
+      </section>
+      <section><SectionTitle title="已學招式" subtitle={initialMoves.length ? '武術背景提供第一批招式；之後只有透過訓練學會的新招才會加入戰鬥選單。' : '你還沒有受過正式訓練。'} />
+        {initialMoves.length ? <MoveChips moveIds={initialMoves.map((move) => move.id)} /> : <div className="empty-progression">第一次技術訓練會讓一項技能升到 Lv.1，並讓你選擇真正學會的第一招。</div>}
       </section>
       <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_REVEAL' })}>從這裡開始</button></ActionDock>
     </Screen>
@@ -277,6 +305,10 @@ function OfferView({ game, dispatch }: ViewProps) {
               <div><span>他最擅長</span><strong>{BRANCH_META[strength].name}</strong></div>
               <div><span>可以針對</span><strong>{BRANCH_META[opponent.weakness].name}</strong></div>
             </div>
+            <div className="opponent-traits"><span>已知特質</span>{opponent.traits.map((owned) => {
+              const trait = traitDefinition(owned.id)
+              return trait ? <small className={`rarity-${trait.rarity}`} key={owned.id}><b>{trait.name}</b> · {trait.condition}：{trait.effect}</small> : null
+            })}</div>
             <p className="coach-verdict">「{coachVerdict(opponent, offer.riskLabel)}」</p>
             <div className="offer-meta"><span>出場費 NT$ {offer.purse.toLocaleString()}</span><span>{offer.shortNotice ? '短期代打' : '完整備戰'}</span></div>
             {opponent.meetings > 0 && <p className="memory-callout">你們已經交手 {opponent.meetings} 次，彼此都很清楚上次發生了什麼。</p>}
@@ -299,7 +331,7 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
     return relationship ? getRelationshipBenefit(relationship) : undefined
   }
   const techniqueActions: Array<{ id: CampAction; name: string; detail: string; risk: string }> = [
-    { id: 'technique', name: '技術訓練', detail: `打磨${BRANCH_META[branch].name}基本功與已學會的招式`, risk: '疲勞低' },
+    { id: 'technique', name: '技術訓練', detail: `累積${BRANCH_META[branch].name} XP，完成後從 3 個招式中選擇 1 個學會`, risk: '疲勞低' },
     { id: 'sparring', name: '實戰對練', detail: `在對練中快速提升${BRANCH_META[branch].name}，但可能受傷`, risk: '風險高' },
   ]
   const generalActions: Array<{ id: CampAction; name: string; detail: string; risk: string }> = [
@@ -314,6 +346,7 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
       <fieldset className="branch-selector">
         <legend>技術焦點</legend>
         <div className="branch-tabs five">{BRANCHES.map((value) => <button key={value} className={branch === value ? 'selected' : ''} onClick={() => setBranch(value)}>{BRANCH_META[value].short}<small>{BRANCH_META[value].name}</small></button>)}</div>
+        <SkillProgressCard branch={branch} fighter={game.fighter} />
         <div className="choice-list">
           {techniqueActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, branch, relaxedTiming: relaxedDrills })}>
             <strong>{action.name}</strong><span>{action.detail}</span>{benefitFor(action.id) && <small>{benefitFor(action.id)?.effect}</small>}<em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
@@ -326,7 +359,7 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
           <strong>{action.name}</strong><span>{action.detail}</span>{benefitFor(action.id) && <small>{benefitFor(action.id)?.effect}</small>}<em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
         </button>)}
       </div>
-      <div className="camp-log">{relaxedDrills ? '寬鬆節奏：更長的讀取與呼吸窗口，最高獎勵不變。' : ''}{game.campActions.length ? `已完成：${game.campDrillHistory.map((result) => `${campLabel(result.kind)} · ${Math.round(result.score * 100)}%`).join(' → ')}` : relaxedDrills ? '' : '已完成：尚未安排'}</div>
+      <div className="camp-log">{relaxedDrills ? '寬鬆節奏：讀取與執行窗口更長，最高獎勵不變。' : ''}{game.campActions.length ? `已完成：${game.campDrillHistory.map((result) => `${campLabel(result.kind)} · ${Math.round(result.score * 100)}%`).join(' → ')}` : relaxedDrills ? '' : '已完成：尚未安排'}</div>
     </Screen>
   )
 }
@@ -346,16 +379,31 @@ function CampDrillView({ game, dispatch }: ViewProps) {
         <p>{outcome.summary}</p>
         <div className="drill-effect-list">{outcome.effects.map((effect) => <b key={effect}>{effect}</b>)}</div>
       </article>
-      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_CAMP_DRILL_RESULT' })}>{game.campActions.length >= 3 ? '完成營隊，處理生活事件' : '回到訓練營'}</button></ActionDock>
+      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_CAMP_DRILL_RESULT' })}>{outcome.kind === 'technique' && game.trainingMoveChoices?.length ? '選擇這次學會的招式' : game.campActions.length >= 3 ? '完成營隊，處理生活事件' : '回到訓練營'}</button></ActionDock>
     </Screen>
   }
   return <Screen title={drill.title} kicker={`營隊訓練 ${game.campActions.length + 1}/3`}>
     <ContextStrip fighter={game.fighter} />
     <article className="drill-brief"><span>{campLabel(drill.kind)}</span><p>{drill.instruction}</p><small>{drill.relaxedTiming ? '寬鬆節奏已開啟：窗口更長、更寬，最高獎勵不變。' : '完成這個短訓練才會消耗本次時段；表現會帶來額外收益。'}</small></article>
-    {drill.kind === 'recovery'
-      ? <RecoveryDrill challenge={drill} dispatch={dispatch} />
-      : <ChoiceDrill challenge={drill} dispatch={dispatch} />}
+    {drill.mode === 'combo' ? <ComboDrill challenge={drill} dispatch={dispatch} />
+      : drill.mode === 'sparring' ? <LiveSparringDrill challenge={drill} dispatch={dispatch} />
+        : drill.mode === 'film-study' ? <FilmStudyDrill challenge={drill} dispatch={dispatch} />
+          : drill.kind === 'recovery' ? <RecoveryDrill challenge={drill} dispatch={dispatch} />
+            : <ChoiceDrill challenge={drill} dispatch={dispatch} />}
     <button className="text-button" onClick={() => dispatch({ type: 'CANCEL_CAMP_DRILL' })}>返回訓練營，不計入這次時段</button>
+  </Screen>
+}
+
+function TrainingRewardView({ game, dispatch }: ViewProps) {
+  const branch = game.trainingMoveBranch ?? 'boxing'
+  const moves = FIGHT_INTENTS.filter((move) => game.trainingMoveChoices?.includes(move.id))
+  return <Screen title="把訓練變成你的招式" kicker={`${BRANCH_META[branch].name} · Lv.${skillLevel(game.fighter.skills[branch].xp)}`}>
+    <p className="lead">這堂課讓你看見三條不同路線。選擇一招真正帶進下一場比賽；沒有重抽，也不能用點數把其餘招式一起買走。</p>
+    <div className="move-learning-list">{moves.map((move) => <button className="choice-row move-learning-card" key={move.id} onClick={() => dispatch({ type: 'LEARN_TRAINING_MOVE', moveId: move.id })}>
+      <strong>{move.label}<small>Lv.{minimumMoveLevel(move)} · {move.category === 'offense' ? '進攻' : move.category === 'transition' ? '轉位' : '防守'}</small></strong>
+      <span>{move.description}</span>
+      <em>{move.submission ? '降服路線' : move.cleanPosition ? `成功可進入 ${positionLabel(move.cleanPosition)}` : `終結壓力 ${move.effects.finishPressure}`}</em>
+    </button>)}</div>
   </Screen>
 }
 
@@ -366,13 +414,179 @@ function drillChoiceLabel(value: string) {
   if (value === 'pattern') return '記下固定節奏'
   if (value === 'power') return '只找重擊'
   if (value === 'random') return '隨機出招'
-  return BRANCH_META[value as Branch]?.name ?? value
+  return FIGHT_INTENTS.find((move) => move.id === value)?.label ?? OPENING_LABELS[value as keyof typeof OPENING_LABELS] ?? BRANCH_META[value as Branch]?.name ?? value
 }
 
 function choiceResult(challenge: CampDrillChallenge, answers: string[], elapsedMs: number): CampDrillResult {
   if (challenge.kind === 'technique') return { kind: 'technique', answers, elapsedMs }
   if (challenge.kind === 'sparring') return { kind: 'sparring', answers, elapsedMs }
+  if (challenge.mode === 'film-study') return { kind: 'film', mode: 'film-study', answers, elapsedMs }
   return { kind: 'film', answers, elapsedMs }
+}
+
+type ComboChallenge = Extract<CampDrillChallenge, { mode: 'combo' }>
+type SparringChallenge = Extract<CampDrillChallenge, { mode: 'sparring' }>
+type FilmChallenge = Extract<CampDrillChallenge, { mode: 'film-study' }>
+
+function TrainingTutorial({ kind, onStart }: { kind: 'combo' | 'sparring' | 'film-study'; onStart: () => void }) {
+  const copy = kind === 'combo'
+    ? ['記住三拍', '教練只完整示範一次；開始後依序選出實際招式。', '踩準節奏', '每一拍越接近中央時機，額外成長越高。']
+    : kind === 'sparring'
+      ? ['先讀威脅', '看清楚對手的具體招式、目前位置與已出現破綻。', '再親手執行', '選好回應後，在時機線進入亮區時出手。']
+      : ['看片段', '三段攻防會包含一個重複習慣。', '做計畫', '找出招式、留下的破綻，以及真正可執行的反擊。']
+  return <section className="training-tutorial" aria-label="訓練說明">
+    <span>第一次進行</span><h2>{copy[0]}</h2><p>{copy[1]}</p><h3>{copy[2]}</h3><p>{copy[3]}</p>
+    <button type="button" className="primary-action" onClick={onStart}>明白，開始訓練</button>
+  </section>
+}
+
+function ComboDrill({ challenge, dispatch }: { challenge: ComboChallenge; dispatch: (command: GameCommand) => void }) {
+  const tutorialKey = 'cage-life:training-tutorial:combo-v1'
+  const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(tutorialKey) !== 'true')
+  const [previewing, setPreviewing] = useState(true)
+  const [stepIndex, setStepIndex] = useState(0)
+  const [expired, setExpired] = useState(false)
+  const reduceMotion = useMemo(() => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches), [])
+  const inputsRef = useRef<Array<{ moveId: string; timingErrorMs: number }>>([])
+  const startedAt = useRef(performance.now())
+  const stepStartedAt = useRef(performance.now())
+  const resolvedRef = useRef(false)
+  const beginInputs = () => { startedAt.current = performance.now(); stepStartedAt.current = performance.now(); setPreviewing(false) }
+  const dismissTutorial = () => { localStorage.setItem(tutorialKey, 'true'); setShowTutorial(false) }
+  const finish = () => {
+    if (resolvedRef.current) return
+    resolvedRef.current = true
+    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: { kind: 'technique', mode: 'combo', inputs: inputsRef.current, elapsedMs: Math.min(challenge.durationMs, Math.max(0, performance.now() - startedAt.current)) } })
+  }
+  useEffect(() => {
+    if (showTutorial || !previewing || reduceMotion) return
+    const timer = window.setTimeout(beginInputs, challenge.previewMs)
+    return () => window.clearTimeout(timer)
+  }, [challenge.previewMs, previewing, reduceMotion, showTutorial])
+  useEffect(() => {
+    if (showTutorial || previewing) return
+    const timer = window.setTimeout(() => setExpired(true), challenge.durationMs)
+    return () => window.clearTimeout(timer)
+  }, [challenge.durationMs, previewing, showTutorial])
+  const choose = (moveId: string) => {
+    if (expired || previewing) return
+    const now = performance.now()
+    const timingErrorMs = reduceMotion ? 0 : Math.abs(now - (stepStartedAt.current + challenge.beatMs / 2))
+    inputsRef.current = [...inputsRef.current, { moveId, timingErrorMs }]
+    const next = stepIndex + 1
+    if (next >= challenge.steps.length) finish()
+    else { stepStartedAt.current = now; setStepIndex(next) }
+  }
+  if (showTutorial) return <TrainingTutorial kind="combo" onStart={dismissTutorial} />
+  const step = challenge.steps[stepIndex]
+  return <section className="camp-drill combo-drill" aria-label="技術組合小遊戲">
+    <div className="drill-progress"><span>組合 {Math.min(stepIndex, challenge.steps.length)}/{challenge.steps.length}</span><i><b style={{ width: `${stepIndex / challenge.steps.length * 100}%` }} /></i><small>{challenge.comboName}</small></div>
+    {previewing ? <div className="combo-preview">
+      <span>教練示範</span><div>{challenge.steps.map((item, index) => <b key={`${item.moveId}-${index}`}>{index + 1}<small>{drillChoiceLabel(item.moveId)}</small></b>)}</div>
+      {reduceMotion && <button type="button" className="primary-action" onClick={beginInputs}>記住了，開始三拍</button>}
+    </div> : expired ? <><p className="drill-cue">時間到。已完成的拍數仍會記錄，基礎成長不會消失。</p><button type="button" className="primary-action" onClick={finish}>記錄這次訓練</button></>
+      : <>
+        <p className="drill-cue">第 {stepIndex + 1} 拍：選出下一個動作</p>
+        <div className="training-timing" style={{ '--training-cycle': `${challenge.beatMs}ms` } as React.CSSProperties}><i /><span /></div>
+        <div className="drill-options">{step.options.map((moveId) => <button type="button" key={moveId} onClick={() => choose(moveId)}>{drillChoiceLabel(moveId)}</button>)}</div>
+      </>}
+    <p className="minigame-instruction">順序正確佔 65%，踩準每一拍佔 35%；失誤仍會完成訓練。</p>
+  </section>
+}
+
+function LiveSparringDrill({ challenge, dispatch }: { challenge: SparringChallenge; dispatch: (command: GameCommand) => void }) {
+  const tutorialKey = 'cage-life:training-tutorial:sparring-v1'
+  const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(tutorialKey) !== 'true')
+  const [exchangeIndex, setExchangeIndex] = useState(0)
+  const [stage, setStage] = useState<'choose' | 'timing' | 'feedback'>('choose')
+  const [selectedMoveId, setSelectedMoveId] = useState<string>()
+  const [lastOutcome, setLastOutcome] = useState<'clean' | 'contested' | 'countered'>()
+  const [position, setPosition] = useState(challenge.exchanges[0].position)
+  const [openings, setOpenings] = useState(challenge.exchanges[0].openings)
+  const [expired, setExpired] = useState(false)
+  const inputsRef = useRef<Array<{ moveId: string; timingErrorMs: number }>>([])
+  const startedAt = useRef(performance.now())
+  const timingStartedAt = useRef(performance.now())
+  const resolvedRef = useRef(false)
+  const reduceMotion = useMemo(() => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches), [])
+  const cycleMs = challenge.relaxedTiming ? 1_900 : 1_300
+  const exchange = challenge.exchanges[exchangeIndex]
+  const selected = exchange.options.find((option) => option.moveId === selectedMoveId)
+  const dismissTutorial = () => { localStorage.setItem(tutorialKey, 'true'); startedAt.current = performance.now(); setShowTutorial(false) }
+  const finish = () => {
+    if (resolvedRef.current) return
+    resolvedRef.current = true
+    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: { kind: 'sparring', mode: 'sparring', inputs: inputsRef.current, elapsedMs: Math.min(challenge.durationMs, Math.max(0, performance.now() - startedAt.current)) } })
+  }
+  useEffect(() => {
+    if (showTutorial) return
+    const timer = window.setTimeout(() => setExpired(true), challenge.durationMs)
+    return () => window.clearTimeout(timer)
+  }, [challenge.durationMs, showTutorial])
+  const armTiming = (moveId: string) => { setSelectedMoveId(moveId); timingStartedAt.current = performance.now(); setStage('timing') }
+  const execute = () => {
+    if (!selected || expired) return
+    const timingErrorMs = reduceMotion ? 0 : Math.abs(performance.now() - (timingStartedAt.current + cycleMs / 2))
+    inputsRef.current = [...inputsRef.current, { moveId: selected.moveId, timingErrorMs }]
+    const outcome = trainingSparringOutcome(selected.matchup, timingErrorMs, challenge.relaxedTiming)
+    setLastOutcome(outcome)
+    setPosition(outcome === 'clean' ? selected.cleanPosition : outcome === 'contested' ? selected.contestedPosition : selected.counteredPosition)
+    setOpenings([...new Set([...openings, ...selected.creates])].slice(-3))
+    setStage('feedback')
+  }
+  const advanceExchange = () => {
+    if (exchangeIndex + 1 >= challenge.exchanges.length) { finish(); return }
+    setExchangeIndex((value) => value + 1)
+    setSelectedMoveId(undefined)
+    setLastOutcome(undefined)
+    setStage('choose')
+  }
+  if (showTutorial) return <TrainingTutorial kind="sparring" onStart={dismissTutorial} />
+  const threat = FIGHT_INTENTS.find((move) => move.id === exchange.threatMoveId)!
+  return <section className="camp-drill live-sparring-drill" aria-label="實戰對練小遊戲">
+    <div className="drill-progress"><span>攻防 {exchangeIndex + 1}/{challenge.exchanges.length}</span><i><b style={{ width: `${exchangeIndex / challenge.exchanges.length * 100}%` }} /></i><small>{positionLabel(position)}</small></div>
+    <div className="training-state"><span>目前位置 <b>{positionLabel(position)}</b></span><span>可追蹤破綻 {openings.length ? openings.map((key) => OPENING_LABELS[key]).join('、') : '尚未建立'}</span></div>
+    {expired ? <><p className="drill-cue">對練時間到。已完成的攻防照常計分。</p><button type="button" className="primary-action" onClick={finish}>記錄這次對練</button></>
+      : stage === 'choose' ? <>
+        <article className="sparring-threat"><span>對手下一步</span><strong>{threat.label}</strong><p>{exchange.cue}</p></article>
+        <div className="sparring-options">{exchange.options.map((option) => {
+          const move = FIGHT_INTENTS.find((item) => item.id === option.moveId)!
+          return <button type="button" key={option.moveId} onClick={() => armTiming(option.moveId)}><strong>{move.label}</strong><small>{move.description}</small></button>
+        })}</div>
+      </> : stage === 'timing' ? <>
+        <p className="drill-cue">{drillChoiceLabel(selectedMoveId!)}已經選定。抓住亮區執行。</p>
+        <div className="training-timing" style={{ '--training-cycle': `${cycleMs}ms` } as React.CSSProperties}><i /><span /></div>
+        <button type="button" className="primary-action timing-strike" onClick={execute}>在窗口出手</button>
+      </> : <div className={`sparring-feedback ${lastOutcome}`}>
+        <span>{lastOutcome === 'clean' ? '乾淨奏效' : lastOutcome === 'contested' ? '互有得失' : '遭到破解'}</span>
+        <strong>{drillChoiceLabel(selectedMoveId!)}</strong><p>{selected?.reason}</p>
+        <button type="button" className="primary-action" onClick={advanceExchange}>{exchangeIndex + 1 >= challenge.exchanges.length ? '完成對練' : '進入下一段攻防'}</button>
+      </div>}
+    <p className="minigame-instruction">戰術判斷佔 70%，執行時機佔 30%；位置與破綻會保留到下一段。</p>
+  </section>
+}
+
+function FilmStudyDrill({ challenge, dispatch }: { challenge: FilmChallenge; dispatch: (command: GameCommand) => void }) {
+  const tutorialKey = 'cage-life:training-tutorial:film-v1'
+  const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(tutorialKey) !== 'true')
+  const [watching, setWatching] = useState(true)
+  const [beat, setBeat] = useState(0)
+  const reduceMotion = useMemo(() => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches), [])
+  const dismissTutorial = () => { localStorage.setItem(tutorialKey, 'true'); setShowTutorial(false) }
+  useEffect(() => {
+    if (showTutorial || !watching || reduceMotion) return
+    const timer = window.setInterval(() => setBeat((current) => {
+      if (current >= challenge.sequenceMoveIds.length - 1) { window.clearInterval(timer); window.setTimeout(() => setWatching(false), 500); return current }
+      return current + 1
+    }), 850)
+    return () => window.clearInterval(timer)
+  }, [challenge.sequenceMoveIds.length, reduceMotion, showTutorial, watching])
+  if (showTutorial) return <TrainingTutorial kind="film-study" onStart={dismissTutorial} />
+  return <section className="film-study-drill" aria-label="影片研究小遊戲">
+    <div className="film-strip"><header><span>對手影片</span><strong>{challenge.opponentName}</strong></header><div>{challenge.sequenceMoveIds.map((moveId, index) => <article className={watching && index === beat ? 'active' : ''} key={`${moveId}-${index}`}><b>{index + 1}</b><strong>{drillChoiceLabel(moveId)}</strong><small>{FIGHT_INTENTS.find((move) => move.id === moveId)?.description}</small></article>)}</div></div>
+    {watching ? <div className="film-watching"><p>{reduceMotion ? '依序讀完三段攻防，再開始分析。' : '影片播放中……留意哪個動作重複出現。'}</p>{reduceMotion && <button type="button" className="primary-action" onClick={() => setWatching(false)}>看完了，開始分析</button>}</div>
+      : <ChoiceDrill challenge={challenge} dispatch={dispatch} />}
+  </section>
 }
 
 function ChoiceDrill({ challenge, dispatch }: { challenge: CampDrillChallenge; dispatch: (command: GameCommand) => void }) {
@@ -384,7 +598,7 @@ function ChoiceDrill({ challenge, dispatch }: { challenge: CampDrillChallenge; d
   const finish = (next: string[]) => {
     if (resolvedRef.current) return
     resolvedRef.current = true
-    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: choiceResult(challenge, next, Math.max(0, performance.now() - startedAt.current)) })
+    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: choiceResult(challenge, next, Math.min(challenge.durationMs, Math.max(0, performance.now() - startedAt.current))) })
   }
   useEffect(() => {
     const timer = window.setTimeout(() => setExpired(true), challenge.durationMs)
@@ -421,7 +635,7 @@ function RecoveryDrill({ challenge, dispatch }: { challenge: CampDrillChallenge;
   const finish = (durations = heldDurationsRef.current) => {
     if (resolvedRef.current) return
     resolvedRef.current = true
-    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: { kind: 'recovery', heldDurationsMs: durations, elapsedMs: Math.max(0, performance.now() - startedAt.current) } })
+    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: { kind: 'recovery', heldDurationsMs: durations, elapsedMs: Math.min(challenge.durationMs, Math.max(0, performance.now() - startedAt.current)) } })
   }
   useEffect(() => {
     const timer = window.setTimeout(() => setExpired(true), challenge.durationMs)
@@ -484,63 +698,15 @@ function LifeView({ game, dispatch }: ViewProps) {
 }
 
 function GrowthView({ game, dispatch }: ViewProps) {
-  const afterFight = Boolean(game.insightGained)
-  const hasInsight = game.fighter.insight > 0
+  const awards = (game.traitAwards ?? []).map((id) => traitDefinition(id)).filter(Boolean)
   return (
-    <Screen title={afterFight ? '新的領悟' : '決定打法'} kicker={`${game.fighter.insight} 點技術領悟可用`}>
-      {afterFight && <div className="growth-award"><span>＋{game.insightGained}</span><div><strong>你從這場比賽中學到了東西</strong><small>現在可以學習新技術，也可以把點數留給更高階的招式。</small></div></div>}
-      {hasInsight ? <>
-        <p className="lead">技術一旦學會就不能反悔。除了提升能力，也能在特定局面提供新的應對方式。</p>
-        <TechniqueTree game={game} dispatch={dispatch} interactive />
-      </> : <div className="growth-complete"><span>✓</span><div><strong>本次成長完成</strong><small>目前沒有可用的技術領悟，下場比賽後再回來看看。</small></div></div>}
-      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{hasInsight ? `保留 ${game.fighter.insight} 點，繼續` : '繼續生涯'}</button></ActionDock>
+    <Screen title={awards.length ? '打法成為了特質' : '實戰留下的痕跡'} kicker={awards.length ? `${awards.length} 項新特質` : '生涯進度'}>
+      {awards.length ? <div className="trait-awards">{awards.map((trait) => trait && <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity)}</span><h2>{trait.name}</h2><p>{trait.description}</p><strong>{trait.effect}</strong><small>生效：{trait.condition}</small></article>)}</div>
+        : <div className="growth-complete"><span>✓</span><div><strong>沒有憑空出現的新能力</strong><small>真正的招式來自訓練；重複的實戰行為則會逐步形成特質。</small></div></div>}
+      {game.fighter.traitProgress.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="第一次做出符合條件的表現後，進度會保持可見。" /><TraitProgressList fighter={game.fighter} /></>}
+      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>繼續生涯</button></ActionDock>
     </Screen>
   )
-}
-
-function TechniqueTree({ game, dispatch, interactive = false }: { game: GameState; dispatch?: (command: GameCommand) => void; interactive?: boolean }) {
-  const [branch, setBranch] = useState<Branch | 'hybrid'>('boxing')
-  const [selected, setSelected] = useState<TechniqueNode>()
-  const nodes = TECHNIQUE_NODES.filter((node) => node.branch === branch)
-  return <>
-    <div className="branch-tabs tree-tabs">{[...BRANCHES, 'hybrid' as const].map((value) => <button key={value} className={branch === value ? 'selected' : ''} style={{ '--branch': value === 'hybrid' ? '#d7bd83' : BRANCH_META[value].accent } as React.CSSProperties} onClick={() => setBranch(value)}>{value === 'hybrid' ? '流' : BRANCH_META[value].short}<small>{value === 'hybrid' ? '流派' : BRANCH_META[value].name}</small></button>)}</div>
-    <div className="tech-tree" style={{ '--branch': branch === 'hybrid' ? '#d7bd83' : BRANCH_META[branch].accent } as React.CSSProperties}>
-      {nodes.map((node, index) => {
-        const unlocked = game.fighter.unlockedNodes.includes(node.id)
-        const status = getUnlockStatus(game, node.id)
-        return <button key={node.id} className={`tech-node ${unlocked ? 'unlocked' : status.ok ? 'available' : 'locked'}`} onClick={() => setSelected(node)}>
-          <span className="node-glyph">{unlocked ? '✓' : node.tier}</span>
-          <div><strong>{node.name}</strong><small>{unlocked ? `精通 ${masteryLabel(game.fighter.mastery[node.id]?.value ?? 0)} · ${game.fighter.mastery[node.id]?.value ?? 0}` : status.ok ? `可解鎖 · ${node.cost} 點` : status.reason}</small></div>
-          {index < nodes.length - 1 && <i className="tree-line" />}
-        </button>
-      })}
-    </div>
-    {selected && <div className="sheet-backdrop" role="presentation" onClick={() => setSelected(undefined)}>
-      <section className="detail-sheet" role="dialog" aria-modal="true" aria-labelledby="node-title" onClick={(event) => event.stopPropagation()}>
-        <div className="sheet-handle" />
-        <div className="sheet-scroll">
-          <p className="eyebrow">{selected.branch === 'hybrid' ? '跨分支流派' : BRANCH_META[selected.branch].name} · 第 {selected.tier} 階</p>
-          <h2 id="node-title">{selected.name}</h2>
-          <p>{selected.description}</p>
-          <div className="effect-block"><span>學會後</span><strong>{selected.effect}</strong></div>
-          {selected.tradeoff && <div className="tradeoff-block"><span>代價</span><strong>{selected.tradeoff}</strong></div>}
-          {selected.evidence && <p className="requirement">實戰條件：{selected.evidence.label}（目前 {game.fighter.evidence[selected.evidence.key]}）</p>}
-          <p className="permanent-note">一旦學會，這段生涯中便無法取消。</p>
-        </div>
-        <div className="sheet-actions">
-          {game.fighter.unlockedNodes.includes(selected.id) ? <button className="primary-action" onClick={() => setSelected(undefined)}>已學會這項技術</button> : interactive ? <button className="primary-action" disabled={!getUnlockStatus(game, selected.id).ok} onClick={() => { dispatch?.({ type: 'UNLOCK_NODE', nodeId: selected.id }); setSelected(undefined) }}>學習技術 · {selected.cost} 點</button> : null}
-          <button className="secondary-action" onClick={() => setSelected(undefined)}>關閉</button>
-        </div>
-      </section>
-    </div>}
-  </>
-}
-
-function masteryLabel(value: number) {
-  if (value >= 90) return '專家'
-  if (value >= 60) return '穩定'
-  if (value >= 25) return '熟練'
-  return '初學'
 }
 
 function WeightView({ game, dispatch }: ViewProps) {
@@ -676,8 +842,13 @@ function CriticalView({ game, dispatch }: ViewProps) {
   const resolve = (optionId: string) => { setShowAllMoves(false); dispatch({ type: 'RESOLVE_CRITICAL', optionId }) }
   const outcomeLabel = fight.lastNarrative?.outcome === 'clean' ? '乾淨奏效' : fight.lastNarrative?.outcome === 'contested' ? '互有得失' : '遭到破解'
   return <Screen title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · ${momentum}`}>
+    {fight.positionEntry && <PositionEntryDialog game={game} dispatch={dispatch} />}
     <FightArena game={game} compact showLiveLog={false} />
     <CornerDirective fight={fight} />
+    <div className="fight-trait-strip"><span>你的特質</span>{game.fighter.traits.map((owned) => {
+      const trait = traitDefinition(owned.id)
+      return trait ? <b className={`rarity-${trait.rarity}`} key={owned.id} title={`${trait.condition}：${trait.effect}`}>{trait.name}</b> : null
+    })}</div>
     {fight.lastNarrative && <article className={`narrative-beat ${fight.lastNarrative.outcome}`}>
       <header><span>上一段攻防</span><strong>{outcomeLabel}</strong></header>
       <p>{fight.lastNarrative.paragraph}</p>
@@ -689,7 +860,7 @@ function CriticalView({ game, dispatch }: ViewProps) {
     {fight.opponentOpenings.length > 0 && <div className="opening-strip"><span>可利用破綻</span>{fight.opponentOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
     {fight.playerOpenings.length > 0 && <div className="opening-strip danger"><span>你的防守空檔</span>{fight.playerOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
     {fight.beatHistory.length > 0 && <AdaptationWarning fight={fight} />}
-    <div className="move-section-label"><span>關鍵選擇</span><small>克制、招牌、轉位與安全路線</small></div>
+    <div className="move-section-label"><span>關鍵選擇</span><small>有利選擇、招牌、轉位與安全路線</small></div>
     <div className="choice-list">{prompt.featuredOptions.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} />)}</div>
     {remaining > 0 && <button className="more-moves-button" onClick={() => { setMoveBranch('all'); setShowAllMoves(true) }}>查看其餘 {remaining} 種招式 <span>進攻、轉位與防守</span></button>}
     {showAllMoves && <div className="sheet-backdrop move-sheet-backdrop" role="presentation" onClick={() => setShowAllMoves(false)}>
@@ -706,6 +877,27 @@ function CriticalView({ game, dispatch }: ViewProps) {
       </section>
     </div>}
   </Screen>
+}
+
+function PositionEntryDialog({ game, dispatch }: ViewProps) {
+  const entry = game.fight!.positionEntry!
+  const visual = POSITION_VISUALS[entry.position]
+  const ownerLabel = visual.owner === 'player' ? '你先取得主動位置' : visual.owner === 'opponent' ? '對手先取得主動位置' : '雙方仍在爭奪位置'
+  const tactic = ({ distance: '保持距離', pressure: '向前壓迫', takedown: '尋找抱摔', cage: '籠邊消耗', recover: '放慢節奏' } as const)[entry.plan]
+  return <div className="position-entry-backdrop">
+    <section className={`position-entry-dialog owner-${visual.owner}`} role="dialog" aria-modal="true" aria-labelledby="position-entry-title" aria-describedby="position-entry-explanation">
+      <p className="eyebrow">ROUND {entry.round} · 戰術落點</p>
+      <div className="position-entry-route" aria-label={`選擇戰術：${tactic}，目前位置：${positionLabel(entry.position)}`}>
+        <span><small>你的戰術</small><strong>{tactic}</strong></span>
+        <i aria-hidden="true">→</i>
+        <span><small>目前位置</small><strong>{positionLabel(entry.position)}</strong></span>
+      </div>
+      <h2 id="position-entry-title">你怎麼來到這個位置？</h2>
+      <p id="position-entry-explanation" className="position-entry-story">{entry.explanation}</p>
+      <div className="position-entry-meaning"><span>{ownerLabel}</span><p><strong>現在意味著：</strong>{visual.detail}</p></div>
+      <button type="button" autoFocus className="primary-action" onClick={() => dispatch({ type: 'ACK_POSITION_ENTRY' })}>明白，開始攻防</button>
+    </section>
+  </div>
 }
 
 function AdaptationWarning({ fight }: { fight: FightState }) {
@@ -732,7 +924,7 @@ function ThreatCard({ game }: { game: GameState }) {
 }
 
 function CombatOption({ option, onChoose, compact = false }: { option: CriticalOption; onChoose: (id: string) => void; compact?: boolean }) {
-  const matchupLabel = option.matchup === 'favored' ? '克制' : option.matchup === 'exposed' ? '受制' : '中性'
+  const matchupLabel = option.matchup === 'favored' ? '有利選擇' : option.matchup === 'exposed' ? '容易被反制' : '勝負均等'
   return <button className={`choice-row critical-option matchup-${option.matchup}`} onClick={() => onChoose(option.id)}>
     <div className="option-head"><strong>{option.label}</strong><b>{matchupLabel}</b></div>
     {!compact && <span>{option.description}</span>}
@@ -750,15 +942,16 @@ function CombatOption({ option, onChoose, compact = false }: { option: CriticalO
 function FinishMinigameView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const finishWindow = fight.activeFinishWindow!
+  const tutorialKey = minigameTutorialKey(finishWindow.kind)
   const [ready, setReady] = useState(false)
-  const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(MINIGAME_TUTORIAL_KEY) !== 'true')
+  const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(tutorialKey) !== 'true')
   useEffect(() => {
     if (showTutorial) return
     const timer = window.setTimeout(() => setReady(true), 700)
     return () => window.clearTimeout(timer)
   }, [showTutorial])
   const closeTutorial = () => {
-    localStorage.setItem(MINIGAME_TUTORIAL_KEY, 'true')
+    localStorage.setItem(tutorialKey, 'true')
     setShowTutorial(false)
   }
   const attacking = finishWindow.attacker === 'player'
@@ -1024,20 +1217,15 @@ function FightArena({ game, compact = false, showLiveLog = true }: { game: GameS
   const fight = game.fight!
   const opponent = getOpponent(game)!
   const lastBeat = fight.beatHistory.at(-1)
-  const counteredTakedownEntry = fight.plan === 'takedown' && fight.position === 'bottom' && fight.beatHistory.length === 0
   const playerHit = lastBeat?.damageEvents.find((event) => event.side === 'player')
   const opponentHit = lastBeat?.damageEvents.find((event) => event.side === 'opponent')
-  const critical = [...Object.values(fight.playerDamageByPart), ...Object.values(fight.opponentDamageByPart)].some((value) => value >= 75)
+  const critical = (['head', 'body', 'leg'] as const).some((part) => damageSeverity(fight.playerDamageByPart[part], part) === 'critical' || damageSeverity(fight.opponentDamageByPart[part], part) === 'critical')
   return <section key={`${fight.round}-${fight.sequenceStep}-${lastBeat?.outcome ?? 'ready'}`} className={`fight-arena ${compact ? 'compact' : ''} ${lastBeat ? `impact-${lastBeat.outcome}` : ''} ${playerHit ? `player-hit-${playerHit.part}` : ''} ${opponentHit ? `opponent-hit-${opponentHit.part}` : ''} ${critical ? 'critical-vignette' : ''}`}>
     <div className="fight-bars">
       <div><StatusBar label={game.fighter.name} value={fight.playerStamina} tone="player" /><DamageRibbon damage={fight.playerDamageByPart} /></div>
       <div><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /><DamageRibbon damage={fight.opponentDamageByPart} opponent /></div>
     </div>
     <PositionScene position={fight.position} playerName={game.fighter.name} opponentName={opponent.name} />
-    {counteredTakedownEntry && <aside className="position-event countered" role="status" aria-live="polite">
-      <span>抱摔被破解</span>
-      <p>你壓低重心射出雙腿抱摔，但{opponent.name}後撤髖部避開切入，順勢壓住上身；你落到防守架下位。</p>
-    </aside>}
     {showLiveLog && <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
   </section>
 }
@@ -1140,7 +1328,7 @@ function DamageRibbon({ damage, opponent = false }: { damage: { head: number; bo
   return <div className={`damage-ribbon ${opponent ? 'opponent' : ''}`} aria-label={`${opponent ? '對手' : '我方'}傷勢：頭部 ${damage.head}、軀幹 ${damage.body}、腿部 ${damage.leg}`}>
     {(['head', 'body', 'leg'] as const).map((part) => {
       const value = damage[part]
-      const severity = value >= 75 ? 'critical' : value >= 50 ? 'compromised' : value >= 25 ? 'hurt' : 'healthy'
+      const severity = damageSeverity(value, part)
       return <span className={severity} key={part}><b>{part === 'head' ? '頭' : part === 'body' ? '軀' : '腿'}</b><i><em style={{ width: `${value}%` }} /></i><small>{value}</small></span>
     })}
   </div>
@@ -1162,7 +1350,8 @@ function positionLabel(position: string) {
 
 function ContextStrip({ fighter }: { fighter: FighterState }) {
   const minHealth = Math.min(...Object.values(fighter.health))
-  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="身體" value={`${minHealth}`} note={minHealth < 60 ? '舊傷復發' : '沒有嚴重傷勢'} /><Metric label="領悟" value={`${fighter.insight}`} note="可用點數" /></div>
+  const best = Math.max(...BRANCHES.map((branch) => skillLevel(fighter.skills[branch].xp)))
+  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="身體" value={`${minHealth}`} note={minHealth < 60 ? '舊傷復發' : '沒有嚴重傷勢'} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /></div>
 }
 
 function StatusBar({ label, value, tone }: { label: string; value: number; tone: string }) {
@@ -1179,6 +1368,57 @@ function Metric({ label, value, note }: { label: string; value: string; note: st
 
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return <div className="section-title"><h3>{title}</h3>{subtitle && <p>{subtitle}</p>}</div>
+}
+
+function experienceLabel(value: StartingExperience) {
+  return value === 'normie' ? '普通人' : value === 'semi-pro' ? '半職業選手' : '業餘愛好者'
+}
+
+function rarityLabel(value: NonNullable<ReturnType<typeof traitDefinition>>['rarity']) {
+  return value === 'legendary' ? '傳奇' : value === 'rare' ? '稀有' : value === 'uncommon' ? '罕見' : '常見'
+}
+
+function SkillProgressCard({ branch, fighter }: { branch: Branch; fighter: FighterState }) {
+  const progress = fighter.skills[branch]
+  const level = skillLevel(progress.xp)
+  const thresholds = [0, 100, 300, 600, 1_000, 1_500]
+  const next = nextSkillThreshold(progress.xp)
+  const start = thresholds[level]
+  const percent = next ? Math.max(0, Math.min(100, (progress.xp - start) / (next - start) * 100)) : 100
+  const known = fighter.learnedMoves.filter((id) => FIGHT_INTENTS.find((move) => move.id === id)?.branch === branch).length
+  return <article className="skill-progress-card" style={{ '--skill': BRANCH_META[branch].accent } as React.CSSProperties}>
+    <div><span>{BRANCH_META[branch].name}</span><strong>Lv.{level}</strong><small>{aptitudeLabel(progress.aptitude)} · 已學 {known} 招</small></div>
+    <i><b style={{ width: `${percent}%` }} /></i>
+    <p>{next ? `${progress.xp} / ${next} XP` : `${progress.xp} XP · 已達大師級`}</p>
+  </article>
+}
+
+function SkillOverview({ fighter }: { fighter: FighterState }) {
+  return <section><SectionTitle title="技能與訓練" subtitle="Lv.0 是未受訓；Lv.5 是大師。天賦只改變學習速度，不封死上限。" /><div className="skill-overview">{BRANCHES.map((branch) => <SkillProgressCard key={branch} branch={branch} fighter={fighter} />)}</div></section>
+}
+
+function TraitGrid({ traits }: { traits: FighterState['traits'] }) {
+  if (!traits.length) return <div className="empty-progression">目前沒有特質。</div>
+  return <div className="trait-grid">{traits.map((owned) => {
+    const trait = traitDefinition(owned.id)
+    if (!trait) return null
+    return <article className={`trait-card rarity-${trait.rarity}`} key={owned.id}><span>{rarityLabel(trait.rarity)} · {owned.source === 'born' ? '天生' : '實戰獲得'}</span><strong>{trait.name}</strong><p>{trait.description}</p><b>{trait.effect}</b><small>生效：{trait.condition}{trait.tradeoff ? ` · 代價：${trait.tradeoff}` : ''}</small></article>
+  })}</div>
+}
+
+function TraitProgressList({ fighter }: { fighter: FighterState }) {
+  return <div className="trait-progress-list">{fighter.traitProgress.map((progress) => {
+    const trait = traitDefinition(progress.traitId)
+    if (!trait) return null
+    const percent = Math.min(100, progress.current / progress.threshold * 100)
+    return <article key={progress.traitId}><div><strong>{trait.name}</strong><span>{progress.current}/{progress.threshold}</span></div><i><b style={{ width: `${percent}%` }} /></i><small>{trait.condition} · 完成後：{trait.effect}</small></article>
+  })}</div>
+}
+
+function MoveChips({ moveIds }: { moveIds: string[] }) {
+  const moves = FIGHT_INTENTS.filter((move) => moveIds.includes(move.id))
+  if (!moves.length) return <div className="empty-progression">尚未學會正式招式。</div>
+  return <div className="learned-move-grid">{moves.map((move) => <span key={move.id} style={{ '--skill': BRANCH_META[move.branch].accent } as React.CSSProperties}><b>{move.label}</b><small>{BRANCH_META[move.branch].name} · Lv.{minimumMoveLevel(move)}</small></span>)}</div>
 }
 
 function Screen({ title, kicker, children }: { title: string; kicker?: string; children: React.ReactNode }) {
@@ -1237,17 +1477,17 @@ function InfoOverlay({ game, type, dispatch, onClose }: { game: GameState; type:
   return <div className="overlay-backdrop" onClick={onClose}><section className="info-overlay" role="dialog" aria-modal="true" aria-label={type === 'status' ? '拳手狀態' : '生涯歷程'} onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">{game.fighter.name}</p><h2>{type === 'status' ? '拳手狀態' : '生涯歷程'}</h2></div><button onClick={onClose} aria-label="關閉">×</button></header><div className="overlay-scroll">{type === 'status' ? <StatusDetails game={game} dispatch={dispatch} /> : <HistoryDetails game={game} />}</div></section></div>
 }
 
-function StatusDetails({ game, dispatch }: { game: GameState; dispatch: (command: GameCommand) => void }) {
+function StatusDetails({ game }: { game: GameState; dispatch: (command: GameCommand) => void }) {
   const fighter = game.fighter
   return <>
-    {fighter.insight > 0 && <section className="status-growth">
-      <div className="status-growth-head"><div><span>可用技術領悟</span><strong>{fighter.insight} 點</strong></div><small>技術一旦學會便不能取消</small></div>
-      <TechniqueTree game={game} dispatch={dispatch} interactive />
-    </section>}
     <SectionTitle title="體格資料" subtitle="身高與臂展由 Seed 決定，會影響遠距及近身對位。" />
     <div className="health-grid"><Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} /><Metric label="身高" value={`${fighter.heightCm} cm`} note="影響重心與對戰距離" /><Metric label="臂展" value={`${fighter.reachCm} cm`} note={`臂展差 ${fighter.reachCm - fighter.heightCm >= 0 ? '+' : ''}${fighter.reachCm - fighter.heightCm} cm`} /><Metric label="目前量級" value={fighter.weightClass} note={weightPlanLabel(fighter.weightPlan)} /></div>
-    <SectionTitle title="技術與潛力" />
-    <div className="attribute-list">{BRANCHES.map((branch) => <AttributeBar key={branch} label={BRANCH_META[branch].name} value={fighter.technique[branch]} potential={fighter.techniquePotential[branch]} color={BRANCH_META[branch].accent} />)}</div>
+    <SkillOverview fighter={fighter} />
+    <SectionTitle title="已學招式" subtitle={`${fighter.learnedMoves.length} 招；戰鬥中只會出現已學招式與緊急基本動作。`} />
+    <MoveChips moveIds={fighter.learnedMoves} />
+    <SectionTitle title="特質" subtitle="天生條件與實戰留下的身份會一起影響比賽。" />
+    <TraitGrid traits={fighter.traits} />
+    {fighter.traitProgress.length > 0 && <><SectionTitle title="特質進度" /><TraitProgressList fighter={fighter} /></>}
     <SectionTitle title="身體狀況" />
     <div className="health-grid">{(Object.keys(fighter.health) as HealthPart[]).map((part) => <Metric key={part} label={healthPartLabel(part)} value={`${fighter.health[part]}`} note={fighter.health[part] < 60 ? '需要留意' : '狀況良好'} />)}</div>
     <SectionTitle title="重要關係" />
@@ -1255,12 +1495,7 @@ function StatusDetails({ game, dispatch }: { game: GameState; dispatch: (command
       const benefit = getRelationshipBenefit(relationship)
       return <div className={`relationship ${benefit.tier}`} key={relationship.id}><strong>{relationship.name} · {benefit.tierLabel}</strong><span>{benefit.action}：{benefit.effect}</span><small>信任 {relationship.trust} · {relationship.status} · {relationship.memories.at(-1)}</small></div>
     })}</div>
-    {fighter.insight === 0 && <><SectionTitle title="已學技術" subtitle="取得新的技術領悟後，科技樹會在這裡重新開放。" /><div className="unlocked-summary">{TECHNIQUE_NODES.filter((node) => fighter.unlockedNodes.includes(node.id)).map((node) => <span key={node.id}>{node.name}</span>)}</div></>}
   </>
-}
-
-function AttributeBar({ label, value, potential, color }: { label: string; value: number; potential: number; color: string }) {
-  return <div className="attribute-bar"><div><span>{label}</span><b>{value}</b><small>{getPotentialLabel(value, potential)}</small></div><i style={{ '--fill': color } as React.CSSProperties}><span className="potential" style={{ width: `${potential}%` }} /><span className="current" style={{ width: `${value}%` }} /></i></div>
 }
 
 function healthPartLabel(part: HealthPart) { return ({ head: '頭部', hands: '雙手', knees: '膝腿', torso: '軀幹' } as const)[part] }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { advance, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun } from '../src/game/engine'
-import type { CampAction, GameCommand, GameState, RiskLabel } from '../src/game/types'
+import { FIGHT_INTENTS } from '../src/game/fight-content'
+import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, RiskLabel } from '../src/game/types'
 
 const riskOrder: Record<RiskLabel, number> = { '低風險': 0, '中度風險': 1, '高風險': 2, '極高風險': 3, '絕望': 4 }
 
@@ -8,17 +9,27 @@ function apply(state: GameState, command: GameCommand) {
   return advance(state, command).state
 }
 
+function perfectDrillResult(challenge: CampDrillChallenge): CampDrillResult {
+  if (challenge.kind === 'recovery') return { kind: 'recovery', heldDurationsMs: [850, 850, 850], elapsedMs: 2_400 }
+  if (challenge.mode === 'combo') return { kind: 'technique', mode: 'combo', inputs: challenge.steps.map((step) => ({ moveId: step.moveId, timingErrorMs: 0 })), elapsedMs: 0 }
+  if (challenge.mode === 'sparring') return { kind: 'sparring', mode: 'sparring', inputs: challenge.exchanges.map((exchange) => ({ moveId: exchange.options.find((option) => option.matchup === 'favored')!.moveId, timingErrorMs: 0 })), elapsedMs: 0 }
+  if (challenge.mode === 'film-study') return { kind: 'film', mode: 'film-study', answers: challenge.prompts.map((prompt) => prompt.answer), elapsedMs: 0 }
+  return { kind: challenge.kind, answers: challenge.prompts.map((prompt) => prompt.answer), elapsedMs: 0 } as CampDrillResult
+}
+
 function completeCampDrill(state: GameState, action: CampAction): GameState {
   let next = apply(state, { type: 'START_CAMP_DRILL', action, branch: 'boxing' })
   const challenge = next.activeCampDrill!
-  next = apply(next, { type: 'RESOLVE_CAMP_DRILL', result: challenge.kind === 'recovery'
-    ? { kind: 'recovery', heldDurationsMs: [850, 850, 850], elapsedMs: 2_400 }
-    : { kind: challenge.kind, answers: challenge.prompts.map((prompt) => prompt.answer), elapsedMs: 2_400 } })
-  return apply(next, { type: 'ACK_CAMP_DRILL_RESULT' })
+  next = apply(next, { type: 'RESOLVE_CAMP_DRILL', result: perfectDrillResult(challenge) })
+  next = apply(next, { type: 'ACK_CAMP_DRILL_RESULT' })
+  if (next.phase === 'training-reward') next = apply(next, { type: 'LEARN_TRAINING_MOVE', moveId: next.trainingMoveChoices![0] })
+  return next
 }
 
 function playGreedyFight(seed: string, targetRatingGap?: number) {
   let state = createNewRun({ name: '測試拳手', region: 'taiwan', motive: 'prove', seed })
+  state.fighter.learnedMoves = FIGHT_INTENTS.map((move) => move.id)
+  for (const opponent of state.opponents) opponent.learnedMoves = FIGHT_INTENTS.map((move) => move.id)
   let guard = 0
   while (state.phase !== 'fight-result' && guard < 100) {
     guard += 1
@@ -32,6 +43,8 @@ function playGreedyFight(seed: string, targetRatingGap?: number) {
     } else if (state.phase === 'camp') {
       const action = state.campActions.length === 0 ? 'film' : state.campActions.length === 1 ? 'technique' : targetRatingGap === undefined ? 'recovery' : 'sparring'
       state = completeCampDrill(state, action)
+    } else if (state.phase === 'training-reward') {
+      state = apply(state, { type: 'LEARN_TRAINING_MOVE', moveId: state.trainingMoveChoices![0] })
     } else if (state.phase === 'life') state = apply(state, { type: 'RESOLVE_LIFE', optionId: state.lifeEvent!.options[0].id })
     else if (state.phase === 'weight') state = apply(state, { type: 'SET_WEIGHT_PLAN', plan: 'safe' })
     else if (state.phase === 'prefight') {

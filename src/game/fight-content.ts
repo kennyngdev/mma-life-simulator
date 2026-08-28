@@ -206,6 +206,13 @@ export const FIGHT_INTENTS: FightMoveDefinition[] = [
   move('turn-into-guard', '轉身進入防守架', '越過控制腿轉身面向對手，成功便進入對手的防守架上方。', ['back-defense'], 'ground', 'transition', stages(3, 8, 12, 10), effects(6, 0, 0, 0, 9, 8, 4), { cleanPosition: 'top', contestedPosition: 'bottom', counteredPosition: 'back-defense' }),
   move('shoulder-to-mat', '肩膀貼地轉入防守架', '先把上側肩膀壓到地面，再移開髖部轉身面向對手。', ['back-defense'], 'ground', 'transition', stages(4, 8, 12, 11), effects(5, 0, 0, 0, 8, 7, 2), { cleanPosition: 'bottom', contestedPosition: 'back-defense' }),
   move('back-wall-escape', '貼籠滑脫背控', '把對手壓向鐵網，借支點滑下控制腿並回到籠邊。', ['back-defense'], 'wrestling', 'transition', stages(4, 8, 11, 12), effects(4, 0, 0, 0, 7, 8, 1), { cleanPosition: 'cage-defense', contestedPosition: 'scramble' }),
+  // Distinct ground-and-pound decisions across every dominant grappling layer.
+  move('front-headlock-body-knees', '前頸控制膝擊軀幹', '壓低頭肩後將膝蓋送進肋部，在不放掉頭臂控制的情況下消耗體力。', ['front-headlock-control'], 'wrestling', 'offense', stages(3, 9, 12, 12), effects(9, 1, 13, 0, 10, 9, 11), { exploits: ['neck-exposed'], creates: ['tight-elbows'] }),
+  move('guard-hammerfists', '防守架內鎚拳', '撐高上身後以拳底連續落下；傷害更大，但過度後仰會給對手掃摔機會。', ['top'], 'ground', 'offense', stages(2, 8, 11, 14), effects(11, 14, 1, 0, 4, 11, 17), { contestedPosition: 'top', counteredPosition: 'bottom', exploits: ['hips-flat', 'high-guard'], creates: ['off-balance'] }),
+  move('side-body-knees', '側控膝擊軀幹', '壓住頭肩與髖部，用近側膝蓋重複攻擊肋部，用體力消耗逼出轉身反應。', ['side-control'], 'ground', 'offense', stages(3, 9, 11, 12), effects(9, 1, 13, 0, 10, 8, 10), { exploits: ['hips-flat'], creates: ['tight-elbows', 'off-balance'] }),
+  move('crucifix-elbows', '十字架連續肘擊', '用雙腿固定近側手臂，手臂控制頭部後連續落肘，用控制換取終結壓力。', ['side-control'], 'ground', 'offense', stages(1, 7, 12, 15), effects(11, 15, 1, 0, 14, 11, 20), { exploits: ['arm-isolated', 'hips-flat'], creates: ['high-guard', 'neck-exposed'] }),
+  move('mount-barrage', '騎乘位爆發連砸', '放高髖部後左右連續落拳，直接追求裁判終止；如果落空，底下對手可能趁機橋翻。', ['mount'], 'ground', 'offense', stages(1, 6, 11, 16), effects(12, 18, 2, 0, 7, 14, 23), { contestedPosition: 'mount', counteredPosition: 'bottom', exploits: ['high-guard', 'hips-flat'], creates: ['off-balance', 'arm-isolated'] }),
+  move('back-hammerfists', '背後鎚拳連打', '放開一側控制手連續攻擊耳側，擴大頭部傷害，但也增加對手轉身滑脫的空間。', ['back-control'], 'ground', 'offense', stages(2, 8, 11, 14), effects(11, 14, 1, 0, 6, 11, 18), { contestedPosition: 'back-control', counteredPosition: 'back-defense', exploits: ['high-guard'], creates: ['neck-exposed', 'off-balance'] }),
 ]
 
 const variant = (id: string, intentId: string, name: string, preview: string, extras: Partial<ExecutionVariant> = {}): ExecutionVariant => ({ id, intentId, name, preview, ...extras })
@@ -257,7 +264,6 @@ export const EXECUTION_VARIANTS: ExecutionVariant[] = [
   variant('base-wall-shot', 'wall-takedown', '籠邊雙腿抱摔', '頭位壓向下巴，轉角抱起雙腿'),
   variant('base-top-control', 'top-control', '膝開穩姿', '膝蓋打開、脊椎挺直，先拆掉下位的拉頭控制'),
   variant('base-ground-strikes', 'ground-strikes', '防守架內短拳', '一手固定胸線，另一手短拳穿過頭部防守'),
-  variant('crucifix', 'ground-strikes', '十字架肘擊', '用雙腿固定手臂，在十字架位置連續落肘', { unlockKey: 'crucifix', effectBonus: { control: 4, finishPressure: 5 } }),
   variant('base-guard-body', 'guard-body-strikes', '肘內短拳攻身', '肘部留在腿內，連續短拳打向肋部和腹部'),
   variant('base-knee-cut', 'improve-position', '切膝過腿', '壓扁髖部，以膝蓋切過腿線滑向側控'),
   variant('base-pass', 'pass-guard', '疊壓繞腿', '把雙腿推向頭部，再從髖線外側繞進側控'),
@@ -314,6 +320,13 @@ export const EXECUTION_VARIANTS: ExecutionVariant[] = [
   variant('base-turn-guard', 'turn-into-guard', '轉身進防守架', '越過下方控制腿，轉身面向對手'),
   variant('base-shoulder-mat', 'shoulder-to-mat', '肩膀貼地轉身', '把上側肩膀壓到地面，移髖後面向對手'),
   variant('base-wall-back-escape', 'back-wall-escape', '貼籠滑脫', '把對手壓向鐵網，借力滑下控制腿'),
+  variant('base-front-headlock-body-knees', 'front-headlock-body-knees', '前頸控制膝擊肋部', '胸口壓住後腦，近側膝蓋連續送進肋部'),
+  variant('base-guard-hammerfists', 'guard-hammerfists', '撐高鎚拳', '雙膝展開穩住底盤，撤回拳底連續落下'),
+  variant('base-side-body-knees', 'side-body-knees', '側控膝擊肋部', '胸口壓住頭肩，近側膝蓋連續撞進肋部'),
+  variant('base-crucifix-elbows', 'crucifix-elbows', '十字架肘擊', '用雙腿固定手臂，在十字架位置連續落肘'),
+  variant('trained-crucifix-elbows', 'crucifix-elbows', '十字架陷阱連肘', '腿部困死防守手，自由手連續落肘追求終止', { unlockKey: 'crucifix', effectBonus: { control: 4, finishPressure: 5 } }),
+  variant('base-mount-barrage', 'mount-barrage', '騎乘位連續砸擊', '髖部放高封住橋翻，左右重拳連續落下'),
+  variant('base-back-hammerfists', 'back-hammerfists', '背後鎚拳連打', '安全帶控制留住一側，另一手以拳底連續攻擊耳側'),
 ]
 
 /** Explicit consumption map: every tech unlock key affects a variant, intent, or passive recommendation/effect rule. */
@@ -344,17 +357,17 @@ export const TECHNIQUE_COMBAT_RULES: Record<string, { intents: string[]; bonus: 
   'wall-takedown': { intents: ['wall-takedown', 'cage-single-leg', 'cage-arm-drag'], bonus: 9, note: '籠邊摔法與繞背提升' },
   'mat-return': { intents: ['deny-stand', 'cage-mat-return', 'body-lock-mat-return', 'ankle-ride'], bonus: 9, note: '回摔與阻止起身提升' },
   'wrestle-pressure': { intents: ['shot-entry', 'single-leg-shot', 'blast-double', 'quick-entry', 'snapdown-entry', 'scramble-front-headlock'], bonus: 8, note: '連續進腿、下壓與接位的重複懲罰降低' },
-  'top-posture': { intents: ['top-control', 'ground-strikes', 'guard-body-strikes', 'side-control-pressure', 'mount-control', 'mount-punches', 'secure-back', 'body-triangle', 'back-strikes'], bonus: 8, note: '各層上位與背後控制更穩定' },
+  'top-posture': { intents: ['top-control', 'ground-strikes', 'guard-body-strikes', 'guard-hammerfists', 'side-control-pressure', 'side-body-knees', 'mount-control', 'mount-punches', 'mount-barrage', 'secure-back', 'body-triangle', 'back-strikes', 'back-hammerfists'], bonus: 8, note: '各層上位與背後控制更穩定' },
   'closed-guard': { intents: ['rebuild-guard', 'hip-escape', 'guard-sweep', 'pull-guard'], bonus: 8, note: '被反制時限制傷害並守住下位防守架', effect: 'closed-guard' },
   'wall-walk': { intents: ['wall-walk', 'side-wall-escape', 'scramble-wall', 'back-wall-escape'], bonus: 9, note: '各種貼籠起身與脫困提升' },
-  crucifix: { intents: ['ground-strikes', 'isolate-arm', 'side-elbows', 'side-control-pressure'], bonus: 9, note: '上位困臂與肘擊控制提升' },
+  crucifix: { intents: ['isolate-arm', 'side-elbows', 'crucifix-elbows', 'side-control-pressure'], bonus: 9, note: '上位困臂與肘擊控制提升' },
   'bottom-submission': { intents: ['bottom-submission', 'guard-armbar', 'guard-kimura'], bonus: 10, note: '防守架下位降服提升' },
   'position-hunter': { intents: ['improve-position', 'pass-guard', 'isolate-arm', 'knee-on-belly', 'mount-transition', 'high-mount', 'take-back', 'secure-back', 'body-triangle', 'trap-arm-from-back'], bonus: 8, note: '過腿、騎乘、奪背與控位提升' },
   'style-range': { intents: ['probe-range', 'long-guard', 'check-low-kick', 'angle-away', 'check-hook', 'counter-pressure'], bonus: 8, note: '遠距防守與反擊協同' },
   'style-pressure': { intents: ['drive-back', 'cage-body-head', 'quick-entry', 'enter-clinch', 'double-collar-entry'], bonus: 8, note: '跨距離壓迫與控制協同' },
   'style-cage': { intents: ['inside-position', 'wall-takedown', 'cage-single-leg', 'cage-mat-return', 'cage-barrage', 'cage-knee-elbow'], bonus: 8, note: '籠邊打摔控制協同' },
   'style-sprawl': { intents: ['anti-shot-uppercut', 'sprawl-circle', 'front-headlock-go-behind', 'counter-pressure'], bonus: 8, note: '防摔後立即前頸或拳擊反擊' },
-  'style-ground-pound': { intents: ['shot-entry', 'ground-strikes', 'guard-body-strikes', 'side-elbows', 'mount-punches', 'mount-elbows', 'back-strikes'], bonus: 8, note: '抱摔後各層上位打擊協同' },
+  'style-ground-pound': { intents: ['shot-entry', 'front-headlock-body-knees', 'ground-strikes', 'guard-body-strikes', 'guard-hammerfists', 'side-elbows', 'side-body-knees', 'crucifix-elbows', 'mount-punches', 'mount-elbows', 'mount-barrage', 'back-strikes', 'back-hammerfists'], bonus: 8, note: '抱摔後各層上位打擊協同' },
   'style-submission': { intents: ['front-headlock', 'front-headlock-guillotine', 'front-headlock-anaconda', 'seek-choke', 'bottom-submission', 'guard-armbar', 'guard-kimura', 'americana', 'side-kimura', 'north-south-choke', 'arm-triangle', 'mounted-armbar', 'take-back', 'rear-naked-choke', 'back-armbar'], bonus: 8, note: '轉位時更易捕捉各位置降服' },
 }
 

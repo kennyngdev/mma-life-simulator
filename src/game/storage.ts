@@ -16,7 +16,7 @@ async function database() {
 export async function saveGame(game: GameState): Promise<void> {
   const db = await database()
   const envelope: SaveEnvelope = {
-    saveVersion: 9,
+    saveVersion: 10,
     rulesVersion: game.rulesVersion,
     contentVersion: game.contentVersion,
     savedAt: Date.now(),
@@ -29,11 +29,8 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
-  if (envelope.saveVersion === 9 && envelope.rulesVersion === '0.6.0' && envelope.contentVersion === '0.9.0') {
+  if (envelope.saveVersion === 10 && envelope.rulesVersion === '0.7.0' && envelope.contentVersion === '1.0.0') {
     return { game: envelope.game as GameState }
-  }
-  if (envelope.saveVersion === 8 && envelope.rulesVersion === '0.5.0' && envelope.contentVersion === '0.8.0') {
-    return { game: migrateVersion8(envelope.game) }
   }
   return { resetReason: 'combat-rules-upgrade' }
 }
@@ -62,9 +59,9 @@ export function migrateVersion8(game: unknown): GameState {
   const fight = legacy.fight ? { ...legacy.fight, lastSuccessfulIntentId: undefined } : undefined
   return {
     ...legacy,
-    saveVersion: 9,
-    rulesVersion: '0.6.0',
-    contentVersion: '0.9.0',
+    saveVersion: 10,
+    rulesVersion: '0.7.0',
+    contentVersion: '1.0.0',
     fighter,
     opponents,
     campActions,
