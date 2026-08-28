@@ -2,8 +2,8 @@
 
 - Use one mobile-first vertical frame capped at 720px. Fit each play state within `100dvh`; dense panels may scroll internally so primary actions remain reachable.
 - Keep story text at 15px or larger and player-facing mechanics at 14px or larger. Remove secondary flavor before shrinking critical information.
-- The start screen shows available death points, discovered death count, and permanent talent count, with direct access to the talent shop and death journal.
-- Sect selection must say it is an aspiration. The reveal and character sheet keep `志願` visibly distinct from formal membership until the admission scene after round 3.
+- The start screen shows available death points, discovered death count, and enabled/owned inherited talent count, with direct access to the talent shop and death journal.
+- Sect selection appears after the round-3 result and must say it is an aspiration. Before then, the reveal and character sheet show that no sect aspiration has been chosen; after selection, `志願` remains visibly distinct from formal membership until the admission scene.
 - During youth, the character sheet and move grid show only the three novice moves. The admission scene explicitly presents the four newly earned sect moves.
 - The event HUD shows all three path scores and marks the current dominant direction. Every choice is labeled 問劍、行契、or 守人 and previews its actual money cost, objective, path gain, and failure condition.
 - Keep money spending inside event choices. Do not show a phase shop or post-battle flat-upgrade screen.
@@ -11,10 +11,11 @@
 - For `progress`, place the objective action above the move grid. State that it adds one progress, consumes the turn, and performs no move. Disable it when the player is not ready.
 - Mark leaders and protected actors directly on fighter cards. Protected-character and deadline failures must be as legible as player health.
 - Enemy cards occupy the upper lane, allies the lower lane. Health and inner power always use labels and numbers. Move controls remain visible and disabled outside the player turn.
+- The battle turn-progress track is persistent between the objective panel and arena. On narrow screens, a lone fighter fills its lane and no fighter, timeline marker, or command may overflow the 720px frame or viewport.
 - Combat feedback may animate cuts, bursts, recovery, and guards, but sound and motion never carry essential state. Respect reduced-motion preferences.
 - The result card leads directly to the next required state: admission, technique mutation, ending, or—after death—the talent shop.
 - Death presentation states the concrete loss first, then the actionable hint, then the epitaph. It shows whether the death awarded `+1` or `+0` points.
-- The talent shop shows price, full benefit, full drawback, ownership, and insufficient balance. Permanent talents are always active, non-refundable, and non-toggleable.
+- The talent shop shows price, full benefit, full drawback, ownership, insufficient balance, and an explicit inherited/disabled state. Purchases are non-refundable; toggles affect the next life and never alter a life already in progress.
 - The death journal shows all 46 slots without leaking undiscovered titles.
 - Technique milestone cards appear after rounds 7, 11, and 14. They name the affected move and behavioral change; proficiency is biography context, not a progress gate.
-- The character sheet shows path bars, aspiring/admitted sect state, current and permanent talents with drawbacks, resources, resolved moves, and learned mutations.
+- The character sheet shows path bars, aspiring/admitted sect state, current and enabled inherited talents with drawbacks, resources, resolved moves, and learned mutations.

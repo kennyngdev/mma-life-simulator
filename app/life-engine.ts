@@ -109,8 +109,8 @@ export type TalentDefinition = {
   drawback: string;
   modifiers: Partial<{ hpMultiplier: number; qiMultiplier: number; attackMultiplier: number; speedMultiplier: number; hp: number; qi: number; attack: number; defense: number; speed: number; recovery: number; money: number }>;
 };
-export type MetaProgress = { version: 2; deathPoints: number; discoveredDeathIds: DeathId[]; purchasedTalents: TalentId[] };
-export const emptyMetaProgress: MetaProgress = { version: 2, deathPoints: 0, discoveredDeathIds: [], purchasedTalents: [] };
+export type MetaProgress = { version: 3; deathPoints: number; discoveredDeathIds: DeathId[]; purchasedTalents: TalentId[]; disabledTalents: TalentId[] };
+export const emptyMetaProgress: MetaProgress = { version: 3, deathPoints: 0, discoveredDeathIds: [], purchasedTalents: [], disabledTalents: [] };
 
 export type LifeRun = {
   version: 15;
@@ -233,11 +233,13 @@ export function parseMetaProgress(raw: string | null): MetaProgress {
   try {
     const value = JSON.parse(raw) as Partial<MetaProgress> & { discoveredTraits?: string[] };
     const migrated = (value.discoveredTraits ?? []).map((name) => legacyNameMap.get(name) ?? name).filter((id) => talentFor(id));
+    const purchasedTalents = uniqueSorted([...(value.purchasedTalents ?? []).filter((id) => talentFor(id)), ...migrated]);
     return {
-      version: 2,
+      version: 3,
       deathPoints: Math.max(0, Math.floor(value.deathPoints ?? 0)),
       discoveredDeathIds: uniqueSorted((value.discoveredDeathIds ?? []).filter((id): id is DeathId => typeof id === 'string' && id.startsWith('death:'))),
-      purchasedTalents: uniqueSorted([...(value.purchasedTalents ?? []).filter((id) => talentFor(id)), ...migrated]),
+      purchasedTalents,
+      disabledTalents: uniqueSorted((value.disabledTalents ?? []).filter((id) => purchasedTalents.includes(id))),
     };
   } catch { return structuredClone(emptyMetaProgress); }
 }
@@ -251,7 +253,19 @@ export function purchaseTalent(meta: MetaProgress, talentId: TalentId) {
   if (meta.purchasedTalents.includes(talentId)) return { meta, ok: false, reason: '這項天賦已經屬於你。' };
   const price = talentPrice(talent.rarity);
   if (meta.deathPoints < price) return { meta, ok: false, reason: `還差 ${price - meta.deathPoints} 點死亡點數。` };
-  return { meta: { ...meta, deathPoints: meta.deathPoints - price, purchasedTalents: uniqueSorted([...meta.purchasedTalents, talentId]) }, ok: true, reason: '這份好處與代價，往後每一世都會生效。' };
+  return { meta: { ...meta, deathPoints: meta.deathPoints - price, purchasedTalents: uniqueSorted([...meta.purchasedTalents, talentId]) }, ok: true, reason: '已購買並設為繼承；投胎前可以停用。' };
+}
+
+export function activeLegacyTalents(meta: MetaProgress) {
+  return meta.purchasedTalents.filter((id) => !meta.disabledTalents.includes(id));
+}
+
+export function toggleLegacyTalent(meta: MetaProgress, talentId: TalentId): MetaProgress {
+  if (!meta.purchasedTalents.includes(talentId)) return meta;
+  const disabledTalents = meta.disabledTalents.includes(talentId)
+    ? meta.disabledTalents.filter((id) => id !== talentId)
+    : uniqueSorted([...meta.disabledTalents, talentId]);
+  return { ...meta, disabledTalents };
 }
 
 export function composeLegacyStats(activeIds: readonly TalentId[]) {
@@ -290,9 +304,10 @@ export function identityDetail(kind: IdentityKind, value: string) {
   return kind === 'origin' ? `${value}教會你：江湖的第一課通常沒有師父。` : `${value}；這件事會在你最忙的時候回來。`;
 }
 
-export function newLife(name: string, seed: string, difficulty: DifficultyId, purchasedTalents: readonly TalentId[] = []): LifeRun {
-  const legacyTalents = uniqueSorted(purchasedTalents.filter((id) => talentFor(id)));
-  const available = talentDefinitions.filter((talent) => !legacyTalents.includes(talent.id));
+export function newLife(name: string, seed: string, difficulty: DifficultyId, purchasedTalents: readonly TalentId[] = [], enabledLegacyTalents: readonly TalentId[] = purchasedTalents): LifeRun {
+  const purchased = uniqueSorted(purchasedTalents.filter((id) => talentFor(id)));
+  const legacyTalents = uniqueSorted(enabledLegacyTalents.filter((id) => purchased.includes(id)));
+  const available = talentDefinitions.filter((talent) => !purchased.includes(talent.id));
   const trait = pick(available.length ? available : talentDefinitions, `${seed}:current-talent`).id;
   const active = uniqueSorted([...legacyTalents, trait]);
   const build = composeLegacyStats(active);
@@ -308,7 +323,9 @@ export function newLife(name: string, seed: string, difficulty: DifficultyId, pu
 
 export const sectFor = (id: SectId | null | undefined) => sects.find((sect) => sect.id === id) ?? noviceStyle;
 export const hasTalent = (run: LifeRun, id: TalentId) => run.trait === id || run.legacyTalents.includes(id);
+export const needsSectChoice = (run: LifeRun) => run.turn >= 3 && !run.aspiredSectId && !run.sectId && !run.dead;
 export function chooseAspiredSect(run: LifeRun, sectId: SectId): LifeRun {
+  if (!needsSectChoice(run)) return run;
   const sect = sectFor(sectId);
   return { ...run, aspiredSectId: sectId, chronicle: [...run.chronicle, `${run.year}年：你想拜入${sect.name}。想是一回事，山門還沒點頭。`] };
 }

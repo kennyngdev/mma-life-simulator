@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   advanceObjective,
+  activeLegacyTalents,
   admitToSect,
   allDeathDefinitions,
   authoredEvents,
@@ -15,6 +16,7 @@ import {
   isComplete,
   markDeathAward,
   needsAdmission,
+  needsSectChoice,
   newLife,
   nextInsightTier,
   parseMetaProgress,
@@ -28,13 +30,14 @@ import {
   standardCompletionReference,
   talentDefinitions,
   talentPrice,
+  toggleLegacyTalent,
   validateCampaignContent,
   type LifeRun,
   type PathId,
   type SectId,
 } from './life-engine';
 
-const life = (seed = 'reference') => chooseAspiredSect(newLife('阿測', seed, 'standard'), 'huashan');
+const life = (seed = 'reference') => chooseAspiredSect({ ...newLife('阿測', seed, 'standard'), turn: 3 }, 'huashan');
 const pathRun = (path: PathId, turn = 1) => ({ ...life(`path-${path}-${turn}`), turn, pathScores: { duelist: path === 'duelist' ? 3 : 0, contractor: path === 'contractor' ? 3 : 0, protector: path === 'protector' ? 3 : 0 }, lastChosenPath: path });
 
 describe('campaign content and routing', () => {
@@ -74,9 +77,18 @@ describe('campaign content and routing', () => {
 });
 
 describe('admission and technique milestones', () => {
-  it('starts with an aspiration but no sect membership or sect moves', () => {
-    const run = life();
-    expect(run.aspiredSectId).toBe('huashan');
+  it('offers no sect choice until three displayed rounds are complete', () => {
+    const fresh = newLife('阿測', 'reference', 'standard');
+    expect(needsSectChoice(fresh)).toBe(false);
+    expect(chooseAspiredSect(fresh, 'huashan').aspiredSectId).toBeNull();
+    const eligible = { ...fresh, turn: 3 };
+    expect(needsSectChoice(eligible)).toBe(true);
+    expect(chooseAspiredSect(eligible, 'huashan').aspiredSectId).toBe('huashan');
+  });
+
+  it('uses only novice moves before a sect is chosen', () => {
+    const run = newLife('阿測', 'reference', 'standard');
+    expect(run.aspiredSectId).toBeNull();
     expect(run.sectId).toBeNull();
     expect(resolvedSectFor(run).moves.map((move) => move.name)).toEqual(['亂拳直進', '護住要害', '喘勻這口氣']);
   });
@@ -143,10 +155,33 @@ describe('death journal and permanent talent economy', () => {
     expect(migrated.deathPoints).toBe(0);
   });
 
+  it('lets purchased talents be disabled between lives without losing ownership', () => {
+    const purchased = purchaseTalent({ ...parseMetaProgress(null), deathPoints: 3 }, 'silver-guard').meta;
+    const disabled = toggleLegacyTalent(purchased, 'silver-guard');
+    expect(disabled.purchasedTalents).toContain('silver-guard');
+    expect(disabled.disabledTalents).toEqual(['silver-guard']);
+    expect(activeLegacyTalents(disabled)).not.toContain('silver-guard');
+    expect(activeLegacyTalents(toggleLegacyTalent(disabled, 'silver-guard'))).toContain('silver-guard');
+  });
+
+  it('migrates old meta saves with all purchased talents enabled', () => {
+    const migrated = parseMetaProgress(JSON.stringify({ version: 2, purchasedTalents: ['backwater'] }));
+    expect(migrated.version).toBe(3);
+    expect(migrated.disabledTalents).toEqual([]);
+    expect(activeLegacyTalents(migrated)).toEqual(['backwater']);
+  });
+
   it('snapshots a sorted legacy list and excludes it from the seeded current-life draw', () => {
     const owned = talentDefinitions.map((talent) => talent.id).filter((id) => id !== 'backwater');
     const run = newLife('測', 'only-one-left', 'standard', [...owned].reverse());
     expect(run.legacyTalents).toEqual([...owned].sort());
+    expect(run.trait).toBe('backwater');
+  });
+
+  it('keeps disabled purchases out of both inheritance and the current-life draw', () => {
+    const owned = talentDefinitions.map((talent) => talent.id).filter((id) => id !== 'backwater');
+    const run = newLife('測', 'disabled-stays-disabled', 'standard', owned, ['thick-skin']);
+    expect(run.legacyTalents).toEqual(['thick-skin']);
     expect(run.trait).toBe('backwater');
   });
 
@@ -196,7 +231,7 @@ describe('battle death and endings', () => {
     const reference = standardCompletionReference;
     const spent = reference.legacyTalents.reduce((total, id) => total + talentPrice(talentDefinitions.find((talent) => talent.id === id)!.rarity), 0);
     expect(spent).toBeLessThanOrEqual(12);
-    let run = chooseAspiredSect(newLife('參考少俠', reference.seed, reference.difficulty, reference.legacyTalents), reference.sectId);
+    let run = newLife('參考少俠', reference.seed, reference.difficulty, reference.legacyTalents);
     for (let displayedRound = 1; displayedRound <= 16 && !isComplete(run) && !run.dead; displayedRound += 1) {
       const choice = eventFor(run).choices.find((item) => item.path === reference.dominantPath)!;
       if (choice.resolution === 'peaceful') run = resolvePeaceful(run, choice);
@@ -207,6 +242,7 @@ describe('battle death and endings', () => {
         run = resolveBattle(run);
       }
       expect(run.dead, `reference died after displayed round ${run.turn}`).toBe(false);
+      if (needsSectChoice(run)) run = chooseAspiredSect(run, reference.sectId);
       if (needsAdmission(run)) run = admitToSect(run);
       if (nextInsightTier(run)) run = chooseInsight(run, insightChoicesFor(run)[0].id);
       run = { ...run, result: null };

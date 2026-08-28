@@ -6,7 +6,7 @@ The player begins as an ordinary late-Ming youth and discovers what kind of mart
 
 The loop is:
 
-> choose a desired sect → survive three youth turns with novice moves → earn admission → mutate the sect style at three milestones → reach a path-sensitive ending
+> survive three youth turns with novice moves → choose a desired sect → earn admission → mutate the sect style at three milestones → reach a path-sensitive ending
 
 ## Whole-life structure
 
@@ -18,7 +18,7 @@ The loop is:
 
 ## Earned sect membership and progression
 
-- Sect selection records `aspiredSectId`; it is not membership. For the first three displayed rounds, every character has only 亂拳直進、護住要害、and 喘勻這口氣.
+- Sect selection appears only after the first three displayed rounds and records `aspiredSectId`; it is not membership. Before then, every character has only 亂拳直進、護住要害、and 喘勻這口氣.
 - After round 3 resolves, a dedicated admission scene sets `sectId` and swaps in the chosen sect’s four-move kit.
 - Technique mutations occur after displayed rounds 7, 11, and 14. Each sect has two choices at each tier. A mutation changes targeting, resource cadence, status use, defensive timing, or objective interaction; magnitude-only upgrades are not acceptable.
 - 門派造詣 remains visible and contributes to the biography but never gates milestone timing.
@@ -36,17 +36,17 @@ The loop is:
 
 - Every authored event owns one stable death definition: unique id, comic title, concrete cause, actionable hint, and one concise epitaph.
 - The first record of a death id awards one death point and persists immediately. Repeating that event death awards zero, regardless of seed or battle details.
-- Between lives, death points buy permanent talents: Common 1, Rare 3, Legendary 6. Purchases are non-refundable and cannot be toggled.
-- Every purchased talent applies in every future life with its full benefit and drawback. Conflicting drawbacks intentionally coexist.
-- A current-life seeded talent is chosen only from talents not already purchased. Duplicate effects never stack.
-- Each new run snapshots the sorted purchased list. Deterministic reproduction includes version, seed, identity, difficulty, choices, and this legacy snapshot.
+- Between lives, death points buy permanent talents: Common 1, Rare 3, Legendary 6. Purchases are non-refundable, but each purchased talent can be enabled or disabled before a new life.
+- Every enabled talent applies in the next life with its full benefit and drawback. Its enabled set is fixed once that life begins; conflicting enabled drawbacks intentionally coexist.
+- A current-life seeded talent is chosen only from talents not already purchased, including purchased talents disabled for inheritance. Duplicate effects never stack.
+- Each new run snapshots the sorted enabled legacy list. Deterministic reproduction includes version, seed, identity, difficulty, choices, and this legacy snapshot.
 - Talent composition uses one canonical order: base values; multipliers; additive benefits and costs; caps and minimums. Recovery starts at 60% and clamps to 40–85%.
 - Legacy `前世見聞.discoveredTraits` migrates into permanently purchased talents at no cost.
 
 ## Persistence and replay
 
 - `LifeRun` version 15 is the compatibility boundary. Version-14 in-progress lives restart while migrated meta progress survives.
-- Meta progress is separately versioned and stores death points, discovered death ids, and purchased talents.
+- Meta progress is separately versioned and stores death points, discovered death ids, purchased talents, and which purchases are disabled for the next life.
 - Enemy scaling comes from difficulty and campaign turn. It never compensates for purchased talents: dying, learning, buying power, and eventually winning is the intended long arc.
 - Replay must come from curiosity and accumulated knowledge, not artificial waiting, paid rerolls, misleading odds, or punishment for stopping.
 
