@@ -8,7 +8,7 @@ export type TraitRarity = 'common' | 'uncommon' | 'rare' | 'legendary'
 export type MindStat = 'fightIQ' | 'composure'
 export type HealthPart = 'head' | 'hands' | 'knees' | 'torso'
 export type WeightPlan = 'safe' | 'standard' | 'aggressive'
-export type CampAction = 'technique' | 'sparring' | 'film' | 'recovery'
+export type CampAction = 'technique' | 'film' | 'recovery'
 export type CampDrillKind = CampAction
 export type StrikeKind = 'punch' | 'kick'
 export type StrikeCommitment = 'quick' | 'set' | 'committed'
@@ -30,7 +30,7 @@ export type FightDamagePart = 'head' | 'body' | 'leg'
 export type DamageSeverity = 'healthy' | 'hurt' | 'compromised' | 'critical'
 export type TacticalMatchup = 'favored' | 'neutral' | 'exposed'
 export type ThreatLevel = 'watch' | 'danger' | 'critical'
-export type CornerAdjustment = 'protect' | 'recover' | 'press'
+export type CornerAdjustment = 'rest' | 'protect' | 'recover' | 'press'
 export type OpeningKey =
   | 'high-guard' | 'tight-elbows' | 'weight-forward' | 'lead-leg-heavy' | 'expects-shot'
   | 'backed-to-cage' | 'off-balance' | 'neck-exposed' | 'arm-isolated' | 'hips-flat'
@@ -152,9 +152,29 @@ export interface HistoryEntry {
   tags: string[]
 }
 
+export interface RegionalIdentity {
+  name: string
+  alias?: string
+}
+
+export interface RegionProfile {
+  label: string
+  circuit: string
+  description: string
+  opponentMix: string
+  economyLabel: string
+  economyMultiplier: number
+  currency: { symbol: string; displayRate: number; rounding: number }
+  hometowns: string[]
+  identities: RegionalIdentity[]
+  promotions: Record<'grassroots' | 'amateur' | 'regional', string[]>
+}
+
 export interface FighterState {
   name: string
   region: Region
+  hometown: string
+  alias?: string
   motive: Motive
   age: number
   year: number
@@ -200,6 +220,9 @@ export interface Opponent {
   name: string
   region: string
   nationality?: string
+  originRegion?: Region
+  hometown?: string
+  alias?: string
   age: number
   heightCm: number
   reachCm: number
@@ -226,6 +249,8 @@ export interface FightOffer {
   riskLabel: RiskLabel
   titleFight: boolean
   shortNotice: boolean
+  venueRegion?: Region
+  opponentIsLocal?: boolean
 }
 
 export type RiskLabel = '低風險' | '中度風險' | '高風險' | '極高風險' | '絕望'
@@ -239,24 +264,6 @@ export interface CampDrillPrompt {
 export interface CampComboStep {
   moveId: string
   options: string[]
-}
-
-export interface CampSparringOption {
-  moveId: string
-  matchup: TacticalMatchup
-  reason: string
-  cleanPosition: Position
-  contestedPosition: Position
-  counteredPosition: Position
-  creates: OpeningKey[]
-}
-
-export interface CampSparringExchange {
-  threatMoveId: string
-  cue: string
-  position: Position
-  openings: OpeningKey[]
-  options: CampSparringOption[]
 }
 
 export interface CampDrillBase {
@@ -285,14 +292,6 @@ export interface ComboCampDrillChallenge extends CampDrillBase {
   prompts: []
 }
 
-export interface SparringCampDrillChallenge extends CampDrillBase {
-  kind: 'sparring'
-  mode: 'sparring'
-  branch: Branch
-  exchanges: CampSparringExchange[]
-  prompts: []
-}
-
 export interface FilmCampDrillChallenge extends CampDrillBase {
   kind: 'film'
   mode: 'film-study'
@@ -310,7 +309,6 @@ export interface RecoveryCampDrillChallenge extends CampDrillBase {
 export type CampDrillChallenge =
   | LegacyCampDrillChallenge
   | ComboCampDrillChallenge
-  | SparringCampDrillChallenge
   | FilmCampDrillChallenge
   | RecoveryCampDrillChallenge
 
@@ -319,15 +317,9 @@ export interface CampComboInput {
   timingErrorMs: number
 }
 
-export interface CampSparringInput {
-  moveId: string
-  timingErrorMs: number
-}
-
 export type CampDrillResult =
-  | { kind: 'technique' | 'sparring' | 'film'; mode?: 'legacy-choice'; answers: string[]; elapsedMs: number }
+  | { kind: 'technique' | 'film'; mode?: 'legacy-choice'; answers: string[]; elapsedMs: number }
   | { kind: 'technique'; mode: 'combo'; inputs: CampComboInput[]; elapsedMs: number }
-  | { kind: 'sparring'; mode: 'sparring'; inputs: CampSparringInput[]; elapsedMs: number }
   | { kind: 'film'; mode: 'film-study'; answers: string[]; elapsedMs: number }
   | { kind: 'recovery'; heldDurationsMs: number[]; elapsedMs: number }
 
@@ -588,6 +580,7 @@ export interface LifeEvent {
   title: string
   description: string
   personId: string
+  region?: Region
   options: Array<{
     id: string
     label: string
@@ -610,6 +603,8 @@ export interface Biography {
   seed: string
   name: string
   region: Region
+  hometown?: string
+  alias?: string
   record: string
   title: string
   summary: string
@@ -634,7 +629,7 @@ export interface RngStreams {
 }
 
 export interface GameState {
-  saveVersion: 10
+  saveVersion: 11
   rulesVersion: '0.7.0'
   contentVersion: '1.0.0'
   seed: string
@@ -646,7 +641,6 @@ export interface GameState {
   offers: FightOffer[]
   selectedOfferId?: string
   campActions: CampAction[]
-  campSharpness: Partial<Record<Branch, number>>
   campDrillHistory: CampDrillOutcome[]
   activeCampDrill?: CampDrillChallenge
   campDrillOutcome?: CampDrillOutcome

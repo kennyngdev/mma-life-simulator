@@ -44,7 +44,7 @@ export function aptitudeLabel(aptitude: number): string {
 }
 
 export const UNIVERSAL_MOVE_IDS = new Set([
-  'probe-range', 'angle-away', 'shell-counter', 'frame-space', 'sprawl-circle',
+  'probe-range', 'double-jab-entry', 'outside-angle-step', 'angle-away', 'shell-counter', 'frame-space', 'sprawl-circle',
   'pummel-center', 'wall-turn', 'top-control', 'safe-bottom', 'wall-walk',
   'scramble-stand', 'base-balance', 'side-shell', 'mount-shell', 'hand-fight-rnc',
   'plum-frame-escape', 'body-lock-frame', 'front-headlock-hand-fight',
@@ -64,13 +64,17 @@ export function movesForBranch(branch: Branch, level: SkillLevel): FightMoveDefi
 }
 
 export function startingMoves(branch: Branch, level: SkillLevel, count: number): string[] {
-  return movesForBranch(branch, level)
+  const ranked = movesForBranch(branch, level)
     .sort((a, b) => minimumMoveLevel(a) - minimumMoveLevel(b)
       || Number(Boolean(b.defensive)) - Number(Boolean(a.defensive))
       || a.effects.staminaCost - b.effects.staminaCost
       || a.id.localeCompare(b.id))
-    .slice(0, count)
-    .map((move) => move.id)
+  const selected = ranked.slice(0, count)
+  if (count > 0 && !selected.some((move) => move.category === 'offense')) {
+    const attack = ranked.find((move) => move.category === 'offense')
+    if (attack) return [attack, ...selected.filter((move) => move.id !== attack.id)].slice(0, count).map((move) => move.id)
+  }
+  return selected.map((move) => move.id)
 }
 
 export function availableMoves(fighter: Pick<FighterState, 'learnedMoves'>, position: Position): FightMoveDefinition[] {
@@ -103,13 +107,13 @@ export const TRAITS: TraitDefinition[] = [
   { id: 'one-shot-power', name: '一擊天賦', rarity: 'legendary', description: '每個回合的第一記全力重擊都足以改變比賽。', condition: '每回合第一次高承諾打擊', effect: '終結壓力 +35%', tradeoff: '揮空時體力消耗 +20%', modifier: 'finishPressure', amount: 35 },
   { id: 'born-survivor', name: '絕境生還', rarity: 'legendary', description: '真正危險時，你的動作反而變得最清楚。', condition: '身體進入危急狀態', effect: '防守成功率 +35%', modifier: 'criticalDefense', amount: 35 },
 
-  { id: 'power-puncher', name: '重拳終結者', rarity: 'rare', description: '你已證明拳頭不只得分，也能直接結束比賽。', condition: '使用拳擊進攻', effect: '拳擊傷害與終結壓力 +20%', modifier: 'punchDamage', amount: 20, earned: { key: 'punchKos', threshold: 2 } },
-  { id: 'high-kick-artist', name: '高踢獵手', rarity: 'rare', description: '你把踢擊藏到對手忘記防守的瞬間。', condition: '使用踢擊進攻', effect: '踢擊傷害與終結壓力 +20%', modifier: 'kickDamage', amount: 20, earned: { key: 'kickKos', threshold: 2 } },
-  { id: 'submission-hunter', name: '降服獵人', rarity: 'rare', description: '兩次收尾證明你能把位置優勢變成結束。', condition: '嘗試降服', effect: '降服壓力 +20%', modifier: 'submissionPressure', amount: 20, earned: { key: 'submissions', threshold: 2 } },
-  { id: 'escape-artist', name: '脫困專家', rarity: 'uncommon', description: '下位不是終點，只是另一條回到比賽的路。', condition: '從下位防守或轉位', effect: '下位逃脫成功率 +15%', modifier: 'bottomEscape', amount: 15, earned: { key: 'bottomEscapes', threshold: 3 } },
+  { id: 'power-puncher', name: '重拳終結者', rarity: 'rare', description: '你已證明拳頭不只得分，也能直接結束比賽。', condition: '以拳擊完成 KO 勝利', effect: '拳擊傷害與終結壓力 +20%', modifier: 'punchDamage', amount: 20, earned: { key: 'punchKos', threshold: 2 } },
+  { id: 'high-kick-artist', name: '高踢獵手', rarity: 'rare', description: '你把踢擊藏到對手忘記防守的瞬間。', condition: '以踢擊完成 KO 勝利', effect: '踢擊傷害與終結壓力 +20%', modifier: 'kickDamage', amount: 20, earned: { key: 'kickKos', threshold: 2 } },
+  { id: 'submission-hunter', name: '降服獵人', rarity: 'rare', description: '兩次收尾證明你能把位置優勢變成結束。', condition: '完成降服勝利', effect: '降服壓力 +20%', modifier: 'submissionPressure', amount: 20, earned: { key: 'submissions', threshold: 2 } },
+  { id: 'escape-artist', name: '脫困專家', rarity: 'uncommon', description: '下位不是終點，只是另一條回到比賽的路。', condition: '從不利地面位置脫困', effect: '下位逃脫成功率 +15%', modifier: 'bottomEscape', amount: 15, earned: { key: 'bottomEscapes', threshold: 3 } },
   { id: 'comeback-fighter', name: '逆轉鬥士', rarity: 'rare', description: '比分落後時，你不再把壓力誤認成結局。', condition: '首回合落後後繼續比賽', effect: '落後時成功率 +20%', modifier: 'comeback', amount: 20, earned: { key: 'comebackWins', threshold: 2 } },
   { id: 'iron-will', name: '鋼鐵意志', rarity: 'rare', description: '你曾多次看見比賽即將結束，卻仍走了回來。', condition: '身體進入危急狀態', effect: '危急狀態防守 +20%', modifier: 'criticalDefense', amount: 20, earned: { key: 'survivedFinishWindows', threshold: 3 } },
-  { id: 'cage-general', name: '籠邊統治者', rarity: 'uncommon', description: '鐵網對你不是邊界，而是一件控制對手的工具。', condition: '籠邊控制', effect: '籠邊控制效果 +15%', modifier: 'cageControl', amount: 15, earned: { key: 'cageMinutes', threshold: 6 } },
+  { id: 'cage-general', name: '籠邊統治者', rarity: 'uncommon', description: '鐵網對你不是邊界，而是一件控制對手的工具。', condition: '累積 6 分鐘籠邊控制', effect: '籠邊控制效果 +15%', modifier: 'cageControl', amount: 15, earned: { key: 'cageMinutes', threshold: 6 } },
 ]
 
 export const BIRTH_TRAITS = TRAITS.filter((trait) => !trait.earned)

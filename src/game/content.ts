@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Branch, Motive, Region, TechniqueNode } from './types'
+import type { Branch, Motive, Region, RegionProfile, TechniqueNode } from './types'
 
 export const REGION_LABELS: Record<Region, string> = {
   'hong-kong': '香港',
@@ -40,11 +40,12 @@ export const BACKGROUNDS: Array<{
   primary: Branch
   secondary: Branch
   startingNodes?: [string, string]
+  startingMoves?: string[]
 }> = [
   { id: 'boxing', name: '業餘拳擊手', description: '腳步扎實，出拳俐落，但一被拖到地面就無所適從。', primary: 'boxing', secondary: 'clinch' },
   { id: 'sanda', name: '散打校隊', description: '你會踢、會打，也熟悉接腿後的摔法。', primary: 'kicking', secondary: 'wrestling' },
   { id: 'muay-thai', name: '泰拳館少年', description: '你不怕近身硬拚，通常會用膝和肘回敬對手。', primary: 'kicking', secondary: 'clinch' },
-  { id: 'wrestling', name: '自由式摔跤選手', description: '壓低重心、連續進腿和控制對手已成習慣；現在該學的是站立打擊與降服。', primary: 'wrestling', secondary: 'ground', startingNodes: ['wrestle-sprawl', 'wrestle-double'] },
+  { id: 'wrestling', name: '自由式摔跤選手', description: '壓低重心、連續進腿和控制對手已成習慣；現在該學的是站立打擊與降服。', primary: 'wrestling', secondary: 'ground', startingNodes: ['wrestle-sprawl', 'wrestle-double'], startingMoves: ['shot-entry'] },
   { id: 'judo', name: '柔道黑帶新秀', description: '你很會讓對手失去平衡，但沒有道服可抓時，一切都得重新適應。', primary: 'clinch', secondary: 'wrestling' },
   { id: 'bjj', name: '巴西柔術選手', description: '你熟悉防守架、轉位與各種降服；難的是如何先把對手拖到地面。', primary: 'ground', secondary: 'wrestling', startingNodes: ['ground-posture', 'ground-guard'] },
 ]
@@ -58,19 +59,72 @@ export const WEIGHT_CLASSES = [
   { name: '輕重量級', limit: 93 },
 ] as const
 
-export const REGION_NAMES: Record<Region, { given: string[]; family: string[] }> = {
+export const REGION_PROFILES: Record<Region, RegionProfile> = {
   'hong-kong': {
-    family: ['陳', '李', '梁', '黃', '周', '何', '郭', '鄧', '張', '劉', '羅', '許', '謝', '馮', '葉', '蘇', '潘', '馬', '蔡', '杜'],
-    given: ['家朗', '俊熙', '柏謙', '梓峰', '皓然', '天佑', '子健', '浩文', '卓賢', '嘉俊', '逸朗', '樂軒', '晉希', '啟文', '駿謙', '諾言', '朗賢', '志恆', '偉霆', '文皓'],
+    label: '香港', circuit: '國際門戶',
+    description: '商業曝光多、外來拳手也多。地方收入較高，但醫療與生活成本同樣更高。',
+    opponentMix: '約 50% 香港 · 25% 鄰近地區 · 25% 亞洲來客', economyLabel: '高收入／高成本', economyMultiplier: 1.15,
+    currency: { symbol: 'HK$', displayRate: 0.25, rounding: 10 },
+    hometowns: ['九龍', '港島', '新界', '荃灣', '沙田'],
+    identities: [
+      { name: '陳家朗', alias: 'Ka-long Chan' }, { name: '梁卓賢', alias: 'Cheuk-yin Leung' },
+      { name: '黃俊熙', alias: 'Chun-hei Wong' }, { name: '何柏謙', alias: 'Pak-him Ho' },
+      { name: '鄧梓峰', alias: 'Tsz-fung Tang' }, { name: '郭天佑', alias: 'Tin-yau Kwok' },
+      { name: '周浩文', alias: 'Ho-man Chow' }, { name: '羅逸朗', alias: 'Yat-long Law' },
+      { name: '許樂軒', alias: 'Lok-hin Hui' }, { name: '馮啟文', alias: 'Kai-man Fung' },
+      { name: '葉駿謙', alias: 'Chun-him Yip' }, { name: '蘇志恆', alias: 'Chi-hang So' },
+      { name: '潘偉霆', alias: 'Wai-ting Poon' }, { name: '馬朗賢', alias: 'Long-yin Ma' },
+      { name: '杜皓文', alias: 'Ho-man To' }, { name: '謝晉希', alias: 'Chun-hei Tse' },
+      { name: '李諾言', alias: 'Lok-yin Lee' }, { name: '張子健', alias: 'Tsz-kin Cheung' },
+      { name: '劉文皓', alias: 'Man-ho Lau' }, { name: '蔡嘉俊', alias: 'Ka-chun Choi' },
+    ],
+    promotions: {
+      grassroots: ['九龍拳館試煉', '維港週末對抗', '旺角籠鬥秀'],
+      amateur: ['維港格鬥夜', '香港新秀聯賽'], regional: ['亞洲港口挑戰賽', '香江職業格鬥會'],
+    },
   },
   taiwan: {
-    family: ['林', '陳', '張', '王', '黃', '吳', '許', '江', '蔡', '楊', '劉', '鄭', '謝', '郭', '洪', '邱', '曾', '廖', '賴', '徐'],
-    given: ['致遠', '子翔', '柏勳', '冠廷', '承恩', '曜宇', '家豪', '維哲', '昱辰', '品睿', '彥廷', '宇謙', '哲維', '奕翔', '宗翰', '俊傑', '秉宸', '威廷', '祐嘉', '凱翔'],
+    label: '台灣', circuit: '拳館網絡',
+    description: '地方拳館彼此熟識，對手與人情會反覆出現在你的生涯裡。收入與成本最穩定。',
+    opponentMix: '約 65% 台灣 · 20% 鄰近地區 · 15% 亞洲來客', economyLabel: '穩定收入／穩定成本', economyMultiplier: 1,
+    currency: { symbol: 'NT$', displayRate: 1, rounding: 100 },
+    hometowns: ['台北', '新北', '台中', '台南', '高雄'],
+    identities: [
+      { name: '林致遠' }, { name: '江冠廷' }, { name: '吳承恩' }, { name: '洪曜宇' },
+      { name: '邱柏勳' }, { name: '曾品睿' }, { name: '廖彥廷' }, { name: '賴宇謙' },
+      { name: '徐哲維' }, { name: '鄭奕翔' }, { name: '郭宗翰' }, { name: '楊秉宸' },
+      { name: '許威廷' }, { name: '謝祐嘉' }, { name: '蔡凱翔' }, { name: '王昱辰' },
+      { name: '張子翔' }, { name: '黃家豪' }, { name: '劉維哲' }, { name: '陳俊傑' },
+    ],
+    promotions: {
+      grassroots: ['河濱拳館試煉', '廟口週末對抗', '南方格鬥秀'],
+      amateur: ['島嶼格鬥夜', '城市拳館聯賽'], regional: ['海峽格鬥聯盟', '福爾摩沙職業賽'],
+    },
   },
   mainland: {
-    family: ['王', '李', '張', '劉', '趙', '孫', '高', '馬', '陳', '楊', '黃', '周', '吳', '徐', '胡', '朱', '郭', '何', '羅', '宋'],
-    given: ['昊然', '宇航', '子軒', '博文', '俊傑', '天宇', '浩然', '振東', '澤宇', '嘉豪', '明軒', '凱文', '睿哲', '承宇', '景程', '逸凡', '皓軒', '鵬飛', '志遠', '文博'],
+    label: '中國大陸', circuit: '深度賽事',
+    description: '城市賽事與跨城集訓密集，地方競爭最深。收入較低，但治療與生活成本也較低。',
+    opponentMix: '約 75% 中國大陸 · 15% 鄰近地區 · 10% 亞洲來客', economyLabel: '低收入／低成本', economyMultiplier: 0.85,
+    currency: { symbol: '¥', displayRate: 0.22, rounding: 10 },
+    hometowns: ['上海', '成都', '武漢', '西安', '廣州'],
+    identities: [
+      { name: '趙振東' }, { name: '孫宇航' }, { name: '高鵬飛' }, { name: '胡景程' },
+      { name: '朱逸凡' }, { name: '宋文博' }, { name: '周澤宇' }, { name: '馬天宇' },
+      { name: '羅承宇' }, { name: '何睿哲' }, { name: '王明軒' }, { name: '李凱文' },
+      { name: '張昊然' }, { name: '劉博文' }, { name: '陳浩然' }, { name: '楊皓軒' },
+      { name: '黃志遠' }, { name: '吳子軒' }, { name: '徐嘉豪' }, { name: '郭文昊' },
+    ],
+    promotions: {
+      grassroots: ['城市俱樂部試煉', '街區週末對抗', '新秀格鬥秀'],
+      amateur: ['全國新秀賽', '城市俱樂部聯賽'], regional: ['東方職業格鬥會', '跨城格鬥巡迴'],
+    },
   },
+}
+
+export function formatRegionalMoney(value: number, region: Region): string {
+  const { symbol, displayRate, rounding } = REGION_PROFILES[region].currency
+  const converted = Math.round(value * displayRate / rounding) * rounding
+  return `${symbol} ${converted.toLocaleString('zh-TW')}`
 }
 
 export const OPPONENT_NATIONALITIES: Record<Region, string> = {
