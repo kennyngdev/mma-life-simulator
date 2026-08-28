@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { createNewRun, getWeightOptions } from '../src/game/engine'
-import type { CriticalOption, FinishKind, GameState } from '../src/game/types'
+import type { CampAction, CampDrillChallenge, CriticalOption, FinishKind, GameState } from '../src/game/types'
 
 const storage = vi.hoisted(() => ({
   archiveBiography: vi.fn(),
@@ -33,7 +33,7 @@ function gameAtFinishMinigame(kind: FinishKind): GameState {
     activeFinishWindow: {
       attacker: 'player', kind, opportunity: 72, threat: '明顯機會', sourceAction: kind === 'submission' ? '十字架控制' : '重擺拳', sourceStep: 3,
       sourcePosition: kind === 'submission' ? 'bottom' : 'pocket',
-      difficulty: { aimTolerance: .24, timingTolerance: .25, cycleMs: 1300, submissionStart: .5, submissionResistance: .1, submissionDurationMs: 3600, targetX: .52, targetY: .3 },
+      difficulty: { aimTolerance: .12, timingTolerance: .25, cycleMs: 1300, targetTravel: .1, targetCycleMs: 4400, submissionStart: .5, submissionResistance: .1, submissionDurationMs: 3600, targetX: .52, targetY: .3 },
     },
     commentary: ['前面的攻防替你創造了終結窗口。'], scores: [], finished: false,
   }
@@ -48,7 +48,7 @@ function gameAtBackControl(): GameState {
     executionId: `base-${id}`, executionName, branch: 'ground', category,
     effectSummary: label === '裸絞（RNC）' || label.includes('十字固') ? '主效：建立降服終結壓力 · 代價：體力 10' : '主效：頭部傷害 · 代價：體力 7',
     finishRoute: label === '裸絞（RNC）' || label.includes('十字固') ? '降服路線：位置、控制與破綻會開啟終結窗口' : undefined,
-    odds: { clean: 42, contested: 35, countered: 23 }, matchup: 'neutral', matchupReason: '雙方戰術沒有直接克制',
+    odds: { clean: 42, contested: 35, countered: 23 }, matchup: 'neutral', matchupReason: '雙方戰術沒有直接克制', identityTags: [],
   })
   const rnc = option('rear-naked-choke', '裸絞（RNC）', 'offense', '裸絞')
   const armbar = option('back-armbar', '背後十字固', 'offense', '背後十字固')
@@ -69,6 +69,23 @@ function gameAtCounteredTakedownEntry(): GameState {
     commentary: [`第 1 回合，你主動尋找抱摔機會。你壓低重心射出雙腿抱摔，但${opponent.name}後撤髖部避開切入，順勢壓住上身；你落到防守架下位。`],
     prompt: { ...game.fight!.prompt!, title: '接觸｜防守架下位', position: 'bottom' },
   })
+  return game
+}
+
+function gameAtCampDrill(kind: CampAction): GameState {
+  const game = createNewRun(input)
+  const branch = kind === 'technique' || kind === 'sparring' ? 'boxing' as const : undefined
+  const answer = kind === 'sparring' ? 'defense' : 'boxing'
+  const challenge: CampDrillChallenge = {
+    id: `ui-${kind}`, kind, branch, title: `${kind} drill`, instruction: '測試用訓練。', durationMs: 30_000,
+    prompts: kind === 'recovery' ? [] : [
+      { cue: '第一拍', answer, options: [answer, kind === 'sparring' ? 'offense' : 'kicking'] },
+      { cue: '第二拍', answer, options: [answer, kind === 'sparring' ? 'transition' : 'clinch'] },
+      { cue: '第三拍', answer, options: [answer, kind === 'sparring' ? 'offense' : 'ground'] },
+    ],
+  }
+  game.phase = 'camp-drill'
+  game.activeCampDrill = challenge
   return game
 }
 
@@ -181,6 +198,44 @@ describe('生涯重置', () => {
     expect(techniqueFocus).not.toHaveTextContent('影片研究')
     expect(techniqueFocus).not.toHaveTextContent('醫療恢復')
     expect(screen.getByText('通用訓練')).toBeInTheDocument()
+    expect(screen.queryByText('體能訓練')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['technique', '技術小遊戲', '拳擊'],
+    ['sparring', '對練小遊戲', '防守拆解'],
+    ['film', '研究小遊戲', '拳擊'],
+  ] as const)('三種選擇式營隊訓練會接受觸控選擇並進入結果畫面：%s', async (kind, label, answer) => {
+    storage.loadGame.mockResolvedValue({ game: gameAtCampDrill(kind) })
+    render(<App />)
+
+    expect(await screen.findByLabelText(label)).toBeInTheDocument()
+    for (let index = 0; index < 3; index += 1) fireEvent.click(screen.getByRole('button', { name: answer }))
+    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+  })
+
+  it('恢復訓練可用三次按住與放開循環完成', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtCampDrill('recovery') })
+    render(<App />)
+
+    const control = await screen.findByRole('button', { name: '按住，穩定呼吸' })
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.pointerDown(control, { pointerId: index + 1 })
+      fireEvent.pointerUp(control, { pointerId: index + 1 })
+    }
+    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+  })
+
+  it('寬鬆訓練節奏會產生更長的挑戰窗口，但仍保留最高獎勵資格', async () => {
+    const game = createNewRun(input)
+    game.phase = 'camp'
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '開啟寬鬆訓練節奏' }))
+    expect(screen.getByText(/更長的讀取與呼吸窗口/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /技術訓練/ }))
+    expect(await screen.findByText(/最高獎勵不變/)).toBeInTheDocument()
   })
 
   it('訓練營會預告每段關係目前帶來的實際效果', async () => {
@@ -194,8 +249,8 @@ describe('生涯重置', () => {
 
     const support = await screen.findByRole('region', { name: '關係支援' })
     expect(support).toHaveTextContent('關係會改變訓練結果')
-    expect(support).toHaveTextContent('每次技術訓練提升 3 點技術')
-    expect(support).toHaveTextContent('家庭壓力干擾休養：疲勞只減 14')
+    expect(support).toHaveTextContent('招式熟練度更容易達到上限')
+    expect(support).toHaveTextContent('家庭壓力會讓這次休養打些折扣')
     expect(screen.getByRole('button', { name: /技術訓練/ })).toHaveTextContent('深厚信任')
     expect(screen.getByRole('button', { name: /休養治療/ })).toHaveTextContent('關係緊張')
   })
@@ -241,7 +296,7 @@ describe('生涯重置', () => {
     expect(await screen.findByText('終結一擊')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '我明白了，開始挑戰' }))
     expect(await screen.findByLabelText('擊倒進攻小遊戲')).toBeInTheDocument()
-    expect(screen.getByText(/拖曳準星瞄準紅色目標/)).toBeInTheDocument()
+    expect(screen.getByText(/瞄準紅色目標並跟隨移動/)).toBeInTheDocument()
   })
 
   it('降服窗口提供連點與節奏長按兩種操作', async () => {
@@ -261,7 +316,7 @@ describe('生涯重置', () => {
     const first = render(<App />)
 
     const tutorial = await screen.findByRole('dialog', { name: '終結小遊戲怎麼玩？' })
-    expect(tutorial).toHaveTextContent('重擊：瞄準再抓時機')
+    expect(tutorial).toHaveTextContent('重擊：追蹤再抓時機')
     expect(tutorial).toHaveTextContent('降服：連點或節奏長按')
     expect(screen.queryByLabelText('擊倒進攻小遊戲')).not.toBeInTheDocument()
 

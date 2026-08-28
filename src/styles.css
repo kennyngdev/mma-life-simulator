@@ -333,6 +333,8 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .move-section-label span { font-weight: 800; }
 .move-section-label small { color: var(--muted); font-size: 9px; }
 .execution-preview { margin-top: 7px; display: block; color: #f0d4bd; font-size: 11px; font-style: normal; font-weight: 700; }
+.identity-tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 5px; }
+.identity-tags small { padding: 4px 7px; border: 1px solid rgb(215 189 131 / .3); border-radius: 999px; color: #ead2a4; background: rgb(215 189 131 / .08); font-size: 10px; font-weight: 800; }
 .option-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .option-head > b { padding: 3px 6px; border-radius: 999px; color: var(--muted); background: var(--surface-3); font-size: 9px; }
 .matchup-favored { border-left: 3px solid var(--good); }
@@ -406,9 +408,35 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .fighter-silhouette > i { position: absolute; left: 50%; top: 0; width: 28%; aspect-ratio: 1; translate: -50% 0; border-radius: 48%; background: #6e6b66; }
 .fighter-silhouette > b { position: absolute; left: 50%; top: 23%; width: 52%; height: 56%; translate: -50% 0; border-radius: 45% 45% 20% 20%; background: #5b5955; }
 .fighter-silhouette > span { position: absolute; left: 50%; bottom: 0; width: 74%; height: 40%; translate: -50% 0; border-radius: 50% 50% 8% 8%; background: #484743; }
-.strike-target { position: absolute; translate: -50% -50%; min-width: 42px; border: 2px solid #ff755b; border-radius: 50%; background: radial-gradient(circle, rgb(255 117 91 / .62), rgb(226 83 53 / .08) 63%, transparent 65%); box-shadow: 0 0 22px rgb(226 83 53 / .45); pointer-events: none; }
+.strike-target { position: absolute; translate: -50% -50%; min-width: 42px; border: 2px solid #ff755b; border-radius: 50%; background: radial-gradient(circle, rgb(255 117 91 / .62), rgb(226 83 53 / .08) 63%, transparent 65%); box-shadow: 0 0 22px rgb(226 83 53 / .45); pointer-events: none; will-change: left, top; }
 .aim-reticle { position: absolute; width: 42px; height: 42px; display: grid; place-items: center; translate: -50% -50%; border: 2px solid #fff; border-radius: 50%; color: #fff; font: 400 26px/1 monospace; text-shadow: 0 0 8px #000; box-shadow: 0 0 0 1px #000, 0 0 14px rgb(255 255 255 / .4); pointer-events: none; }
 .minigame-instruction { margin: 11px 4px 0; color: var(--muted); font-size: 12px; line-height: 1.6; text-align: center; }
+.drill-brief { margin: 13px 0; padding: 13px 14px; border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: 12px; background: linear-gradient(135deg, rgb(215 189 131 / .11), var(--surface)); }
+.drill-brief > span { color: var(--gold); font: 800 10px "IBM Plex Mono", monospace; letter-spacing: .12em; }
+.drill-brief p { margin: 5px 0; font-size: 14px; line-height: 1.6; }
+.drill-brief small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.camp-drill { min-height: 236px; padding: 16px 13px 13px; border: 1px solid var(--line-bright); border-radius: 18px; background: radial-gradient(circle at 50% 0, rgb(226 83 53 / .12), transparent 50%), var(--surface); }
+.drill-progress { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.drill-progress > i { height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-3); }
+.drill-progress > i > b { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--gold)); transition: width .18s ease; }
+.drill-progress small { color: var(--dim); font-size: 10px; }
+.drill-cue { min-height: 66px; margin: 29px 9px 19px; display: grid; place-items: center; color: #eee0d1; font-size: clamp(17px, 5vw, 23px); font-weight: 800; line-height: 1.35; text-align: center; }
+.drill-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.drill-options button { min-height: 52px; padding: 9px; border: 1px solid var(--line-bright); border-radius: 11px; color: var(--ink); background: var(--surface-3); font-size: 13px; font-weight: 800; cursor: pointer; }
+.drill-options button:active { transform: scale(.98); border-color: var(--gold); }
+.recovery-drill { display: grid; place-items: center; }
+.recovery-orb { position: relative; width: 112px; height: 112px; margin: 18px 0; display: grid; place-items: center; border: 1px solid rgb(215 189 131 / .55); border-radius: 50%; color: var(--gold); background: radial-gradient(circle, rgb(215 189 131 / .22), rgb(215 189 131 / .04) 62%, transparent 64%); box-shadow: 0 0 0 12px rgb(215 189 131 / .035); transition: transform .7s ease, box-shadow .7s ease; }
+.recovery-orb i { position: absolute; inset: 12px; border: 1px solid rgb(215 189 131 / .3); border-radius: inherit; }
+.recovery-orb b { position: relative; font-size: 18px; }
+.recovery-orb.holding { transform: scale(1.18); box-shadow: 0 0 0 22px rgb(215 189 131 / .08), 0 0 24px rgb(215 189 131 / .25); }
+.recovery-drill .drill-progress { width: min(100%, 330px); }
+.recovery-control { width: min(100%, 330px); min-height: 58px; margin-top: 25px; border: 1px solid var(--gold); border-radius: 12px; color: #201b16; background: linear-gradient(135deg, #e0c58c, #b89559); font-size: 15px; font-weight: 900; cursor: pointer; touch-action: none; }
+.drill-result-card { padding: 30px 18px; border: 1px solid rgb(98 169 123 / .5); border-radius: 18px; background: radial-gradient(circle at 50% 0, rgb(98 169 123 / .18), transparent 55%), var(--surface); text-align: center; }
+.drill-result-card > span { width: 48px; height: 48px; margin: 0 auto 10px; display: grid; place-items: center; border: 1px solid rgb(98 169 123 / .7); border-radius: 50%; color: #c2e5ca; font-size: 24px; font-weight: 900; }
+.drill-result-card h2 { margin: 0; font-size: 24px; }
+.drill-result-card p { margin: 8px auto 18px; max-width: 34ch; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.drill-effect-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
+.drill-effect-list b { padding: 7px 9px; border-radius: 999px; color: #c2e5ca; background: rgb(98 169 123 / .14); font-size: 12px; }
 .submission-minigame { padding: 18px 12px 12px; border: 1px solid var(--line-bright); border-radius: 18px; background: radial-gradient(circle at 50% 35%, rgb(143 103 182 / .18), #11110f 72%); }
 .submission-meta { display: flex; justify-content: space-between; align-items: baseline; }
 .submission-meta b { font-size: 19px; }
@@ -565,6 +593,9 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
   .context-strip .metric strong { font-size: 14px; }
   .branch-tabs.five button { font-size: 12px; }
   .game-header { padding-inline: 10px; }
+  .game-header { gap: 7px; }
+  .header-actions { gap: 3px; }
+  .header-actions button { min-width: 39px; padding-inline: 4px; font-size: 10px; }
   .strike-pad { min-height: 250px; }
 }
 

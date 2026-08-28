@@ -1,5 +1,5 @@
 import { openDB } from 'idb'
-import type { Biography, GameState, LoadGameResult, SaveEnvelope } from './types'
+import type { Biography, CampAction, GameState, LoadGameResult, SaveEnvelope } from './types'
 
 const DATABASE = 'cage-life'
 const STORE = 'records'
@@ -16,7 +16,7 @@ async function database() {
 export async function saveGame(game: GameState): Promise<void> {
   const db = await database()
   const envelope: SaveEnvelope = {
-    saveVersion: 8,
+    saveVersion: 9,
     rulesVersion: game.rulesVersion,
     contentVersion: game.contentVersion,
     savedAt: Date.now(),
@@ -27,10 +27,58 @@ export async function saveGame(game: GameState): Promise<void> {
 
 export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
-  const envelope = await db.get(STORE, ACTIVE_KEY) as SaveEnvelope | undefined
+  const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
-  if (envelope.saveVersion !== 8 || envelope.rulesVersion !== '0.5.0' || envelope.contentVersion !== '0.8.0') return { resetReason: 'combat-rules-upgrade' }
-  return { game: envelope.game }
+  if (envelope.saveVersion === 9 && envelope.rulesVersion === '0.6.0' && envelope.contentVersion === '0.9.0') {
+    return { game: envelope.game as GameState }
+  }
+  if (envelope.saveVersion === 8 && envelope.rulesVersion === '0.5.0' && envelope.contentVersion === '0.8.0') {
+    return { game: migrateVersion8(envelope.game) }
+  }
+  return { resetReason: 'combat-rules-upgrade' }
+}
+
+type LegacyGame = Omit<GameState, 'saveVersion' | 'rulesVersion' | 'contentVersion' | 'fighter' | 'opponents' | 'campActions' | 'campSharpness' | 'campDrillHistory' | 'activeCampDrill' | 'campDrillOutcome' | 'fight'> & {
+  fighter: GameState['fighter'] & { body?: Record<string, number>; bodyPotential?: Record<string, number> }
+  opponents: Array<GameState['opponents'][number] & { cardio?: number }>
+  campActions: Array<CampAction | 'conditioning'>
+  campSharpness?: GameState['campSharpness']
+  campDrillHistory?: GameState['campDrillHistory']
+  activeCampDrill?: GameState['activeCampDrill']
+  campDrillOutcome?: GameState['campDrillOutcome']
+  fight?: GameState['fight']
+}
+
+/** Converts v8 careers in place conceptually, retaining their biography and all non-physical progress. */
+export function migrateVersion8(game: unknown): GameState {
+  const legacy = structuredClone(game) as LegacyGame
+  if (!legacy.fighter || !legacy.opponents || !legacy.campActions) throw new Error('無法讀取舊生涯存檔')
+  const fighter = legacy.fighter as GameState['fighter'] & { body?: Record<string, number>; bodyPotential?: Record<string, number> }
+  const opponents = legacy.opponents as Array<GameState['opponents'][number] & { cardio?: number }>
+  delete fighter.body
+  delete fighter.bodyPotential
+  for (const opponent of opponents) delete opponent.cardio
+  const campActions = legacy.campActions.filter((action): action is CampAction => action !== 'conditioning')
+  const fight = legacy.fight ? { ...legacy.fight, lastSuccessfulIntentId: undefined } : undefined
+  return {
+    ...legacy,
+    saveVersion: 9,
+    rulesVersion: '0.6.0',
+    contentVersion: '0.9.0',
+    fighter,
+    opponents,
+    campActions,
+    campSharpness: legacy.campSharpness ?? {},
+    campDrillHistory: legacy.campDrillHistory ?? [],
+    activeCampDrill: legacy.activeCampDrill,
+    campDrillOutcome: legacy.campDrillOutcome,
+    fight,
+  }
+}
+
+/** Backwards-compatible name used by legacy callers and migration tests. */
+export function removeLegacyPhysicalStats(game: GameState): GameState {
+  return migrateVersion8(game)
 }
 
 export async function clearActiveGame(): Promise<void> {

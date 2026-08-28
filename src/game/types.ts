@@ -2,11 +2,13 @@ export type Region = 'hong-kong' | 'taiwan' | 'mainland'
 export type Motive = 'family' | 'prove' | 'honor' | 'fame'
 export type Stage = 'amateur' | 'regional' | 'asia' | 'world' | 'legacy'
 export type Branch = 'boxing' | 'kicking' | 'clinch' | 'wrestling' | 'ground'
-export type BodyStat = 'power' | 'speed' | 'cardio' | 'recovery'
 export type MindStat = 'fightIQ' | 'composure'
 export type HealthPart = 'head' | 'hands' | 'knees' | 'torso'
 export type WeightPlan = 'safe' | 'standard' | 'aggressive'
-export type CampAction = 'technique' | 'sparring' | 'conditioning' | 'film' | 'recovery'
+export type CampAction = 'technique' | 'sparring' | 'film' | 'recovery'
+export type CampDrillKind = CampAction
+export type StrikeKind = 'punch' | 'kick'
+export type StrikeCommitment = 'quick' | 'set' | 'committed'
 export type RoundPlan = 'distance' | 'pressure' | 'takedown' | 'cage' | 'recover'
 export type Position =
   | 'range' | 'pocket' | 'clinch' | 'cage'
@@ -35,6 +37,7 @@ export type GamePhase =
   | 'reveal'
   | 'offer'
   | 'camp'
+  | 'camp-drill'
   | 'life'
   | 'growth'
   | 'weight'
@@ -123,8 +126,6 @@ export interface FighterState {
   frame: string
   technique: Record<Branch, number>
   techniquePotential: Record<Branch, number>
-  body: Record<BodyStat, number>
-  bodyPotential: Record<BodyStat, number>
   mind: Record<MindStat, number>
   health: Record<HealthPart, number>
   fatigue: number
@@ -157,7 +158,6 @@ export interface Opponent {
   rank: number
   rating: number
   technique: Record<Branch, number>
-  cardio: number
   composure: number
   weakness: Branch
   relationship: number
@@ -177,6 +177,38 @@ export interface FightOffer {
 }
 
 export type RiskLabel = '低風險' | '中度風險' | '高風險' | '極高風險' | '絕望'
+
+export interface CampDrillPrompt {
+  cue: string
+  answer: string
+  options: string[]
+}
+
+export interface CampDrillChallenge {
+  id: string
+  kind: CampDrillKind
+  branch?: Branch
+  title: string
+  instruction: string
+  durationMs: number
+  relaxedTiming?: boolean
+  prompts: CampDrillPrompt[]
+}
+
+export type CampDrillResult =
+  | { kind: 'technique'; answers: string[]; elapsedMs: number }
+  | { kind: 'sparring'; answers: string[]; elapsedMs: number }
+  | { kind: 'film'; answers: string[]; elapsedMs: number }
+  | { kind: 'recovery'; heldDurationsMs: number[]; elapsedMs: number }
+
+export interface CampDrillOutcome {
+  kind: CampDrillKind
+  branch?: Branch
+  score: number
+  label: '穩定完成' | '銳利表現' | '完美節奏'
+  effects: string[]
+  summary: string
+}
 
 export interface CriticalOption {
   id: string
@@ -203,6 +235,7 @@ export interface CriticalOption {
   odds: ExchangeOdds
   matchup: TacticalMatchup
   matchupReason: string
+  identityTags: string[]
 }
 
 export interface ExchangeOdds {
@@ -258,6 +291,8 @@ export interface FightMoveDefinition {
   exploits: OpeningKey[]
   defensive?: boolean
   submission?: boolean
+  strikeKind?: StrikeKind
+  commitment?: StrikeCommitment
 }
 
 export interface ExecutionVariant {
@@ -325,6 +360,8 @@ export interface FinishDifficulty {
   aimTolerance: number
   timingTolerance: number
   cycleMs: number
+  targetTravel?: number
+  targetCycleMs?: number
   submissionStart: number
   submissionResistance: number
   submissionDurationMs: number
@@ -370,6 +407,7 @@ export interface FightState {
   plan?: RoundPlan
   lastSuccessfulBranch?: Branch
   lastSuccessfulAction?: string
+  lastSuccessfulIntentId?: string
   criticalCount: number
   sequenceStep: 1 | 2 | 3 | 4
   initiative: Initiative
@@ -449,9 +487,9 @@ export interface RngStreams {
 }
 
 export interface GameState {
-  saveVersion: 8
-  rulesVersion: '0.5.0'
-  contentVersion: '0.8.0'
+  saveVersion: 9
+  rulesVersion: '0.6.0'
+  contentVersion: '0.9.0'
   seed: string
   phase: GamePhase
   stage: Stage
@@ -461,6 +499,10 @@ export interface GameState {
   offers: FightOffer[]
   selectedOfferId?: string
   campActions: CampAction[]
+  campSharpness: Partial<Record<Branch, number>>
+  campDrillHistory: CampDrillOutcome[]
+  activeCampDrill?: CampDrillChallenge
+  campDrillOutcome?: CampDrillOutcome
   lifeEvent?: LifeEvent
   lifeEventResult?: LifeEventResult
   growthDestination?: 'weight' | 'offer' | 'retirement'
@@ -475,7 +517,10 @@ export type GameCommand =
   | { type: 'ACK_REVEAL' }
   | { type: 'SELECT_OFFER'; offerId: string }
   | { type: 'DECLINE_OFFERS' }
-  | { type: 'TAKE_CAMP_ACTION'; action: CampAction; branch?: Branch }
+  | { type: 'START_CAMP_DRILL'; action: CampAction; branch?: Branch; relaxedTiming?: boolean }
+  | { type: 'RESOLVE_CAMP_DRILL'; result: CampDrillResult }
+  | { type: 'ACK_CAMP_DRILL_RESULT' }
+  | { type: 'CANCEL_CAMP_DRILL' }
   | { type: 'RESOLVE_LIFE'; optionId: string }
   | { type: 'ACK_LIFE_RESULT' }
   | { type: 'UNLOCK_NODE'; nodeId: string }

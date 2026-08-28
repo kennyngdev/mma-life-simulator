@@ -4,12 +4,20 @@ const stages = (contact: number, exchange: number, turn: number, finish: number)
 const effects = (score: number, headDamage: number, bodyDamage: number, legDamage: number, control: number, staminaCost: number, finishPressure: number) =>
   ({ score, headDamage, bodyDamage, legDamage, control, staminaCost, finishPressure })
 
+const STANDING_POSITIONS: Position[] = ['range', 'pocket', 'cage', 'cage-control', 'cage-defense']
+const COMMITTED_KICKS = new Set(['body-kick', 'switch-kick', 'question-mark-kick', 'head-kick', 'spinning-back-kick', 'step-knee'])
+
 function move(
   id: string, label: string, description: string, positions: Position[], branch: Branch,
   category: FightMoveDefinition['category'], stageWeights: Record<FightStageName, number>,
   vector: ReturnType<typeof effects>, extras: Partial<FightMoveDefinition> = {},
 ): FightMoveDefinition {
-  return { id, label, description, positions, branch, category, stageWeights, effects: vector, basic: true, creates: [], exploits: [], ...extras }
+  const standing = positions.some((position) => STANDING_POSITIONS.includes(position))
+  const strikeKind = extras.strikeKind ?? (category === 'offense' && standing
+    ? branch === 'boxing' ? 'punch' : branch === 'kicking' ? 'kick' : undefined
+    : undefined)
+  const commitment = extras.commitment ?? (strikeKind === 'punch' ? 'quick' : strikeKind === 'kick' ? (COMMITTED_KICKS.has(id) ? 'committed' : 'set') : undefined)
+  return { id, label, description, positions, branch, category, stageWeights, effects: vector, basic: true, creates: [], exploits: [], strikeKind, commitment, ...extras }
 }
 
 /** Every legal positional action lives here. The engine ranks this full pool instead of enforcing branch diversity. */
@@ -22,8 +30,8 @@ export const FIGHT_INTENTS: FightMoveDefinition[] = [
   move('calf-kick', '小腿低掃', '用脛骨踢向腓總神經附近，快速削弱站姿與移動。', ['range', 'pocket'], 'kicking', 'offense', stages(7, 10, 8, 6), effects(7, 0, 0, 11, 0, 7, 5), { exploits: ['lead-leg-heavy'], creates: ['off-balance'] }),
   move('inside-low-kick', '內側低掃', '踢向大腿內側，讓雙腳交叉並破壞下一拍重心。', ['range'], 'kicking', 'offense', stages(8, 8, 10, 6), effects(6, 0, 0, 8, 2, 6, 3), { creates: ['off-balance', 'weight-forward'] }),
   move('front-kick', '前踢', '用腳掌頂開軀幹，打斷前壓並重建距離。', ['range'], 'kicking', 'defense', stages(9, 6, 8, 9), effects(5, 1, 7, 0, 2, 5, 3), { cleanPosition: 'range', defensive: true, exploits: ['weight-forward'], creates: ['off-balance'] }),
-  move('body-kick', '身體踢', '以脛骨重踢肋部，迫使對手收肘保護軀幹。', ['range', 'pocket'], 'kicking', 'offense', stages(5, 9, 9, 8), effects(9, 1, 14, 0, 0, 9, 8), { exploits: ['high-guard'], creates: ['tight-elbows'] }),
-  move('switch-kick', '換架中段踢', '快速交換站姿後用前腿重踢軀幹，改變熟悉的節奏。', ['range', 'pocket'], 'kicking', 'offense', stages(5, 9, 10, 8), effects(9, 1, 13, 0, 1, 9, 8), { exploits: ['high-guard'], creates: ['tight-elbows'] }),
+  move('body-kick', '身體踢', '以脛骨重踢肋部，迫使對手收肘保護軀幹。', ['range', 'pocket'], 'kicking', 'offense', stages(5, 9, 9, 8), effects(9, 1, 14, 0, 0, 9, 8), { counteredPosition: 'clinch', exploits: ['high-guard'], creates: ['tight-elbows'] }),
+  move('switch-kick', '換架中段踢', '快速交換站姿後用前腿重踢軀幹，改變熟悉的節奏。', ['range', 'pocket'], 'kicking', 'offense', stages(5, 9, 10, 8), effects(9, 1, 13, 0, 1, 9, 8), { counteredPosition: 'clinch', exploits: ['high-guard'], creates: ['tight-elbows'] }),
   move('question-mark-kick', '問號踢', '先抬膝偽裝前踢，再繞過防守改踢頭部。', ['range'], 'kicking', 'offense', stages(1, 5, 10, 13), effects(10, 16, 1, 0, 0, 13, 17), { counteredPosition: 'bottom', exploits: ['tight-elbows', 'high-guard'], creates: ['off-balance'] }),
   move('head-kick', '頭部高踢', '沿著防守外側踢向頭部；威力巨大，也可能被接腿反摔。', ['range', 'pocket'], 'kicking', 'offense', stages(1, 5, 9, 13), effects(10, 17, 0, 0, 0, 13, 18), { counteredPosition: 'bottom', exploits: ['tight-elbows'], creates: ['off-balance'] }),
   move('spinning-back-kick', '轉身後踢', '轉身以腳跟貫穿軀幹，押注高傷害但把背部短暫交出。', ['range', 'pocket'], 'kicking', 'offense', stages(1, 4, 8, 11), effects(9, 3, 16, 0, 0, 13, 14), { counteredPosition: 'back-defense', exploits: ['weight-forward'], creates: ['tight-elbows'] }),

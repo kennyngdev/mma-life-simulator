@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, MOTIVES, REGION_LABELS, TECHNIQUE_NODES } from './game/content'
 import { OPENING_LABELS } from './game/fight-content'
-import { advance, createNewRun, getOpponent, getPotentialLabel, getRelationshipBenefit, getUnlockStatus, getWeightOptions, relationshipTier, STAGE_LABELS } from './game/engine'
+import { advance, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, getOpponent, getPotentialLabel, getRelationshipBenefit, getUnlockStatus, getWeightOptions, relationshipTier, STAGE_LABELS } from './game/engine'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
@@ -9,6 +9,8 @@ import type {
   Biography,
   Branch,
   CampAction,
+  CampDrillChallenge,
+  CampDrillResult,
   CriticalOption,
   FighterState,
   FightDamagePart,
@@ -41,6 +43,7 @@ export default function App() {
   const [resetError, setResetError] = useState<string>()
   const [startupNotice, setStartupNotice] = useState<string>()
   const [sfxEnabled, setSfxEnabled] = useState(() => localStorage.getItem('cage-life:sfx') !== 'off')
+  const [relaxedDrills, setRelaxedDrills] = useState(() => localStorage.getItem('cage-life:relaxed-drills') === 'on')
   const saveQueue = useRef<Promise<void>>(Promise.resolve())
   const playedCue = useRef<string | undefined>(undefined)
 
@@ -84,6 +87,14 @@ export default function App() {
     if (next) unlockAudio()
   }
 
+  const toggleRelaxedDrills = () => {
+    setRelaxedDrills((current) => {
+      const next = !current
+      localStorage.setItem('cage-life:relaxed-drills', next ? 'on' : 'off')
+      return next
+    })
+  }
+
   const resetRun = async () => {
     setResetting(true)
     setResetError(undefined)
@@ -105,10 +116,10 @@ export default function App() {
 
   return (
     <main className="game-shell">
-      <GameHeader game={game} onOverlay={setOverlay} onReset={() => setShowResetConfirmation(true)} sfxEnabled={sfxEnabled} onToggleSfx={toggleSfx} />
+      <GameHeader game={game} onOverlay={setOverlay} onReset={() => setShowResetConfirmation(true)} sfxEnabled={sfxEnabled} onToggleSfx={toggleSfx} relaxedDrills={relaxedDrills} onToggleRelaxedDrills={toggleRelaxedDrills} />
       <div className="game-scroll" aria-live="polite">
         {game.lastMessage && <div className="notice"><span>最新</span>{game.lastMessage}</div>}
-        <GameView game={game} dispatch={dispatch} onNew={resetRun} />
+        <GameView game={game} dispatch={dispatch} onNew={resetRun} relaxedDrills={relaxedDrills} />
       </div>
       {overlay && <InfoOverlay game={game} type={overlay} dispatch={dispatch} onClose={() => setOverlay(undefined)} />}
       {game.lifeEventResult && <LifeEventResultDialog game={game} dispatch={dispatch} />}
@@ -173,7 +184,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
   )
 }
 
-function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx }: { game: GameState; onOverlay: (type: 'status' | 'history') => void; onReset: () => void; sfxEnabled: boolean; onToggleSfx: () => void }) {
+function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx, relaxedDrills, onToggleRelaxedDrills }: { game: GameState; onOverlay: (type: 'status' | 'history') => void; onReset: () => void; sfxEnabled: boolean; onToggleSfx: () => void; relaxedDrills: boolean; onToggleRelaxedDrills: () => void }) {
   const fighter = game.fighter
   return (
     <header className="game-header">
@@ -184,6 +195,7 @@ function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx }: { gam
       </div>
       <div className="header-actions">
         <button type="button" onClick={onToggleSfx} aria-label={sfxEnabled ? '關閉音效' : '開啟音效'} title={sfxEnabled ? '音效開啟' : '音效關閉'}>{sfxEnabled ? '聲效' : '靜音'}</button>
+        <button type="button" onClick={onToggleRelaxedDrills} aria-label={relaxedDrills ? '關閉寬鬆訓練節奏' : '開啟寬鬆訓練節奏'} title="訓練操作節奏">{relaxedDrills ? '寬鬆' : '節奏'}</button>
         <button type="button" onClick={() => onOverlay('status')} aria-label={t('status')}>狀態</button>
         <button type="button" onClick={() => onOverlay('history')} aria-label={t('history')}>歷程</button>
         <button type="button" className="reset-button" onClick={onReset}>重置</button>
@@ -192,11 +204,12 @@ function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx }: { gam
   )
 }
 
-function GameView({ game, dispatch, onNew }: { game: GameState; dispatch: (command: GameCommand) => void; onNew: () => void }) {
+function GameView({ game, dispatch, onNew, relaxedDrills }: { game: GameState; dispatch: (command: GameCommand) => void; onNew: () => void; relaxedDrills: boolean }) {
   switch (game.phase) {
     case 'reveal': return <RevealView game={game} dispatch={dispatch} />
     case 'offer': return <OfferView game={game} dispatch={dispatch} />
-    case 'camp': return <CampView game={game} dispatch={dispatch} />
+    case 'camp': return <CampView game={game} dispatch={dispatch} relaxedDrills={relaxedDrills} />
+    case 'camp-drill': return <CampDrillView game={game} dispatch={dispatch} />
     case 'life': return <LifeView game={game} dispatch={dispatch} />
     case 'growth': return <GrowthView game={game} dispatch={dispatch} />
     case 'weight': return <WeightView game={game} dispatch={dispatch} />
@@ -259,7 +272,7 @@ function OfferView({ game, dispatch }: ViewProps) {
           return <article className={`offer-card risk-${riskTone(offer.riskLabel)}`} key={offer.id}>
             <div className="offer-top"><span>{offer.promotion}</span><b>{offer.titleFight ? '冠軍戰' : offer.riskLabel}</b></div>
             <h2>{opponent.name}</h2>
-            <p>國籍 {opponent.nationality ?? opponent.region} · {opponent.style} · 戰績 {opponent.record.wins}-{opponent.record.losses} · 排名 #{opponent.rank}</p>
+            <p>國籍 {opponent.nationality ?? opponent.region} · {opponent.style} · 戰績 {opponent.record.wins}-{opponent.record.losses} · 排名 #{opponent.rank} · 競技評級 {competitiveRatingForOpponent(opponent)}</p>
             <div className="scout-grid" aria-label={`${opponent.name}的賽前情報`}>
               <div><span>他最擅長</span><strong>{BRANCH_META[strength].name}</strong></div>
               <div><span>可以針對</span><strong>{BRANCH_META[opponent.weakness].name}</strong></div>
@@ -278,7 +291,7 @@ function OfferView({ game, dispatch }: ViewProps) {
   )
 }
 
-function CampView({ game, dispatch }: ViewProps) {
+function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills: boolean }) {
   const [branch, setBranch] = useState<Branch>('boxing')
   const benefitFor = (action: CampAction) => {
     const role = action === 'technique' ? 'coach' : action === 'sparring' ? 'partner' : action === 'recovery' ? 'family' : undefined
@@ -290,7 +303,6 @@ function CampView({ game, dispatch }: ViewProps) {
     { id: 'sparring', name: '實戰對練', detail: `在對練中快速提升${BRANCH_META[branch].name}，但可能受傷`, risk: '風險高' },
   ]
   const generalActions: Array<{ id: CampAction; name: string; detail: string; risk: string }> = [
-    { id: 'conditioning', name: '體能訓練', detail: '加強目前最弱的一項身體能力', risk: '疲勞中' },
     { id: 'film', name: '影片研究', detail: '研究對手習慣，讓勝算估計更準確', risk: '增加情報' },
     { id: 'recovery', name: '休養治療', detail: '降低疲勞，讓受損部位慢慢恢復', risk: '不會成長' },
   ]
@@ -303,24 +315,135 @@ function CampView({ game, dispatch }: ViewProps) {
         <legend>技術焦點</legend>
         <div className="branch-tabs five">{BRANCHES.map((value) => <button key={value} className={branch === value ? 'selected' : ''} onClick={() => setBranch(value)}>{BRANCH_META[value].short}<small>{BRANCH_META[value].name}</small></button>)}</div>
         <div className="choice-list">
-          {techniqueActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'TAKE_CAMP_ACTION', action: action.id, branch })}>
-            <strong>{action.name}</strong><span>{action.detail}</span><small>{benefitFor(action.id)?.effect}</small><em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
+          {techniqueActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, branch, relaxedTiming: relaxedDrills })}>
+            <strong>{action.name}</strong><span>{action.detail}</span>{benefitFor(action.id) && <small>{benefitFor(action.id)?.effect}</small>}<em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
           </button>)}
         </div>
       </fieldset>
       <SectionTitle title="通用訓練" subtitle="不論本次主練哪一門技術，都可以安排以下項目。" />
       <div className="choice-list">
-        {generalActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'TAKE_CAMP_ACTION', action: action.id })}>
+        {generalActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, relaxedTiming: relaxedDrills })}>
           <strong>{action.name}</strong><span>{action.detail}</span>{benefitFor(action.id) && <small>{benefitFor(action.id)?.effect}</small>}<em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
         </button>)}
       </div>
-      <div className="camp-log">已完成：{game.campActions.length ? game.campActions.map(campLabel).join(' → ') : '尚未安排'}</div>
+      <div className="camp-log">{relaxedDrills ? '寬鬆節奏：更長的讀取與呼吸窗口，最高獎勵不變。' : ''}{game.campActions.length ? `已完成：${game.campDrillHistory.map((result) => `${campLabel(result.kind)} · ${Math.round(result.score * 100)}%`).join(' → ')}` : relaxedDrills ? '' : '已完成：尚未安排'}</div>
     </Screen>
   )
 }
 
 function campLabel(action: CampAction) {
-  return ({ technique: '技術', sparring: '對練', conditioning: '體能', film: '研究', recovery: '恢復' } as const)[action]
+  return ({ technique: '技術', sparring: '對練', film: '研究', recovery: '恢復' } as const)[action]
+}
+
+function CampDrillView({ game, dispatch }: ViewProps) {
+  const drill = game.activeCampDrill!
+  const outcome = game.campDrillOutcome
+  if (outcome) {
+    return <Screen title="訓練結果" kicker={`${outcome.label} · ${Math.round(outcome.score * 100)}%`}>
+      <article className="drill-result-card">
+        <span aria-hidden="true">✓</span>
+        <h2>{campLabel(outcome.kind)}完成</h2>
+        <p>{outcome.summary}</p>
+        <div className="drill-effect-list">{outcome.effects.map((effect) => <b key={effect}>{effect}</b>)}</div>
+      </article>
+      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_CAMP_DRILL_RESULT' })}>{game.campActions.length >= 3 ? '完成營隊，處理生活事件' : '回到訓練營'}</button></ActionDock>
+    </Screen>
+  }
+  return <Screen title={drill.title} kicker={`營隊訓練 ${game.campActions.length + 1}/3`}>
+    <ContextStrip fighter={game.fighter} />
+    <article className="drill-brief"><span>{campLabel(drill.kind)}</span><p>{drill.instruction}</p><small>{drill.relaxedTiming ? '寬鬆節奏已開啟：窗口更長、更寬，最高獎勵不變。' : '完成這個短訓練才會消耗本次時段；表現會帶來額外收益。'}</small></article>
+    {drill.kind === 'recovery'
+      ? <RecoveryDrill challenge={drill} dispatch={dispatch} />
+      : <ChoiceDrill challenge={drill} dispatch={dispatch} />}
+    <button className="text-button" onClick={() => dispatch({ type: 'CANCEL_CAMP_DRILL' })}>返回訓練營，不計入這次時段</button>
+  </Screen>
+}
+
+function drillChoiceLabel(value: string) {
+  if (value === 'offense') return '進攻截斷'
+  if (value === 'transition') return '轉位繞過'
+  if (value === 'defense') return '防守拆解'
+  if (value === 'pattern') return '記下固定節奏'
+  if (value === 'power') return '只找重擊'
+  if (value === 'random') return '隨機出招'
+  return BRANCH_META[value as Branch]?.name ?? value
+}
+
+function choiceResult(challenge: CampDrillChallenge, answers: string[], elapsedMs: number): CampDrillResult {
+  if (challenge.kind === 'technique') return { kind: 'technique', answers, elapsedMs }
+  if (challenge.kind === 'sparring') return { kind: 'sparring', answers, elapsedMs }
+  return { kind: 'film', answers, elapsedMs }
+}
+
+function ChoiceDrill({ challenge, dispatch }: { challenge: CampDrillChallenge; dispatch: (command: GameCommand) => void }) {
+  const [answers, setAnswers] = useState<string[]>([])
+  const [expired, setExpired] = useState(false)
+  const startedAt = useRef(performance.now())
+  const answersRef = useRef<string[]>([])
+  const resolvedRef = useRef(false)
+  const finish = (next: string[]) => {
+    if (resolvedRef.current) return
+    resolvedRef.current = true
+    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: choiceResult(challenge, next, Math.max(0, performance.now() - startedAt.current)) })
+  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExpired(true), challenge.durationMs)
+    return () => window.clearTimeout(timer)
+  }, [challenge.durationMs])
+  const prompt = expired ? undefined : challenge.prompts[answers.length]
+  const choose = (answer: string) => {
+    if (expired) return
+    const next = [...answersRef.current, answer]
+    answersRef.current = next
+    setAnswers(next)
+    if (next.length >= challenge.prompts.length) finish(next)
+  }
+  const remaining = Math.max(0, challenge.prompts.length - answers.length)
+  return <section className="camp-drill choice-drill" aria-label={`${campLabel(challenge.kind)}小遊戲`}>
+    <div className="drill-progress"><span>讀取 {answers.length}/{challenge.prompts.length}</span><i><b style={{ width: `${challenge.prompts.length ? answers.length / challenge.prompts.length * 100 : 0}%` }} /></i><small>剩餘 {remaining} 段</small></div>
+    {prompt ? <>
+      <p className="drill-cue">{prompt.cue}</p>
+      <div className="drill-options">{prompt.options.map((option) => <button type="button" key={option} onClick={() => choose(option)}>{drillChoiceLabel(option)}</button>)}</div>
+    </> : <><p className="drill-cue">{expired ? '時間到。確認後才會記錄這次訓練。' : '教練正在記錄你的表現……'}</p>{expired && <button type="button" className="primary-action" onClick={() => finish(answersRef.current)}>記錄這次訓練</button>}</>}
+    <p className="minigame-instruction">{challenge.kind === 'technique' ? '按正確順序完成動作；反應越穩，額外成長越多。' : challenge.kind === 'sparring' ? '防守克制進攻、進攻截斷轉位、轉位繞過保守防守。' : '把影片中的優勢、弱點與固定節奏連起來。'}</p>
+  </section>
+}
+
+function RecoveryDrill({ challenge, dispatch }: { challenge: CampDrillChallenge; dispatch: (command: GameCommand) => void }) {
+  const [cycles, setCycles] = useState(0)
+  const [holding, setHolding] = useState(false)
+  const [expired, setExpired] = useState(false)
+  const startedAt = useRef(performance.now())
+  const heldAt = useRef<number | undefined>(undefined)
+  const cyclesRef = useRef(0)
+  const heldDurationsRef = useRef<number[]>([])
+  const resolvedRef = useRef(false)
+  const finish = (durations = heldDurationsRef.current) => {
+    if (resolvedRef.current) return
+    resolvedRef.current = true
+    dispatch({ type: 'RESOLVE_CAMP_DRILL', result: { kind: 'recovery', heldDurationsMs: durations, elapsedMs: Math.max(0, performance.now() - startedAt.current) } })
+  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExpired(true), challenge.durationMs)
+    return () => window.clearTimeout(timer)
+  }, [challenge.durationMs])
+  const begin = () => { if (!expired && cyclesRef.current < 3) { heldAt.current = performance.now(); setHolding(true) } }
+  const release = () => {
+    if (!holding || heldAt.current === undefined) return
+    const held = performance.now() - heldAt.current
+    const next = cyclesRef.current + 1
+    cyclesRef.current = next
+    heldDurationsRef.current = [...heldDurationsRef.current, held]
+    setCycles(next)
+    setHolding(false)
+    if (next >= 3) finish(heldDurationsRef.current)
+  }
+  return <section className="camp-drill recovery-drill" aria-label="恢復訓練小遊戲">
+    <div className={`recovery-orb ${holding ? 'holding' : ''}`} aria-hidden="true"><i /><b>{holding ? '穩住' : '呼吸'}</b></div>
+    <div className="drill-progress"><span>循環 {cycles}/3</span><i><b style={{ width: `${cycles / 3 * 100}%` }} /></i><small>{holding ? '保持節奏' : '準備下一次'}</small></div>
+    {expired ? <button type="button" className="primary-action" onClick={() => finish()}>記錄這次訓練</button> : <button type="button" className="recovery-control" onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); begin() }} onPointerUp={release} onPointerCancel={() => setHolding(false)}>{holding ? '放開，完成呼氣' : '按住，穩定呼吸'}</button>}
+    <p className="minigame-instruction">每次穩定按住後放開，完成三次呼吸循環。節奏越平穩，恢復越完整。</p>
+  </section>
 }
 
 function RelationshipSupport({ relationships }: { relationships: FighterState['relationships'] }) {
@@ -438,16 +561,26 @@ function PreFightView({ game, dispatch }: ViewProps) {
   const offer = game.offers.find((item) => item.id === game.selectedOfferId)!
   const coach = game.fighter.relationships.find((relationship) => relationship.role === 'coach')
   const strength = strongestBranch(opponent)
+  const playerStrength = strongestBranch(game.fighter)
+  const playerWeakness = weakestBranch(game.fighter)
+  const playerRating = competitiveRatingForFighter(game.fighter)
+  const opponentRating = competitiveRatingForOpponent(opponent)
+  const readinessForecast = Math.round((game.fighter.readiness - 70) * 0.12)
+  const sharpnessForecast = Math.max(0, ...Object.values(game.campSharpness))
+  const scoutingForecast = Math.min(6, Math.floor(game.scouting / 17))
+  const forecast = playerRating - opponentRating + readinessForecast + sharpnessForecast + scoutingForecast
   return <Screen title="籠門之前" kicker={offer.promotion}>
     <div className="tale-of-tape">
-      <FighterFace label="你" name={game.fighter.name} value={Math.round(averageTechnique(game.fighter))} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} />
+      <FighterFace label="你" name={game.fighter.name} value={playerRating} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} />
       <span className="versus">VS</span>
-      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={Math.round(opponent.rating)} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} opponent />
+      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={opponentRating} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} opponent />
     </div>
     <div className="briefing">
       <Metric label="比賽" value={offer.titleFight ? '五回合冠軍戰' : '三回合'} note={offer.riskLabel} />
       <Metric label="量級策略" value={`${game.fighter.weightClass} · ${weightPlanLabel(game.fighter.weightPlan)}`} note={`準備度 ${game.fighter.readiness}`} />
-      <Metric label="情報" value={game.scouting >= 50 ? '充分' : game.scouting >= 25 ? '基本' : '有限'} note={`已辨識弱點：${BRANCH_META[opponent.weakness].name}`} />
+      <Metric label="情報" value={game.scouting >= 50 ? '充分' : game.scouting >= 25 ? '基本' : '有限'} note={`最強 ${BRANCH_META[strength].name}／最弱 ${BRANCH_META[opponent.weakness].name}`} />
+      <Metric label="技術對位" value={`${BRANCH_META[playerStrength].name} 對 ${BRANCH_META[opponent.weakness].name}`} note={`你的弱項 ${BRANCH_META[playerWeakness].name}／他最強 ${BRANCH_META[strength].name}`} />
+      <Metric label="賽前評估" value={forecast >= 5 ? '你略佔優勢' : forecast <= -5 ? '對手略佔優勢' : '旗鼓相當'} note={`評級 ${playerRating} vs ${opponentRating} · 狀態 ${readinessForecast >= 0 ? '+' : ''}${readinessForecast} · 銳度 +${sharpnessForecast} · 情報 +${scoutingForecast}`} />
     </div>
     <aside className="coach-note compact">
       <span className="coach-avatar">教</span>
@@ -458,9 +591,14 @@ function PreFightView({ game, dispatch }: ViewProps) {
   </Screen>
 }
 
-function strongestBranch(opponent: Opponent): Branch {
-  return (Object.keys(opponent.technique) as Branch[]).reduce((best, branch) =>
-    opponent.technique[branch] > opponent.technique[best] ? branch : best)
+function strongestBranch(combatant: { technique: Record<Branch, number> }): Branch {
+  return (Object.keys(combatant.technique) as Branch[]).reduce((best, branch) =>
+    combatant.technique[branch] > combatant.technique[best] ? branch : best)
+}
+
+function weakestBranch(combatant: { technique: Record<Branch, number> }): Branch {
+  return (Object.keys(combatant.technique) as Branch[]).reduce((worst, branch) =>
+    combatant.technique[branch] < combatant.technique[worst] ? branch : worst)
 }
 
 function riskTone(risk: RiskLabel) {
@@ -480,10 +618,6 @@ function coachVerdict(opponent: Opponent, risk: RiskLabel) {
         ? '他略佔上風，接了就得按計畫打。'
         : '這不是普通的考驗，現在接要有付出代價的準備。'
   return `${opening}別在${strength}跟他硬碰，想辦法把戰局帶向${weakness}。`
-}
-
-function averageTechnique(fighter: FighterState) {
-  return Object.values(fighter.technique).reduce((sum, value) => sum + value, 0) / 5
 }
 
 function weightPlanLabel(plan: WeightPlan) {
@@ -603,6 +737,7 @@ function CombatOption({ option, onChoose, compact = false }: { option: CriticalO
     <div className="option-head"><strong>{option.label}</strong><b>{matchupLabel}</b></div>
     {!compact && <span>{option.description}</span>}
     <em className="execution-preview">執行：{option.executionName}</em>
+    {option.identityTags.length > 0 && <div className="identity-tags">{option.identityTags.map((tag) => <small key={tag}>{tag}</small>)}</div>}
     <div className="outcome-bands" aria-label={`乾淨奏效 ${Math.round(option.odds.clean)}%，互有得失 ${Math.round(option.odds.contested)}%，遭到反制 ${Math.round(option.odds.countered)}%`}>
       <i className="clean" style={{ flex: option.odds.clean }} /><i className="contested" style={{ flex: option.odds.contested }} /><i className="countered" style={{ flex: option.odds.countered }} />
     </div>
@@ -658,7 +793,7 @@ function MinigameTutorial({ currentKind, onStart }: { currentKind: 'strike' | 's
       </div>
       <ol className="tutorial-steps">
         <li><b>1</b><div><strong>先看清楚角色</strong><span>「終結機會」代表你正在進攻；「終結危險」則要成功防守或掙脫。</span></div></li>
-        <li className={currentKind === 'strike' ? 'current' : ''}><b>2</b><div><strong>重擊：瞄準再抓時機</strong><span>拖曳準星對準紅色目標，等時機線進入中央亮區時放手。</span></div></li>
+        <li className={currentKind === 'strike' ? 'current' : ''}><b>2</b><div><strong>重擊：追蹤再抓時機</strong><span>拖曳準星跟住移動的紅色目標，等時機線進入中央亮區時放手。</span></div></li>
         <li className={currentKind === 'submission' ? 'current' : ''}><b>3</b><div><strong>降服：連點或節奏長按</strong><span>在倒數結束前推高進度；也能切換成亮區內按住、離開前放手。</span></div></li>
       </ol>
       <p className="tutorial-note">這次是<strong>{currentKind === 'strike' ? '重擊操作' : '降服操作'}</strong>。視窗關閉後才會開始倒數。</p>
@@ -670,25 +805,36 @@ function MinigameTutorial({ currentKind, onStart }: { currentKind: 'strike' | 's
 function StrikeMinigame({ game, dispatch }: ViewProps) {
   const finishWindow = game.fight!.activeFinishWindow!
   const difficulty = finishWindow.difficulty
+  const targetTravel = difficulty.targetTravel ?? 0.1
+  const targetCycleMs = difficulty.targetCycleMs ?? 4200
+  const reduceMotion = useMemo(() => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches), [])
   const padRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
   const progressRef = useRef(0)
+  const targetRef = useRef({ x: difficulty.targetX, y: difficulty.targetY })
   const resolvedRef = useRef(false)
   const [aim, setAim] = useState({ x: 0.5, y: 0.72 })
-  const [timing, setTiming] = useState(0)
+  const [motion, setMotion] = useState({ timing: 0, target: targetRef.current })
 
   useEffect(() => {
     let frame = 0
     const started = performance.now()
     const animate = (now: number) => {
       const progress = ((now - started) % difficulty.cycleMs) / difficulty.cycleMs
+      const targetPhase = ((now - started) % targetCycleMs) / targetCycleMs * Math.PI * 2
+      const margin = difficulty.aimTolerance + 0.02
+      const target = reduceMotion ? { x: difficulty.targetX, y: difficulty.targetY } : {
+        x: Math.max(margin, Math.min(1 - margin, difficulty.targetX + targetTravel * Math.sin(targetPhase))),
+        y: Math.max(margin, Math.min(1 - margin, difficulty.targetY + targetTravel * 0.65 * Math.sin(targetPhase * 2))),
+      }
       progressRef.current = progress
-      setTiming(progress)
+      targetRef.current = target
+      setMotion({ timing: progress, target })
       frame = requestAnimationFrame(animate)
     }
     frame = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(frame)
-  }, [difficulty.cycleMs])
+  }, [difficulty.aimTolerance, difficulty.cycleMs, difficulty.targetX, difficulty.targetY, reduceMotion, targetCycleMs, targetTravel])
 
   const moveAim = (clientX: number, clientY: number) => {
     const rect = padRef.current?.getBoundingClientRect()
@@ -703,38 +849,28 @@ function StrikeMinigame({ game, dispatch }: ViewProps) {
   const release = (nextAim = aim) => {
     if (resolvedRef.current) return
     resolvedRef.current = true
-    const aimError = Math.min(1, Math.hypot(nextAim.x - difficulty.targetX, nextAim.y - difficulty.targetY))
+    const aimError = Math.min(1, Math.hypot(nextAim.x - targetRef.current.x, nextAim.y - targetRef.current.y))
     const timingError = Math.min(1, Math.abs(progressRef.current - 0.5) * 2)
     dispatch({ type: 'RESOLVE_FINISH_MINIGAME', result: { kind: 'strike', aimError, timingError } })
   }
-  const adjustAim = (dx: number, dy: number) => setAim((current) => ({ x: Math.max(0, Math.min(1, current.x + dx)), y: Math.max(0, Math.min(1, current.y + dy)) }))
-
   return <section className="strike-minigame" aria-label={finishWindow.attacker === 'player' ? '擊倒進攻小遊戲' : '擊倒防守小遊戲'}>
     <div className="timing-track" aria-label="出手時機">
       <span className="timing-zone" style={{ width: `${difficulty.timingTolerance * 100}%` }} />
-      <i style={{ left: `${timing * 100}%` }} />
+      <i style={{ left: `${motion.timing * 100}%` }} />
     </div>
     <div
       className="strike-pad"
       ref={padRef}
-      tabIndex={0}
-      onPointerDown={(event) => { draggingRef.current = true; event.currentTarget.setPointerCapture(event.pointerId); moveAim(event.clientX, event.clientY) }}
+      onPointerDown={(event) => { draggingRef.current = true; event.currentTarget.setPointerCapture?.(event.pointerId); moveAim(event.clientX, event.clientY) }}
       onPointerMove={(event) => { if (draggingRef.current) moveAim(event.clientX, event.clientY) }}
       onPointerUp={(event) => { const next = moveAim(event.clientX, event.clientY); draggingRef.current = false; release(next) }}
       onPointerCancel={() => { draggingRef.current = false }}
-      onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft') adjustAim(-0.025, 0)
-        else if (event.key === 'ArrowRight') adjustAim(0.025, 0)
-        else if (event.key === 'ArrowUp') adjustAim(0, -0.025)
-        else if (event.key === 'ArrowDown') adjustAim(0, 0.025)
-        else if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) release()
-      }}
     >
       <div className="fighter-silhouette" aria-hidden="true"><i /><b /><span /></div>
-      <span className="strike-target" style={{ left: `${difficulty.targetX * 100}%`, top: `${difficulty.targetY * 100}%`, width: `${difficulty.aimTolerance * 200}%`, aspectRatio: '1' }} />
+      <span className="strike-target" style={{ left: `${motion.target.x * 100}%`, top: `${motion.target.y * 100}%`, width: `${difficulty.aimTolerance * 200}%`, aspectRatio: '1' }} />
       <span className="aim-reticle" style={{ left: `${aim.x * 100}%`, top: `${aim.y * 100}%` }}>+</span>
     </div>
-    <p className="minigame-instruction">{finishWindow.attacker === 'player' ? '拖曳準星瞄準紅色目標；時機線進入中央亮區時放手。' : '把防守準星移到來拳位置；時機線進入中央亮區時放手閃避。'}</p>
+    <p className="minigame-instruction">{finishWindow.attacker === 'player' ? '拖曳準星瞄準紅色目標並跟隨移動；時機線進入中央亮區時放手。' : '跟住移動的來拳位置；時機線進入中央亮區時放手閃避。'}</p>
   </section>
 }
 
@@ -813,11 +949,9 @@ function SubmissionMinigame({ game, dispatch }: ViewProps) {
     <button
       type="button"
       className="submission-control"
-      onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); if (mode === 'tap') tap(); else holdingRef.current = true }}
+      onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); if (mode === 'tap') tap(); else holdingRef.current = true }}
       onPointerUp={() => { holdingRef.current = false }}
       onPointerCancel={() => { holdingRef.current = false }}
-      onKeyDown={(event) => { if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) { event.preventDefault(); if (mode === 'tap') tap(); else holdingRef.current = true } }}
-      onKeyUp={(event) => { if (event.key === ' ' || event.key === 'Enter') holdingRef.current = false }}
     >{mode === 'tap' ? '快速連點' : '亮區內按住'}</button>
     <button type="button" className="input-mode-toggle" onClick={() => changeMode(mode === 'tap' ? 'rhythm' : 'tap')}>{mode === 'tap' ? '改用節奏長按' : '改用單指連點'}</button>
     <p className="minigame-instruction">{mode === 'tap' ? `最多每秒計算八次有效點擊，目前 ${acceptedInputs} 次。` : '游標進入中央亮區時按住，離開前放手恢復。'}</p>
@@ -1036,7 +1170,7 @@ function StatusBar({ label, value, tone }: { label: string; value: number; tone:
 }
 
 function FighterFace({ label, name, value, measurements, opponent = false }: { label: string; name: string; value: number; measurements: string; opponent?: boolean }) {
-  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span>{name.slice(0, 1)}</span><small>{label}</small><strong>{name}</strong><em>身高／臂展 {measurements}</em><em>評價 {value}</em></div>
+  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span>{name.slice(0, 1)}</span><small>{label}</small><strong>{name}</strong><em>身高／臂展 {measurements}</em><em>競技評級 {value}</em></div>
 }
 
 function Metric({ label, value, note }: { label: string; value: string; note: string }) {
