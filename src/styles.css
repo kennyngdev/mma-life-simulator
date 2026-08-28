@@ -113,12 +113,12 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .context-strip { grid-template-columns: repeat(3, 1fr); margin-top: 0; }
 .metric { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
 .metric span, .metric strong, .metric small { display: block; }
-.metric span { color: var(--dim); font-size: 10px; font-weight: 700; letter-spacing: .06em; }
+.metric span { color: var(--dim); font-size: 11px; font-weight: 700; letter-spacing: .05em; }
 .metric strong { margin-top: 4px; overflow-wrap: anywhere; font-size: 16px; }
-.metric small { margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.metric small { margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .section-title { margin: 24px 0 12px; }
-.section-title h3 { margin: 0; font-size: 17px; }
-.section-title p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.section-title h3 { margin: 0; font-size: 19px; }
+.section-title p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .initial-nodes { display: grid; gap: 8px; }
 .mini-node { display: flex; gap: 11px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); }
 .mini-node > span { width: 38px; height: 38px; display: grid; place-content: center; border-radius: 50%; color: #fff; background: var(--accent-deep); font-weight: 900; }
@@ -600,25 +600,25 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 /* Progression revamp */
 .experience-list .choice-row.selected { border-color: var(--gold); background: rgb(215 189 131 / .1); }
 .skill-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.skill-progress-card { padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--skill); border-radius: 11px; background: var(--surface); }
+.skill-progress-card { min-height: 104px; padding: 14px; border: 1px solid var(--line); border-left: 3px solid var(--skill); border-radius: 11px; background: var(--surface); }
 .skill-progress-card > div { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 3px 8px; }
-.skill-progress-card span { color: var(--muted); font-size: 10px; font-weight: 800; }
-.skill-progress-card strong { color: var(--ink); font-size: 18px; }
-.skill-progress-card small { grid-column: 1 / -1; color: var(--dim); font-size: 9px; }
+.skill-progress-card span { color: #c8bdae; font-size: 12px; font-weight: 800; }
+.skill-progress-card strong { color: var(--ink); font-size: 20px; }
+.skill-progress-card small { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .skill-progress-card > i, .trait-progress-list article > i { height: 5px; margin-top: 9px; display: block; overflow: hidden; border-radius: 99px; background: #171411; }
 .skill-progress-card > i b, .trait-progress-list article > i b { height: 100%; display: block; border-radius: inherit; background: var(--skill, var(--accent)); }
-.skill-progress-card p { margin: 6px 0 0; color: var(--muted); font-size: 9px; }
+.skill-progress-card p { margin: 7px 0 0; color: #b8ad9e; font-size: 11px; line-height: 1.4; }
 .trait-grid, .trait-awards { display: grid; gap: 9px; }
 .trait-card { padding: 13px; border: 1px solid var(--line); border-left: 3px solid #918879; border-radius: 11px; background: linear-gradient(145deg, var(--surface), #151310); }
 .trait-card.rarity-uncommon, .rarity-uncommon { --rarity: #5ba99d; }
 .trait-card.rarity-rare, .rarity-rare { --rarity: #718fd0; }
 .trait-card.rarity-legendary, .rarity-legendary { --rarity: #d6a83f; }
 .trait-card[class*="rarity-"] { border-left-color: var(--rarity, #918879); }
-.trait-card > span { display: block; color: var(--rarity, var(--dim)); font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.trait-card > strong, .trait-card h2 { margin: 4px 0; display: block; color: var(--ink); font-size: 16px; }
-.trait-card p { margin: 4px 0 8px; color: var(--muted); font-size: 11px; line-height: 1.55; }
-.trait-card > b { display: block; color: #ead7ab; font-size: 11px; }
-.trait-card > small { margin-top: 5px; display: block; color: var(--dim); font-size: 9px; line-height: 1.45; }
+.trait-card > span { display: block; color: var(--rarity, var(--dim)); font-size: 10px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.trait-card > strong, .trait-card h2 { margin: 5px 0; display: block; color: var(--ink); font-size: 18px; }
+.trait-card p { margin: 5px 0 9px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.trait-card > b { display: block; color: #ead7ab; font-size: 12px; line-height: 1.5; }
+.trait-card > small { margin-top: 6px; display: block; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .trait-progress-list { display: grid; gap: 8px; }
 .trait-progress-list article { padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
 .trait-progress-list article > div { display: flex; justify-content: space-between; gap: 12px; }
@@ -627,9 +627,9 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .learned-move-grid { display: flex; flex-wrap: wrap; gap: 7px; }
 .learned-move-grid > span { padding: 8px 10px; border: 1px solid var(--line); border-left: 2px solid var(--skill); border-radius: 8px; background: var(--surface); }
 .learned-move-grid b, .learned-move-grid small { display: block; }
-.learned-move-grid b { font-size: 11px; }
-.learned-move-grid small { margin-top: 2px; color: var(--dim); font-size: 8px; }
-.empty-progression { padding: 14px; border: 1px dashed var(--line-bright); border-radius: 10px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.learned-move-grid b { font-size: 13px; }
+.learned-move-grid small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.empty-progression { padding: 14px; border: 1px dashed var(--line-bright); border-radius: 10px; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .move-learning-list { display: grid; gap: 9px; }
 .move-learning-card strong { display: flex; justify-content: space-between; gap: 12px; }
 .move-learning-card strong small { color: var(--gold); font-size: 9px; }
