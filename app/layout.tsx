@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://wuxia-life-sim.me-e75a.chatgpt.site';
+const siteUrl = 'https://wuxia-life-sim.me-e75a.chatgpt.site';
 
 export const viewport: Viewport = {
   width: 'device-width',

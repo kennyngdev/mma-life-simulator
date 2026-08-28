@@ -9,7 +9,6 @@
     "dev": "vinext dev --port 3010",
     "dev:agent": "vinext dev --port 3011",
     "build": "vinext build",
-    "build:pages": "next build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test": "vitest run"
