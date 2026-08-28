@@ -61,6 +61,34 @@ describe('campaign content and routing', () => {
     for (const event of authoredEvents) expect(event.choices.map((choice) => choice.path).sort()).toEqual(['contractor', 'duelist', 'protector']);
   });
 
+  it('makes the opening question a direct, non-combat destination choice', () => {
+    const run = newLife('阿測', 'opening-routes', 'standard');
+    const event = eventFor(run);
+    expect(event.question).toBe('你先去哪裡？');
+    expect(event.choices.map((choice) => choice.title)).toEqual(['去木劍場', '去貨棧接下急送', '去淹水巷幫人撤離']);
+    expect(event.choices.every((choice) => choice.resolution === 'route')).toBe(true);
+    for (const choice of event.choices) {
+      const resolved = resolvePeaceful(run, choice);
+      expect(resolved.turn).toBe(1);
+      expect(resolved.pathScores[choice.path]).toBe(2);
+      expect(resolved.battle).toBeNull();
+      expect(eventFor(resolved).path).toBe(choice.path);
+    }
+  });
+
+  it('uses literal questions and answers instead of wrapping event titles in stock phrases', () => {
+    const forbidden = /^(當眾接下|先算清|先把)「/;
+    for (const event of authoredEvents) {
+      expect(event.question.length).toBeGreaterThan(0);
+      expect(new Set(event.choices.map((choice) => choice.title)).size).toBe(3);
+      for (const choice of event.choices) {
+        expect(choice.answerType).toBe(event.questionType);
+        expect(choice.title).not.toMatch(forbidden);
+        expect(choice.title).not.toContain(`「${event.title}」`);
+      }
+    }
+  });
+
   it('uses the recent path to break a highest-score tie', () => {
     expect(dominantPath({ duelist: 4, contractor: 4, protector: 1 }, 'contractor')).toBe('contractor');
     expect(dominantPath({ duelist: 4, contractor: 4, protector: 1 }, 'duelist')).toBe('duelist');
@@ -255,7 +283,7 @@ describe('battle death and endings', () => {
     let run = newLife('參考少俠', reference.seed, reference.difficulty, reference.legacyTalents);
     for (let displayedRound = 1; displayedRound <= 16 && !isComplete(run) && !run.dead; displayedRound += 1) {
       const choice = eventFor(run).choices.find((item) => item.path === reference.dominantPath)!;
-      if (choice.resolution === 'peaceful') run = resolvePeaceful(run, choice);
+      if (choice.resolution !== 'battle') run = resolvePeaceful(run, choice);
       else {
         run = startBattle(run, choice);
         for (let safety = 0; run.battle && !run.battle.result && safety < 10; safety += 1) {

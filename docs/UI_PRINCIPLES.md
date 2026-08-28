@@ -5,7 +5,8 @@
 - The start screen shows available death points, discovered death count, and enabled/owned inherited talent count, with direct access to the talent shop and death journal.
 - Sect selection appears after the round-3 result and must say it is an aspiration. Before then, the reveal and character sheet show that no sect aspiration has been chosen; after selection, `志願` remains visibly distinct from formal membership until the admission scene.
 - During youth, the character sheet and move grid show only the three novice moves. The admission scene explicitly presents the four newly earned sect moves.
-- The event HUD shows all three path scores and marks the current dominant direction. Every choice is labeled 問劍、行契、or 守人 and previews its actual money cost, objective, path gain, and failure condition.
+- The event HUD shows all three path scores and marks the current dominant direction. The event’s exact question sits immediately above its choices. Each card leads with a concrete answer to that question; 問劍、行契、or 守人 is secondary context, followed by actual money cost, objective, path gain, and failure condition.
+- Destination questions receive destination answers, person questions name a person, and commitment questions state what is accepted or refused. The interface must never ask one kind of question while presenting abstract strategy labels as answers.
 - Keep money spending inside event choices. Do not show a phase shop or post-battle flat-upgrade screen.
 - Before combat, acknowledge the selected preparation and repeat the actual victory rule. The battle screen then places a structured objective panel above the arena with victory condition, current progress, and failure condition.
 - For `progress`, place the objective action above the move grid. State that it adds one progress, consumes the turn, and performs no move. Disable it when the player is not ready.

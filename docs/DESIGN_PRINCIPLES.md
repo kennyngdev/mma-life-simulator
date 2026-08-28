@@ -11,8 +11,9 @@ The loop is:
 ## Whole-life structure
 
 - A life lasts at most sixteen displayed turns across 少年、入門、闖蕩、成名、晚年. Each phase changes the social pressure, not only enemy numbers.
-- The opening crossroads awards two points to 問劍、行契、or 守人. Every later event offers one method for each path and awards one point. The highest score routes the next event; the most recently chosen path breaks ties.
+- The opening crossroads is a non-combat destination choice: go to the wooden-sword ground, take the urgent delivery, or help the flooded lane evacuate. It awards two points to 問劍、行契、or 守人, and the consequence begins on the following turn. Every later event offers one direct answer for each path and awards one point. The highest score routes the next event; the most recently chosen path breaks ties.
 - The campaign contains one shared crossroads and one authored event variant for each dominant path on turns 2–16: 46 event definitions total. Choices must change objective rules, access, relationships, money, or path direction.
+- Every event owns a literal question plus three literal answers. Path identity is a consequence of the answer, not a substitute for it; event titles may never be interpolated into stock choice templates.
 - Money is useful only inside events. It purchases information, allies, fewer enemies, fewer objective steps, alternate routes, or a peaceful resolution. There is no standalone phase shop.
 - Endings cross the dominant path with one of three emphases: sect mastery, relationships/community, or wealth/reputation. Secondary path, relationships, injuries, technique mutations, and turning points color the biography.
 

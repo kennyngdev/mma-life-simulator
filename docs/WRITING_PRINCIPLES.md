@@ -18,6 +18,8 @@ The protagonist is an ordinary person, not a hidden chosen one. Repeated choices
 - 行契 turns pressure into delivery, liability, wages, information, routes, clients, or accumulated obligations.
 - 守人 turns pressure into evacuation, institutional abuse, refugees, public responsibility, or care for a particular person.
 - Choice titles say what the player does. Descriptions name the method and mechanically enforced objective. No copy may promise an effect the engine does not implement.
+- Write the question before the answers. Each answer must complete that exact question in plain language: `你先去哪裡？` → `去木劍場`, not a path slogan or a paraphrase of the event title.
+- Treat destination, priority, person, commitment, method, and payment as distinct question grammars. Do not mechanically wrap an event title in reusable prefixes such as `當眾接下…`, `先算清…`, or `先把…的人帶走`.
 - Adjacent events should not reuse the same choice wording or the same three mechanical bundles.
 - Money solutions are concrete: pay an informant, hire help, secure a route, reduce required work, or buy a peaceful settlement. Never call a flat stat purchase a life choice.
 - Created turning points return in later scenes or the ending. Recurring friends and rivals change access, costs, or battle composition rather than exist as labels.

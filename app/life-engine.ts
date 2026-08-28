@@ -7,6 +7,7 @@ import {
   type BattleRules,
   type BattleState,
 } from './battle';
+import { authoredPrompts, type EventQuestionType } from './campaign-prompts';
 
 export type SectId = 'huashan' | 'shaolin' | 'wudang' | 'beggar' | 'emei' | 'tang';
 export type InsightId = `${SectId}-${1 | 2 | 3}-${'a' | 'b'}`;
@@ -62,7 +63,9 @@ export type LifeChoice = {
   growthStat: StatKey;
   objective: EncounterObjective;
   preparation: BattlePreparation;
-  resolution: 'battle' | 'peaceful';
+  resolution: 'battle' | 'peaceful' | 'route';
+  answerType: EventQuestionType;
+  resolutionLine: string;
   turningPoint: string;
 };
 export type LifeEvent = {
@@ -73,6 +76,8 @@ export type LifeEvent = {
   place: string;
   lead: string;
   conflict: string;
+  question: string;
+  questionType: EventQuestionType;
   weather: '晴' | '雨' | '風';
   enemyName: string;
   enemyRole: 'warrior' | 'assassin' | 'tank';
@@ -91,7 +96,7 @@ export type BattleMeta = {
   initialEnemyCount: number;
 };
 export type BattleResultCard = {
-  kind: 'battle' | 'peaceful';
+  kind: 'battle' | 'peaceful' | 'route';
   won: boolean;
   grade: 'C' | 'B' | 'A' | 'S';
   score: number;
@@ -398,26 +403,45 @@ function objectiveFor(path: PathId, turn: number, affordable: boolean): Encounte
     : { type: 'progress', label: '組織撤離', description: '花回合完成撤離步驟。', failure: '期限前未完成，或受保護的人倒下便死亡。', required: 3, actionLabel: '護送一批人', protect: true };
 }
 
-function choicesFor(eventId: string, title: string, turn: number, opening: boolean): LifeChoice[] {
-  const methods: Record<PathId, Omit<LifeChoice, 'id' | 'path' | 'turningPoint' | 'objective' | 'resolution'>> = {
-    duelist: { title: `當眾接下「${title}」`, description: '把問題變成有名有姓的勝負；首領倒下，局面就會散。', preview: `${opening ? '+2' : '+1'} 問劍；名聲與宿敵關係上升。`, moneyCost: 0, growthStat: 'agility', preparation: { attack: 2 } },
-    contractor: { title: `先算清「${title}」的代價`, description: '買情報、談路線、把工作拆成能完成的步驟。', preview: `${opening ? '+2' : '+1'} 行契；完成後領 6 銀工錢。`, moneyCost: turn % 4 === 1 ? 8 : 2, growthStat: 'wisdom', preparation: { objectiveEase: 1, removeEnemy: turn > 6 } },
-    protector: { title: `先把「${title}」裡的人帶走`, description: '召集幫手並守住撤離節點；受保護者也會成為真實敗因。', preview: `${opening ? '+2' : '+1'} 守人；人情與同伴關係上升。`, moneyCost: 0, growthStat: 'will', preparation: { guard: 10, inviteFriend: turn > 4 } },
+function choicesFor(eventId: string, beat: Beat, turn: number, opening: boolean): LifeChoice[] {
+  const authored = authoredPrompts[beat.title];
+  if (!authored) throw new Error(`Missing authored prompt for ${beat.title}`);
+  const paths: PathId[] = ['duelist', 'contractor', 'protector'];
+  const mechanics: Record<PathId, Pick<LifeChoice, 'preview' | 'moneyCost' | 'growthStat' | 'preparation'>> = {
+    duelist: { preview: `${opening ? '+2' : '+1'} 問劍；名聲與宿敵關係上升。`, moneyCost: 0, growthStat: 'agility', preparation: { attack: 2 } },
+    contractor: { preview: `${opening ? '+2' : '+1'} 行契；完成後領 6 銀工錢。`, moneyCost: turn % 4 === 1 ? 8 : 2, growthStat: 'wisdom', preparation: { objectiveEase: 1, removeEnemy: turn > 6 } },
+    protector: { preview: `${opening ? '+2' : '+1'} 守人；人情與同伴關係上升。`, moneyCost: 0, growthStat: 'will', preparation: { guard: 10, inviteFriend: turn > 4 } },
   };
-  return (Object.keys(methods) as PathId[]).map((path) => {
-    const method = methods[path];
-    const objective = objectiveFor(path, turn, path === 'contractor');
-    return { ...method, id: `${eventId}:${path}`, path, objective, resolution: objective.type === 'peaceful' ? 'peaceful' : 'battle', turningPoint: `${eventId}:${path}` };
+  return paths.map((path, index) => {
+    const copy = authored.answers[index];
+    const objective: EncounterObjective = opening
+      ? { type: 'peaceful', label: '選擇方向', description: '前往你選擇的地方；真正的麻煩會從下一回開始。', failure: '這次選路不會開戰。', required: 0 }
+      : objectiveFor(path, turn, path === 'contractor');
+    const resolution = opening ? 'route' : objective.type === 'peaceful' ? 'peaceful' : 'battle';
+    return {
+      ...mechanics[path], ...copy, id: `${eventId}:${path}`, path, objective, resolution, answerType: authored.type,
+      moneyCost: opening ? 0 : mechanics[path].moneyCost,
+      preparation: opening ? {} : mechanics[path].preparation,
+      resolutionLine: opening
+        ? `你先${copy.title.replace(/^去/, '往')}。這條路會從下一回開始回頭找你。`
+        : resolution === 'peaceful'
+          ? `你用情報與銀兩解開「${beat.title}」，沒有拿命替別人的安排補洞。`
+          : `你選擇${copy.title}，並承擔這個方法真正的勝負條件。`,
+      turningPoint: `${eventId}:${path}`,
+    };
   });
 }
 
 function eventFromBeat(beat: Beat, turn: number, path: PathId | 'shared'): LifeEvent {
   const id = path === 'shared' ? 'crossroads-01' : `${path}-${String(turn + 1).padStart(2, '0')}`;
+  const authored = authoredPrompts[beat.title];
+  if (!authored) throw new Error(`Missing authored prompt for ${beat.title}`);
   return {
     id, turn, path, title: beat.title, place: beat.place, lead: beat.lead, conflict: '這次的選法會改變目標規則，也會留下之後結算的人情與責任。',
+    question: authored.question, questionType: authored.type,
     weather: path === 'shared' ? '晴' : pathWeather[path], enemyName: beat.enemy, enemyRole: beat.role ?? 'warrior', enemyCount: beat.count ?? 1,
     death: { id: `death:${id}`, title: beat.death, cause: `${beat.death}。你未能完成「${beat.title}」的目標，傷勢沒有留下第二次機會。`, hint: '下次先看勝利與失敗條件；用銀兩降低步驟、先處理首領，或把回合留給撤離。', epitaph: beat.epitaph },
-    choices: choicesFor(id, beat.title, turn, path === 'shared'),
+    choices: choicesFor(id, beat, turn, path === 'shared'),
   };
 }
 
@@ -533,7 +557,7 @@ function objectiveStateFor(run: LifeRun, choice: LifeChoice, prep: BattlePrepara
   };
 }
 export function startBattle(run: LifeRun, choice: LifeChoice): LifeRun {
-  if (!choiceAvailable(run, choice) || choice.resolution === 'peaceful') return run;
+  if (!choiceAvailable(run, choice) || choice.resolution !== 'battle') return run;
   const event = eventFor(run);
   const prep = choice.preparation;
   const style = resolvedSectFor(run);
@@ -586,11 +610,23 @@ function advanceLife(run: LifeRun, choice: LifeChoice, summary: string): LifeRun
   };
 }
 export function resolvePeaceful(run: LifeRun, choice: LifeChoice): LifeRun {
-  if (!choiceAvailable(run, choice) || choice.resolution !== 'peaceful') return run;
+  if (!choiceAvailable(run, choice) || choice.resolution === 'battle') return run;
   const event = eventFor(run);
   const paid = { ...run, money: run.money - choice.moneyCost };
-  const next = advanceLife(paid, choice, `你在「${event.title}」買到安全路線，沒有拿命替別人的預算補洞。`);
-  return { ...next, result: { kind: 'peaceful', won: true, grade: 'S', score: 100, moments: [`和平解決：${event.title}`], line: '你花掉的是銀兩，不是命。', rewards: [choice.preview] } };
+  const next = advanceLife(paid, choice, choice.resolutionLine);
+  const routed = choice.resolution === 'route';
+  return {
+    ...next,
+    result: {
+      kind: choice.resolution,
+      won: true,
+      grade: 'S',
+      score: 100,
+      moments: [routed ? `方向選定：${choice.title}` : `和平解決：${event.title}`],
+      line: routed ? '這次只決定你先往哪裡走；下一回，後果才正式開始。' : '你花掉的是銀兩，不是命。',
+      rewards: [choice.preview],
+    },
+  };
 }
 export function resolveBattle(run: LifeRun): LifeRun {
   if (!run.battle?.result || !run.battleMeta) return run;
@@ -653,9 +689,18 @@ export function validateCampaignContent() {
   if (new Set(allDeathDefinitions.map((death) => death.id)).size !== 46) errors.push('死亡 ID 重複');
   for (const event of authoredEvents) {
     if (event.choices.length !== 3 || uniqueSorted(event.choices.map((choice) => choice.path)).length !== 3) errors.push(`${event.id} 沒有三條路徑方法`);
+    if (!event.question.trim()) errors.push(`${event.id} 沒有明確問題`);
     if (!event.death.cause || !event.death.hint || !event.death.epitaph) errors.push(`${event.id} 死亡資料不完整`);
-    for (const choice of event.choices) if (choice.resolution === 'battle' && choice.objective.type === 'peaceful') errors.push(`${choice.id} 目標與解法矛盾`);
+    for (const choice of event.choices) {
+      if (choice.answerType !== event.questionType) errors.push(`${choice.id} 沒有直接回答事件問題`);
+      if (choice.resolution === 'battle' && choice.objective.type === 'peaceful') errors.push(`${choice.id} 目標與解法矛盾`);
+      if (/^(當眾接下|先算清|先把)「/.test(choice.title) || choice.title.includes(`「${event.title}」`)) errors.push(`${choice.id} 仍使用事件標題套版`);
+    }
   }
+  const opening = authoredEvents[0];
+  if (opening.question !== '你先去哪裡？') errors.push('開場問題必須直接問玩家先去哪裡');
+  if (opening.choices.map((choice) => choice.title).join('|') !== '去木劍場|去貨棧接下急送|去淹水巷幫人撤離') errors.push('開場答案必須直接對應三個目的地');
+  if (opening.choices.some((choice) => choice.resolution !== 'route')) errors.push('開場只選方向，不應觸發戰鬥');
   for (const path of ['duelist', 'contractor', 'protector'] as PathId[]) {
     const menus = authoredEvents.filter((event) => event.path === path).map((event) => event.choices.map((choice) => choice.title).join('|'));
     if (menus.some((menu, index) => index > 0 && menu === menus[index - 1])) errors.push(`${path} 有相鄰重複選單`);
