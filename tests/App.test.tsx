@@ -271,6 +271,20 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: /背後短拳/ })).toBeInTheDocument()
   })
 
+  it('關鍵選擇畫面只顯示一次上一段攻防', async () => {
+    const game = gameAtBackControl()
+    game.fight!.commentary = ['這段攻防不應在場景下方重複。']
+    game.fight!.lastNarrative = {
+      executionId: 'test-exchange', executionName: '測試攻防', outcome: 'clean',
+      paragraph: '這段攻防不應在場景下方重複。', positionBefore: 'range', positionAfter: 'back-control',
+      openingsCreated: [], openingsConsumed: [], impactTags: [], colorCommentary: '漂亮的轉位。',
+    }
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findAllByText('這段攻防不應在場景下方重複。')).toHaveLength(1)
+  })
+
   it('抱摔開局被破解落入下位時顯示醒目的原因說明', async () => {
     const game = gameAtCounteredTakedownEntry()
     storage.loadGame.mockResolvedValue({ game })

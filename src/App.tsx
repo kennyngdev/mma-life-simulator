@@ -513,7 +513,7 @@ function CriticalView({ game, dispatch }: ViewProps) {
   const resolve = (optionId: string) => { setShowAllMoves(false); dispatch({ type: 'RESOLVE_CRITICAL', optionId }) }
   const outcomeLabel = fight.lastNarrative?.outcome === 'clean' ? '乾淨奏效' : fight.lastNarrative?.outcome === 'contested' ? '互有得失' : '遭到破解'
   return <Screen title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · ${momentum}`}>
-    <FightArena game={game} compact />
+    <FightArena game={game} compact showLiveLog={false} />
     <CornerDirective fight={fight} />
     {fight.lastNarrative && <article className={`narrative-beat ${fight.lastNarrative.outcome}`}>
       <header><span>上一段攻防</span><strong>{outcomeLabel}</strong></header>
@@ -857,7 +857,7 @@ function downloadBiography(bio: Biography) {
   anchor.href = url; anchor.download = `${bio.name}-${bio.seed}.json`; anchor.click(); URL.revokeObjectURL(url)
 }
 
-function FightArena({ game, compact = false }: { game: GameState; compact?: boolean }) {
+function FightArena({ game, compact = false, showLiveLog = true }: { game: GameState; compact?: boolean; showLiveLog?: boolean }) {
   const fight = game.fight!
   const opponent = getOpponent(game)!
   const lastBeat = fight.beatHistory.at(-1)
@@ -875,7 +875,7 @@ function FightArena({ game, compact = false }: { game: GameState; compact?: bool
       <span>抱摔被破解</span>
       <p>你壓低重心射出雙腿抱摔，但{opponent.name}後撤髖部避開切入，順勢壓住上身；你落到防守架下位。</p>
     </aside>}
-    <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>
+    {showLiveLog && <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
   </section>
 }
 
