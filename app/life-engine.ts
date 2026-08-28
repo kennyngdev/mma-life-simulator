@@ -532,12 +532,6 @@ function objectiveStateFor(run: LifeRun, choice: LifeChoice, prep: BattlePrepara
     deadline: choice.objective.type === 'progress' ? required + 5 : undefined,
   };
 }
-function pumpBattle(battle: BattleState, rules: BattleRules) {
-  let state = battle;
-  for (let safety = 0; safety < 500 && !state.result && state.readyActorId !== 'player'; safety += 1) state = reduceBattle(state, { type: 'advance' }, rules).state;
-  return state;
-}
-
 export function startBattle(run: LifeRun, choice: LifeChoice): LifeRun {
   if (!choiceAvailable(run, choice) || choice.resolution === 'peaceful') return run;
   const event = eventFor(run);
@@ -552,7 +546,7 @@ export function startBattle(run: LifeRun, choice: LifeChoice): LifeRun {
     objective: objectiveStateFor(run, choice, prep), actors, rngIndex: 0,
     resources: { money: run.money - choice.moneyCost, phoneCharges: 0, flags: [...run.turningPoints], talents, strength: run.stats.strength, partySize: actors.filter((actor) => actor.side === 'ally').length },
   };
-  const battle = pumpBattle(createBattle(setup, rulesFor(style)), rulesFor(style));
+  const battle = createBattle(setup, rulesFor(style));
   return {
     ...run, money: run.money - choice.moneyCost, battle,
     battleMeta: { eventId: event.id, choiceId: choice.id, growthStat: choice.growthStat, preparation: prep, startedHp: run.hp, initialEnemyCount: battle.actors.filter((actor) => actor.side === 'enemy').length, feedback: { headline: '準備已落定，代價也已付清。', bridge: choice.description, effect: choice.preview, fightReason: choice.objective.description, actionLabel: '進入這一戰 →' } },
@@ -562,12 +556,16 @@ export function startBattle(run: LifeRun, choice: LifeChoice): LifeRun {
 export function performMove(run: LifeRun, actionId: string): LifeRun {
   if (!run.battle || run.battle.result || run.battle.readyActorId !== 'player') return run;
   const style = resolvedSectFor(run); const rules = rulesFor(style);
-  return { ...run, battle: pumpBattle(reduceBattle(run.battle, { type: 'use-action', actionId }, rules).state, rules) };
+  return { ...run, battle: reduceBattle(run.battle, { type: 'use-action', actionId }, rules).state };
 }
 export function advanceObjective(run: LifeRun): LifeRun {
   if (!run.battle || run.battle.result || run.battle.readyActorId !== 'player') return run;
   const style = resolvedSectFor(run); const rules = rulesFor(style);
-  return { ...run, battle: pumpBattle(reduceBattle(run.battle, { type: 'advance-objective' }, rules).state, rules) };
+  return { ...run, battle: reduceBattle(run.battle, { type: 'advance-objective' }, rules).state };
+}
+export function advanceBattle(run: LifeRun): LifeRun {
+  if (!run.battle || run.battle.result || run.battle.readyActorId === 'player') return run;
+  return { ...run, battle: reduceBattle(run.battle, { type: 'advance' }, rulesFor(resolvedSectFor(run))).state };
 }
 export function selectTarget(run: LifeRun, targetId: string): LifeRun {
   if (!run.battle) return run;

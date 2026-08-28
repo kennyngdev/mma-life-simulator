@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import styles from './game.module.css';
 import {
   activeLegacyTalents,
+  advanceBattle,
   advanceObjective,
   admitToSect,
   allDeathDefinitions,
@@ -61,6 +62,7 @@ import { effectForAction, effectGlyph, playSectSfx, timelineMarkerPresentation, 
 
 const SAVE_KEY = 'daxia-simulator-v1';
 const META_KEY = 'daxia-simulator-legacy-v1';
+const TURN_TIMELINE_MS = 180;
 const rarityLabels: Record<RarityId, string> = { common: '普通', rare: '稀有', legendary: '傳說' };
 
 function percentage(value: number, max: number) { return `${Math.max(0, Math.min(100, value / Math.max(1, max) * 100))}%`; }
@@ -202,6 +204,12 @@ export default function DaxiaPage() {
   }, []);
   useEffect(() => { if (!ready) return; window.localStorage.setItem(META_KEY, JSON.stringify(meta)); }, [meta, ready]);
   useEffect(() => { if (!ready) return; if (run && screen !== 'start' && screen !== 'talent-shop') window.localStorage.setItem(SAVE_KEY, JSON.stringify({ screen, run })); else window.localStorage.removeItem(SAVE_KEY); }, [run, screen, ready]);
+  const battleNeedsTick = Boolean(!characterOpen && screen === 'battle' && run?.battle && !run.battle.result && run.battle.readyActorId !== 'player');
+  useEffect(() => {
+    if (!battleNeedsTick) return;
+    const timer = window.setTimeout(() => setRun((current) => current ? advanceBattle(current) : current), TURN_TIMELINE_MS);
+    return () => window.clearTimeout(timer);
+  }, [battleNeedsTick, run?.battle?.tick, run?.battle?.actionSerial]);
   const reset = () => { setRun(null); setScreen('start'); setCharacterOpen(false); };
   const begin = () => { const next = newLife(name, seed.trim() || makeSeed(), difficulty, meta.purchasedTalents, activeLegacyTalents(meta)); setRun(next); setScreen('reveal'); };
   const chooseMethod = (choice: LifeChoice) => { if (!run || !choiceAvailable(run, choice)) return; if (choice.resolution === 'peaceful') { setRun(resolvePeaceful(run, choice)); setScreen('result'); } else { setRun(startBattle(run, choice)); setScreen('prebattle'); } };

@@ -30,7 +30,7 @@ The loop is:
 - Each encounter uses one structured objective shared by the preview, battle HUD, and resolver: `eliminate` defeats all enemies; `leader` defeats the named leader; `progress` spends player turns on an explicit action; `survive` withstands hostile actions; `peaceful` skips battle through an authored resolution.
 - A progress action adds one point, consumes the player’s turn, and performs no martial move. Preparation may reduce required progress, remove an enemy, add an ally, or avoid battle.
 - Grades reward objective completion, remaining health, useful preparation, and optional threat neutralization. Pressing unnecessary moves is never rewarded.
-- The battle engine remains pure and deterministic. Enemy committed intents, inner-power costs, rest behavior, explicit effect recipients, seeded starting positions, and progress overflow reproduce from saved state.
+- The battle engine remains pure and deterministic. Enemy committed intents, inner-power costs, rest behavior, explicit effect recipients, seeded starting positions, and progress overflow reproduce from saved state. The UI advances exactly one engine tick every 180ms instead of fast-forwarding between player turns.
 
 ## Death journal and permanent talents
 

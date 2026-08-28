@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   advanceObjective,
+  advanceBattle,
   activeLegacyTalents,
   admitToSect,
   allDeathDefinitions,
@@ -20,6 +21,7 @@ import {
   newLife,
   nextInsightTier,
   parseMetaProgress,
+  performMove,
   purchaseTalent,
   recordDeath,
   referenceRuns,
@@ -39,6 +41,11 @@ import {
 
 const life = (seed = 'reference') => chooseAspiredSect({ ...newLife('阿測', seed, 'standard'), turn: 3 }, 'huashan');
 const pathRun = (path: PathId, turn = 1) => ({ ...life(`path-${path}-${turn}`), turn, pathScores: { duelist: path === 'duelist' ? 3 : 0, contractor: path === 'contractor' ? 3 : 0, protector: path === 'protector' ? 3 : 0 }, lastChosenPath: path });
+function advanceUntilPlayerReady(run: LifeRun) {
+  let current = run;
+  for (let safety = 0; current.battle && !current.battle.result && current.battle.readyActorId !== 'player' && safety < 500; safety += 1) current = advanceBattle(current);
+  return current;
+}
 
 describe('campaign content and routing', () => {
   it('contains one crossroads plus 45 path variants and 46 unique deaths', () => {
@@ -196,6 +203,20 @@ describe('death journal and permanent talent economy', () => {
 });
 
 describe('battle death and endings', () => {
+  it('exposes each deterministic battle tick so the turn track can visibly advance', () => {
+    const run = pathRun('duelist', 1);
+    const choice = eventFor(run).choices.find((item) => item.resolution === 'battle')!;
+    const started = startBattle(run, choice);
+    expect(started.battle?.readyActorId).toBeNull();
+    const ticked = advanceBattle(started);
+    expect(ticked.battle?.tick).toBe((started.battle?.tick ?? 0) + 1);
+    expect(ticked.battle?.actors.map((actor) => actor.progress)).not.toEqual(started.battle?.actors.map((actor) => actor.progress));
+    const ready = advanceUntilPlayerReady(started);
+    expect(ready.battle?.readyActorId).toBe('player');
+    const acted = performMove(ready, resolvedSectFor(ready).moves[0].id);
+    expect(acted.battle?.readyActorId).toBeNull();
+  });
+
   it('uses the same structured objective shown by the selected method', () => {
     const run = pathRun('contractor', 6);
     const choice = eventFor(run).choices.find((item) => item.path === 'contractor')!;
@@ -237,7 +258,10 @@ describe('battle death and endings', () => {
       if (choice.resolution === 'peaceful') run = resolvePeaceful(run, choice);
       else {
         run = startBattle(run, choice);
-        for (let safety = 0; run.battle && !run.battle.result && safety < 10; safety += 1) run = advanceObjective(run);
+        for (let safety = 0; run.battle && !run.battle.result && safety < 10; safety += 1) {
+          run = advanceUntilPlayerReady(run);
+          if (!run.battle?.result) run = advanceObjective(run);
+        }
         expect(run.battle?.result, `objective stalled in displayed round ${displayedRound}`).not.toBeNull();
         run = resolveBattle(run);
       }

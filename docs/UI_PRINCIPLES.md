@@ -11,7 +11,7 @@
 - For `progress`, place the objective action above the move grid. State that it adds one progress, consumes the turn, and performs no move. Disable it when the player is not ready.
 - Mark leaders and protected actors directly on fighter cards. Protected-character and deadline failures must be as legible as player health.
 - Enemy cards occupy the upper lane, allies the lower lane. Health and inner power always use labels and numbers. Move controls remain visible and disabled outside the player turn.
-- The battle turn-progress track is persistent between the objective panel and arena. On narrow screens, a lone fighter fills its lane and no fighter, timeline marker, or command may overflow the 720px frame or viewport.
+- The battle turn-progress track is persistent between the objective panel and arena and visibly advances one deterministic tick every 180ms. On narrow screens, a lone fighter fills its lane and no fighter, timeline marker, or command may overflow the 720px frame or viewport.
 - Combat feedback may animate cuts, bursts, recovery, and guards, but sound and motion never carry essential state. Respect reduced-motion preferences.
 - The result card leads directly to the next required state: admission, technique mutation, ending, or—after death—the talent shop.
 - Death presentation states the concrete loss first, then the actionable hint, then the epitaph. It shows whether the death awarded `+1` or `+0` points.
