@@ -32,6 +32,7 @@ function gameAtFinishMinigame(kind: FinishKind): GameState {
     playerControl: 8, opponentControl: 3, finishPressure: 36, beatHistory: [], finishWindowsUsed: 1, techniqueTriggersThisRound: [],
     activeFinishWindow: {
       attacker: 'player', kind, opportunity: 72, threat: '明顯機會', sourceAction: kind === 'submission' ? '十字架控制' : '重擺拳', sourceStep: 3,
+      sourcePosition: kind === 'submission' ? 'bottom' : 'pocket',
       difficulty: { aimTolerance: .24, timingTolerance: .25, cycleMs: 1300, submissionStart: .5, submissionResistance: .1, submissionDurationMs: 3600, targetX: .52, targetY: .3 },
     },
     commentary: ['前面的攻防替你創造了終結窗口。'], scores: [], finished: false,
@@ -170,6 +171,27 @@ describe('生涯重置', () => {
     expect(screen.getByText('通用訓練')).toBeInTheDocument()
   })
 
+  it('人生事件選擇後顯示故事與效果結果彈窗', async () => {
+    const game = createNewRun(input)
+    game.phase = 'life'
+    game.lifeEvent = {
+      id: 'test-life', title: '教練臨時要求加練', description: '教練希望你再練一輪。', personId: 'coach',
+      options: [{ id: 'train', label: '留下來加練', detail: '訓練帶來一些代價。', outcome: '拳館熄燈後，你仍留在墊上反覆拆解動作。離開時，你和教練都更確定這場比賽該怎麼打。', effects: { trust: 7, fatigue: 9, readiness: 2 } }],
+    }
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /留下來加練/ }))
+
+    const dialog = screen.getByRole('dialog', { name: '留下來加練' })
+    expect(dialog).toHaveTextContent('拳館熄燈後')
+    expect(dialog).toHaveTextContent(`${game.fighter.relationships[0].name}信任 +7`)
+    expect(dialog).toHaveTextContent('疲勞 +9')
+    expect(dialog).toHaveTextContent('準備度 +2')
+    fireEvent.click(screen.getByRole('button', { name: '接受結果，繼續' }))
+    expect(screen.queryByRole('dialog', { name: '留下來加練' })).not.toBeInTheDocument()
+  })
+
   it('用教練口吻交代每名邀約對手的強項與弱點', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
@@ -197,6 +219,7 @@ describe('生涯重置', () => {
     render(<App />)
 
     expect(await screen.findByLabelText('降服進攻小遊戲')).toBeInTheDocument()
+    expect(screen.getByText(/下位失敗可能被過腿/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '快速連點' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '改用節奏長按' }))
     expect(screen.getByRole('button', { name: '亮區內按住' })).toBeInTheDocument()

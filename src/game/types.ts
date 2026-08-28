@@ -338,6 +338,8 @@ export interface FinishWindow {
   threat: FinishThreat
   sourceAction: string
   sourceStep: 1 | 2 | 3 | 4
+  sourcePosition?: Position
+  failurePosition?: Position
   difficulty: FinishDifficulty
 }
 
@@ -408,8 +410,17 @@ export interface LifeEvent {
     id: string
     label: string
     detail: string
+    outcome: string
     effects: Partial<{ trust: number; fatigue: number; money: number; readiness: number; health: number }>
   }>
+}
+
+export interface LifeEventResult {
+  eventTitle: string
+  optionLabel: string
+  personName: string
+  story: string
+  effects: Partial<{ trust: number; fatigue: number; money: number; readiness: number; health: number }>
 }
 
 export interface Biography {
@@ -450,6 +461,7 @@ export interface GameState {
   selectedOfferId?: string
   campActions: CampAction[]
   lifeEvent?: LifeEvent
+  lifeEventResult?: LifeEventResult
   growthDestination?: 'weight' | 'offer' | 'retirement'
   insightGained?: number
   scouting: number
@@ -464,6 +476,7 @@ export type GameCommand =
   | { type: 'DECLINE_OFFERS' }
   | { type: 'TAKE_CAMP_ACTION'; action: CampAction; branch?: Branch }
   | { type: 'RESOLVE_LIFE'; optionId: string }
+  | { type: 'ACK_LIFE_RESULT' }
   | { type: 'UNLOCK_NODE'; nodeId: string }
   | { type: 'CONTINUE_GROWTH' }
   | { type: 'SET_WEIGHT_PLAN'; plan: WeightPlan }

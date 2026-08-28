@@ -198,6 +198,22 @@ describe('拳途人生模擬核心', () => {
     expect(after.fighter.unlockedNodes).not.toContain(highTier.id)
   })
 
+  it('人生事件選項會保留故事與數值影響，直到玩家確認結果', () => {
+    let state = createNewRun(input)
+    state.phase = 'life'
+    state.lifeEvent = {
+      id: 'test-life', title: '賽前的選擇', description: '測試事件', personId: 'coach',
+      options: [{ id: 'train', label: '留下加練', detail: '訓練有得有失。', outcome: '你留在拳館完成最後一輪訓練。離開時，天已經亮了。', effects: { trust: 4, fatigue: 6, readiness: 2 } }],
+    }
+
+    state = apply(state, { type: 'RESOLVE_LIFE', optionId: 'train' })
+
+    expect(state.phase).toBe('growth')
+    expect(state.lifeEventResult).toMatchObject({ optionLabel: '留下加練', story: '你留在拳館完成最後一輪訓練。離開時，天已經亮了。', effects: { trust: 4, fatigue: 6, readiness: 2 } })
+    state = apply(state, { type: 'ACK_LIFE_RESULT' })
+    expect(state.lifeEventResult).toBeUndefined()
+  })
+
   it('離開自動成長畫面後仍可從狀態介面學習技術', () => {
     let state = createNewRun(input)
     state.phase = 'offer'
@@ -725,5 +741,60 @@ describe('拳途人生模擬核心', () => {
     submissionState = apply(submissionState, { type: 'RESOLVE_CRITICAL', optionId: submissionOption.id })
     expect(submissionState.phase).toBe('finish-minigame')
     expect(submissionState.fight!.activeFinishWindow?.kind).toBe('submission')
+  })
+
+  it('任何明確的降服選擇都會立即進入小遊戲，即使機會很差或已用完一般終結窗口', () => {
+    let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'DIRECT-BOTTOM-SUB' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    const execution = variantsForIntent('guard-armbar')[0]
+    const template = state.fight!.prompt!.allOptions[0]
+    const submission = {
+      ...template, id: 'test-guard-armbar', label: '防守架十字固', actionKey: 'guard-armbar', intentId: 'guard-armbar',
+      executionId: execution.id, executionName: execution.name, branch: 'ground' as const, category: 'offense' as const,
+      conservative: false, usesOpenings: [], chance: { min: 0, max: 0 },
+    }
+    Object.assign(state.fight!, { position: 'bottom', finishWindowsUsed: 4, opponentDamage: 0, finishPressure: 0, playerControl: 0, opponentControl: 0 })
+    state.fight!.prompt!.allOptions = [submission]
+
+    state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: submission.id })
+
+    expect(state.phase).toBe('finish-minigame')
+    expect(state.fight!.activeFinishWindow).toMatchObject({ attacker: 'player', kind: 'submission', sourcePosition: 'bottom', failurePosition: 'side-control-defense' })
+  })
+
+  it('低完成度的下位降服失敗會被過腿，額外消耗體力並送出控制分', () => {
+    let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'BOTTOM-SUB-PENALTY' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    state.phase = 'finish-minigame'
+    state.fight!.position = 'bottom'
+    state.fight!.activeFinishWindow = {
+      attacker: 'player', kind: 'submission', opportunity: 24, threat: '勉強一搏', sourceAction: '防守架十字固', sourceStep: 1,
+      sourcePosition: 'bottom', failurePosition: 'side-control-defense', difficulty: finishDifficultyFor(24, { x: 0.5, y: 0.5 }),
+    }
+    const staminaBefore = state.fight!.playerStamina
+    const controlBefore = state.fight!.opponentControl
+    const bodyDamageBefore = state.fight!.playerDamageByPart.body
+
+    state = apply(state, { type: 'RESOLVE_FINISH_MINIGAME', result: { kind: 'submission', progress: 0.3, acceptedInputs: 3, elapsedMs: 3000 } })
+
+    expect(state.phase).toBe('critical')
+    expect(state.fight!.position).toBe('side-control-defense')
+    expect(state.fight!.playerStamina).toBe(staminaBefore - 18)
+    expect(state.fight!.opponentControl).toBe(controlBefore + 10)
+    expect(state.fight!.playerDamageByPart.body).toBe(bodyDamageBefore + 4)
+  })
+
+  it('既有傷害會大幅改善降服機會，而下位嘗試明顯劣於上位', () => {
+    const state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'SUB-BALANCE' })), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    const fight = state.fight!
+    const option = { ...fight.prompt!.allOptions[0], actionKey: 'guard-armbar', branch: 'ground' as const, conservative: false, usesOpenings: [] }
+    Object.assign(fight, { playerStamina: 70, opponentStamina: 70, opponentDamage: 0, momentum: 0, finishPressure: 0, playerControl: 0, opponentControl: 0 })
+    fight.position = 'bottom'
+    const freshBottom = finishOpportunity(state, fight, option, 'player', 'submission')
+    fight.position = 'top'
+    const freshTop = finishOpportunity(state, fight, option, 'player', 'submission')
+    fight.opponentDamage = 65
+    const damagedTop = finishOpportunity(state, fight, option, 'player', 'submission')
+
+    expect(freshTop - freshBottom).toBeGreaterThanOrEqual(15)
+    expect(damagedTop - freshTop).toBeGreaterThanOrEqual(35)
   })
 })

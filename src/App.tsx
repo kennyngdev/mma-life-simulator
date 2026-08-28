@@ -108,6 +108,7 @@ export default function App() {
         <GameView game={game} dispatch={dispatch} onNew={resetRun} />
       </div>
       {overlay && <InfoOverlay game={game} type={overlay} dispatch={dispatch} onClose={() => setOverlay(undefined)} />}
+      {game.lifeEventResult && <LifeEventResultDialog game={game} dispatch={dispatch} />}
       {showResetConfirmation && <ResetConfirmation resetting={resetting} error={resetError} onCancel={() => { setShowResetConfirmation(false); setResetError(undefined) }} onConfirm={resetRun} />}
     </main>
   )
@@ -552,6 +553,7 @@ function FinishMinigameView({ game, dispatch }: ViewProps) {
     return () => window.clearTimeout(timer)
   }, [])
   const attacking = finishWindow.attacker === 'player'
+  const bottomSubmissionRisk = finishWindow.kind === 'submission' && attacking && finishWindow.sourcePosition === 'bottom'
   const title = finishWindow.kind === 'strike'
     ? attacking ? '終結一擊' : '危險重擊'
     : attacking ? '收緊降服' : '掙脫降服'
@@ -559,7 +561,9 @@ function FinishMinigameView({ game, dispatch }: ViewProps) {
     <div className={`finish-alert ${attacking ? 'opportunity' : 'danger'}`}>
       <span>{attacking ? '終結機會' : '終結危險'}</span>
       <strong>{finishWindow.sourceAction}</strong>
-      <small>{attacking ? '前面的攻防替你創造了這一刻。' : '對手抓住空檔；這次防守由你完成。'}</small>
+      <small>{finishWindow.kind === 'submission' && attacking
+        ? `終結條件 ${Math.round(finishWindow.opportunity)} / 100；對手受創、低體力與有利位置會降低難度。${bottomSubmissionRisk ? ' 下位失敗可能被過腿。' : ''}`
+        : attacking ? '前面的攻防替你創造了這一刻。' : '對手抓住空檔；這次防守由你完成。'}</small>
     </div>
     <FightArena game={game} compact />
     {!ready ? <div className="minigame-ready" role="status"><b>準備</b><span>{finishWindow.kind === 'strike' ? '瞄準，再抓住出手時機' : '穩住位置，聽到提示便開始'}</span></div>
@@ -655,6 +659,9 @@ function SubmissionMinigame({ game, dispatch }: ViewProps) {
   const lastFrameRef = useRef(performance.now())
   const holdingRef = useRef(false)
   const resolvedRef = useRef(false)
+  const attacking = finishWindow.attacker === 'player'
+  const effectiveOpportunity = attacking ? finishWindow.opportunity : 100 - finishWindow.opportunity
+  const tapGain = 0.034 + Math.max(0, Math.min(100, effectiveOpportunity)) * 0.0003
 
   const finish = (finalProgress: number) => {
     if (resolvedRef.current) return
@@ -678,7 +685,7 @@ function SubmissionMinigame({ game, dispatch }: ViewProps) {
     lastTapRef.current = now
     inputsRef.current += 1
     setAcceptedInputs(inputsRef.current)
-    addProgress(0.105)
+    addProgress(tapGain)
   }
 
   useEffect(() => {
@@ -703,7 +710,6 @@ function SubmissionMinigame({ game, dispatch }: ViewProps) {
     return () => cancelAnimationFrame(frame)
   }, [difficulty.submissionDurationMs, difficulty.submissionResistance, mode])
 
-  const attacking = finishWindow.attacker === 'player'
   return <section className="submission-minigame" aria-label={attacking ? '降服進攻小遊戲' : '降服防守小遊戲'}>
     <div className="submission-meta"><b>{attacking ? '收緊' : '逃脫'} {Math.round(progress * 100)}%</b><span>{(remaining / 1000).toFixed(1)} 秒</span></div>
     <div className="tug-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
@@ -872,6 +878,35 @@ function Screen({ title, kicker, children }: { title: string; kicker?: string; c
 function ActionDock({ children }: { children: React.ReactNode }) {
   return <div className="action-dock">{children}</div>
 }
+
+function LifeEventResultDialog({ game, dispatch }: { game: GameState; dispatch: (command: GameCommand) => void }) {
+  const result = game.lifeEventResult!
+  const effectLabels = [
+    result.effects.trust ? { label: `${result.personName}信任 ${signed(result.effects.trust)}`, positive: result.effects.trust > 0 } : undefined,
+    result.effects.readiness ? { label: `準備度 ${signed(result.effects.readiness)}`, positive: result.effects.readiness > 0 } : undefined,
+    result.effects.fatigue ? { label: `疲勞 ${signed(result.effects.fatigue)}`, positive: result.effects.fatigue < 0 } : undefined,
+    result.effects.health ? { label: `最弱部位健康 ${signed(result.effects.health)}`, positive: result.effects.health > 0 } : undefined,
+    result.effects.money ? { label: `金錢 ${signedMoney(result.effects.money)}`, positive: result.effects.money > 0 } : undefined,
+  ].filter((effect): effect is { label: string; positive: boolean } => Boolean(effect))
+
+  return <div className="event-result-backdrop">
+    <section className="event-result-dialog" role="dialog" aria-modal="true" aria-labelledby="event-result-title" aria-describedby="event-result-story">
+      <p className="eyebrow">CHOICE RESULT</p>
+      <span className="result-check" aria-hidden="true">✓</span>
+      <h2 id="event-result-title">{result.optionLabel}</h2>
+      <p className="result-context">{result.eventTitle}</p>
+      <p id="event-result-story" className="result-story">{result.story}</p>
+      <div className="event-effects" aria-label="選擇造成的影響">
+        <strong>造成的影響</strong>
+        <div>{effectLabels.map((effect) => <span key={effect.label} className={effect.positive ? 'positive' : 'negative'}>{effect.label}</span>)}</div>
+      </div>
+      <button type="button" className="primary-action" onClick={() => dispatch({ type: 'ACK_LIFE_RESULT' })}>接受結果，繼續</button>
+    </section>
+  </div>
+}
+
+function signed(value: number) { return `${value > 0 ? '+' : ''}${value}` }
+function signedMoney(value: number) { return `${value > 0 ? '+' : '-'}$${Math.abs(value).toLocaleString('en-US')}` }
 
 function ResetConfirmation({ resetting, error, onCancel, onConfirm }: { resetting: boolean; error?: string; onCancel: () => void; onConfirm: () => void }) {
   return <div className="reset-backdrop" onClick={() => { if (!resetting) onCancel() }}>

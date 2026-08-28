@@ -351,24 +351,24 @@ function createLifeEvent(state: GameState): [LifeEvent, RngStreams] {
       id: `coach-${state.fighter.evidence.fights}`, title: '教練臨時要求加練', personId: 'coach',
       description: `${relationship.name}認為再來一次高強度對練，就能找出最適合你的打法。但你的身體已經快撐不住這次訓練營了。`,
       options: [
-        { id: 'trust', label: '留下來加練', detail: '教練更信任你，備戰狀態也略有提升，但身體更加疲勞。', effects: { trust: 7, fatigue: 9, readiness: 2 } },
-        { id: 'boundary', label: '坦白說自己需要休息', detail: '身體得到休息，教練也認為你更懂得判斷自身狀況。', effects: { trust: 2, fatigue: -8, readiness: 5 } },
+        { id: 'trust', label: '留下來加練', detail: '教練更信任你，備戰狀態也略有提升，但身體更加疲勞。', outcome: '拳館熄燈後，你仍和教練留在墊上反覆拆解動作。最後一輪結束時，你的腳步沉重，但彼此都更確定這場比賽該怎麼打。', effects: { trust: 7, fatigue: 9, readiness: 2 } },
+        { id: 'boundary', label: '坦白說自己需要休息', detail: '身體得到休息，教練也認為你更懂得判斷自身狀況。', outcome: '你坦白說出身體的警訊，原以為教練會失望，他卻只是點頭收起護具。那晚的休息讓你第二天重新找回了銳利的節奏。', effects: { trust: 2, fatigue: -8, readiness: 5 } },
       ],
     },
     {
       id: `family-${state.fighter.evidence.fights}`, title: '錯過的重要晚餐', personId: 'family',
       description: `${relationship.name}提醒你，這週早就答應要留一個晚上陪家人；偏偏明天是賽前最後一次完整對練。`,
       options: [
-        { id: 'home', label: '回家赴約', detail: '你履行了承諾，也得到一晚休息，但備戰狀態略受影響。', effects: { trust: 8, fatigue: -5, readiness: -1 } },
-        { id: 'gym', label: '留在拳館', detail: '你維持了比賽狀態，但家人不會忘記這次失約。', effects: { trust: -9, fatigue: 5, readiness: 4 } },
+        { id: 'home', label: '回家赴約', detail: '你履行了承諾，也得到一晚休息，但備戰狀態略受影響。', outcome: '你準時出現在餐桌旁，讓那頓飯終於沒有空著的座位。短暫離開拳館使備戰節奏慢了一拍，卻也讓你睡了幾週來最好的一覺。', effects: { trust: 8, fatigue: -5, readiness: -1 } },
+        { id: 'gym', label: '留在拳館', detail: '你維持了比賽狀態，但家人不會忘記這次失約。', outcome: '你把手機翻面，繼續戴上拳套完成最後幾輪對練。技術狀態維持住了，但深夜螢幕上的未接來電比任何一記重拳都更難忽視。', effects: { trust: -9, fatigue: 5, readiness: 4 } },
       ],
     },
     {
       id: `health-${state.fighter.evidence.fights}`, title: '身體發出的訊號', personId: 'partner',
       description: `${relationship.name}發現你每次對練完，都會不自覺地揉著身上傷得最重的地方。你可以現在花錢治療，也可以先撐過這場比賽再說。`,
       options: [
-        { id: 'doctor', label: '安排檢查與治療', detail: '你付了醫療費，身上最嚴重的傷勢有所好轉。', effects: { trust: 4, money: -2200, health: 8, fatigue: -4 } },
-        { id: 'hide', label: '照原計畫出賽', detail: '你省下醫療費，但得帶著傷勢和不安走進鐵籠。', effects: { trust: -4, money: 0, health: -2, readiness: -5 } },
+        { id: 'doctor', label: '安排檢查與治療', detail: '你付了醫療費，身上最嚴重的傷勢有所好轉。', outcome: '檢查結果不算嚴重，但治療師要求你暫停最激烈的訓練。幾天後疼痛終於退去，你也不再需要假裝一切正常。', effects: { trust: 4, money: -2200, health: 8, fatigue: -4 } },
+        { id: 'hide', label: '照原計畫出賽', detail: '你省下醫療費，但得帶著傷勢和不安走進鐵籠。', outcome: '你笑著說只是普通痠痛，然後照常把護具塞進背包。沒有人再追問，但那個受傷的部位在每次發力時都提醒你代價還在。', effects: { trust: -4, money: 0, health: -2, readiness: -5 } },
       ],
     },
   ]
@@ -691,7 +691,8 @@ function buildCriticalPrompt(state: GameState, fight: FightState): [DecisionProm
     const lowStaminaFit = fight.playerStamina < 35 && intent.defensive ? 15 : fight.playerStamina < 35 && intent.effects.staminaCost > 8 ? -15 : 0
     const score = intent.stageWeights[stage.id] + style + exploited.length * 15 + rules.length * 8 + pressureFit + lowStaminaFit - adaptation * 4
     const staminaCost = intent.effects.staminaCost + severityTier(fight.playerDamageByPart.body) + (fight.cornerAdjustment === 'press' ? 2 : 0)
-    const effectSummary = intent.submission ? `主效：建立降服終結壓力 · 代價：體力 ${staminaCost}`
+    const effectSummary = intent.submission
+      ? `主效：立即進入降服操作 · 難度取決於受創、體力與位置 · 代價：體力 ${staminaCost}${fight.position === 'bottom' ? '，下位失敗可能被過腿' : '，失敗可能失去位置'}`
       : intent.category === 'transition' ? `主效：${intent.cleanPosition ? `轉到${positionLabel(intent.cleanPosition)}` : '爭取位置'} · 代價：體力 ${staminaCost}`
       : intent.defensive ? `主效：降低風險並重整位置 · 代價：得分較少`
         : `主效：${intent.effects.headDamage >= intent.effects.bodyDamage && intent.effects.headDamage >= intent.effects.legDamage ? '頭部傷害' : intent.effects.bodyDamage >= intent.effects.legDamage ? '軀幹傷害' : '腿部傷害'} · 代價：體力 ${staminaCost}`
@@ -702,7 +703,7 @@ function buildCriticalPrompt(state: GameState, fight: FightState): [DecisionProm
       executionName: execution.name, category: intent.category, effectSummary,
       usesOpenings: exploited, affinityLabel: affinity?.label, affinityBonus: affinity?.bonus,
       recommendation: exploited.length ? `利用：${exploited.map((key) => OPENING_LABELS[key]).join('、')}` : style ? `${background.name}擅長的路線` : `${stage.name}階段適合`,
-      finishRoute: intent.submission ? '降服路線：位置、控制與破綻會開啟終結窗口'
+      finishRoute: intent.submission ? '降服路線：選擇後立即操作；先重創或控制對手會明顯降低難度'
         : intent.category === 'offense' && intent.effects.finishPressure >= 10 ? 'TKO 路線：重創會直接累積終結壓力' : undefined,
       conservative: intent.defensive,
       unlockNode: firstRule?.node.id,
@@ -948,7 +949,6 @@ function resolveCritical(state: GameState, optionId: string): GameState {
     }
   }
   if (outcome === 'clean' && intent.cleanPosition === 'top' && positionBefore !== 'back-defense') fighter.evidence.takedowns += 1
-  if (outcome === 'clean' && intent.submission) fighter.evidence.submissions += 1
   if (outcome === 'clean' && ['wall-walk', 'side-wall-escape', 'elbow-knee-escape', 'backdoor-escape', 'clear-back-hooks', 'back-wall-escape', 'plum-pummel-inside', 'body-lock-hip-heist', 'front-headlock-sitout'].includes(intent.id)) fighter.evidence.bottomEscapes += 1
   if (outcome === 'clean' && intent.effects.headDamage >= 10) fighter.evidence.knockdowns += roll * 100 < liveOdds.clean * 0.28 ? 1 : 0
   fight.initiative = outcome === 'clean' ? 'player' : outcome === 'countered' ? 'opponent' : 'even'
@@ -958,12 +958,23 @@ function resolveCritical(state: GameState, optionId: string): GameState {
     fight.lastSuccessfulAction = execution.name
   }
   fight.prompt = undefined
-  const attacker = outcome === 'countered' || (outcome === 'contested' && initiativeBefore === 'opponent') ? 'opponent' : 'player'
+  const directSubmissionAttempt = intent.submission
+  const attacker = directSubmissionAttempt ? 'player' : outcome === 'countered' || (outcome === 'contested' && initiativeBefore === 'opponent') ? 'opponent' : 'player'
   const finishMove = attacker === 'player' ? intent : opponentMove
   const finishOption = attacker === 'player' ? option : { ...option, actionKey: opponentMove.id, branch: opponentMove.branch, conservative: opponentMove.defensive, executionName: opponentMoveExecution.name, usesOpenings: opponentIntent.exploitsOpenings }
-  const finishKind = finishMove.submission ? 'submission' : 'strike'
+  const finishKind = directSubmissionAttempt ? 'submission' : finishMove.submission ? 'submission' : 'strike'
   let window: FinishWindow | undefined
-  if (finishMove.category === 'offense' && (outcome !== 'contested' || finishOpportunity({ ...state, fighter }, fight, finishOption, attacker, finishKind) >= 64)) {
+  if (directSubmissionAttempt) {
+    const attemptFight = { ...fight, position: positionBefore }
+    const outcomeAdjustment = outcome === 'clean' ? 8 : outcome === 'contested' ? -2 : -16
+    const failurePosition = positionBefore === 'bottom' ? 'side-control-defense' : intent.counteredPosition ?? 'scramble'
+    const createdWindow = maybeCreateFinishWindow(
+      { ...state, fighter, rng }, attemptFight, finishOption, 'player', 'submission',
+      { force: true, opportunityAdjustment: outcomeAdjustment, sourcePosition: positionBefore, failurePosition },
+    )
+    window = createdWindow[0]
+    rng = createdWindow[1]
+  } else if (finishMove.category === 'offense' && (outcome !== 'contested' || finishOpportunity({ ...state, fighter }, fight, finishOption, attacker, finishKind) >= 64)) {
     const createdWindow = maybeCreateFinishWindow({ ...state, fighter, rng }, fight, finishOption, attacker, finishKind)
     window = createdWindow[0]
     rng = createdWindow[1]
@@ -1040,7 +1051,7 @@ export function finishOpportunity(state: GameState, fight: FightState, option: C
     : opponent.technique[option.branch ?? 'boxing'] + opponent.composure * 0.22
   const attackerPosition = attacker === 'player' ? fight.position : mirrorPosition(fight.position)
   const positionBonus = kind === 'submission'
-    ? (attackerPosition === 'back-control' ? 24 : attackerPosition === 'mount' ? 22 : attackerPosition === 'front-headlock-control' ? 20 : attackerPosition === 'side-control' ? 19 : attackerPosition === 'top' || attackerPosition === 'bottom' ? 17 : attackerPosition === 'clinch' || attackerPosition === 'scramble' ? 8 : 0)
+    ? (attackerPosition === 'back-control' ? 22 : attackerPosition === 'mount' ? 18 : attackerPosition === 'side-control' ? 14 : attackerPosition === 'front-headlock-control' ? 12 : attackerPosition === 'top' ? 8 : attackerPosition === 'bottom' ? -8 : attackerPosition === 'clinch' || attackerPosition === 'scramble' ? 0 : -4)
     : (attackerPosition === 'mount' ? 17 : attackerPosition === 'pocket' || attackerPosition === 'cage' || attackerPosition === 'cage-control' ? 14 : attackerPosition === 'thai-clinch' ? 13 : attackerPosition === 'top' || attackerPosition === 'side-control' || attackerPosition === 'back-control' ? 12 : 3)
   const finishingActions = [
     'risky-power', 'haymaker', 'head-kick', 'question-mark-kick', 'spinning-back-kick', 'spinning-elbow',
@@ -1056,23 +1067,33 @@ export function finishOpportunity(state: GameState, fight: FightState, option: C
   const pressure = attacker === 'player' ? Math.max(0, fight.finishPressure) : Math.max(0, -fight.finishPressure)
   const controlEdge = attacker === 'player' ? Math.max(0, fight.playerControl - fight.opponentControl) : Math.max(0, fight.opponentControl - fight.playerControl)
   const openingBonus = (option.usesOpenings?.length ?? 0) * 5
-  return clamp(attackingDamage * 0.42 + (attackingStamina - defendingStamina) * 0.2 + (technical - 48) * 0.24
+  const damageWeight = kind === 'submission' ? 0.55 : 0.42
+  return clamp(attackingDamage * damageWeight + (attackingStamina - defendingStamina) * 0.2 + (technical - 48) * 0.24
     + positionBonus + actionBonus + momentumBonus * 0.2 + headSeverityBonus + pressure * 0.68
     + (kind === 'submission' ? controlEdge * 0.24 + openingBonus : openingBonus * 0.5), 0, 100)
 }
 
-function maybeCreateFinishWindow(state: GameState, fight: FightState, option: CriticalOption, attacker: 'player' | 'opponent', kind: 'strike' | 'submission'): [FinishWindow | undefined, RngStreams] {
+function maybeCreateFinishWindow(
+  state: GameState,
+  fight: FightState,
+  option: CriticalOption,
+  attacker: 'player' | 'opponent',
+  kind: 'strike' | 'submission',
+  settings: { force?: boolean; opportunityAdjustment?: number; sourcePosition?: Position; failurePosition?: Position } = {},
+): [FinishWindow | undefined, RngStreams] {
   let rng = state.rng
-  if (fight.finishWindowsUsed >= 4 || option.conservative) return [undefined, rng]
-  const opportunity = finishOpportunity(state, fight, option, attacker, kind)
-  let gate: number
+  if (!settings.force && (fight.finishWindowsUsed >= 4 || option.conservative)) return [undefined, rng]
+  const opportunity = clamp(finishOpportunity(state, fight, option, attacker, kind) + (settings.opportunityAdjustment ?? 0))
+  let gate = 0
   let x: number
   let y: number
-  ;[gate, rng] = draw(rng, 'fights')
+  if (!settings.force) {
+    ;[gate, rng] = draw(rng, 'fights')
+  }
   ;[x, rng] = draw(rng, 'fights')
   ;[y, rng] = draw(rng, 'fights')
   const likelihood = opportunity >= 76 ? 1 : opportunity < 36 ? 0 : Math.min(0.68, 0.12 + (opportunity - 36) * 0.015)
-  if (gate > likelihood) return [undefined, rng]
+  if (!settings.force && gate > likelihood) return [undefined, rng]
   const difficulty = finishDifficultyFor(opportunity, { x, y })
   if (attacker === 'opponent') {
     const normalized = opportunity / 100
@@ -1083,7 +1104,10 @@ function maybeCreateFinishWindow(state: GameState, fight: FightState, option: Cr
     difficulty.submissionDurationMs = Math.round(4000 - normalized * 1200)
   }
   const sourceAction = option.executionName ?? option.label
-  return [{ attacker, kind, opportunity, threat: finishThreat(opportunity), sourceAction, sourceStep: fight.sequenceStep, difficulty }, rng]
+  return [{
+    attacker, kind, opportunity, threat: finishThreat(opportunity), sourceAction, sourceStep: fight.sequenceStep,
+    sourcePosition: settings.sourcePosition ?? fight.position, failurePosition: settings.failurePosition, difficulty,
+  }, rng]
 }
 
 function advanceFightSequence(state: GameState): GameState {
@@ -1103,6 +1127,7 @@ function resolveFinishMinigame(state: GameState, result: FinishMinigameResult): 
   const finishWindow = fight.activeFinishWindow
   if (!finishWindow) return state
   const opponent = state.opponents.find((item) => item.id === fight.opponentId)!
+  const fighter = structuredClone(state.fighter)
   const within = (value: number) => Number.isFinite(value) && value >= 0 && value <= 1
   const resultValid = result.kind === finishWindow.kind && (result.kind === 'strike'
     ? within(result.aimError) && within(result.timingError)
@@ -1124,7 +1149,8 @@ function resolveFinishMinigame(state: GameState, result: FinishMinigameResult): 
       ? `你用${finishWindow.sourceAction}製造機會，並親手完成了${fight.method === 'ko' ? '擊倒' : fight.method === 'submission' ? '降服' : '終結'}。`
       : `${opponent.name}以${finishWindow.sourceAction}取得機會；你沒能在最後一刻脫身。`
     fight.commentary.push(finishWindow.attacker === 'player' ? '終結操作成功，比賽結束。' : '防守操作失敗，比賽被終結。')
-    return { ...state, fight, phase: 'fight-result' }
+    if (finishWindow.attacker === 'player' && finishWindow.kind === 'submission') fighter.evidence.submissions += 1
+    return { ...state, fighter, fight, phase: 'fight-result' }
   }
   if (finishWindow.kind === 'strike') {
     if (finishWindow.attacker === 'player') {
@@ -1141,9 +1167,32 @@ function resolveFinishMinigame(state: GameState, result: FinishMinigameResult): 
     }
   } else if (finishWindow.attacker === 'player') {
     const progress = result.kind === 'submission' ? result.progress : 0
-    fight.initiative = progress >= 0.5 ? 'player' : 'opponent'
-    fight.position = progress >= 0.5 ? fight.position : 'scramble'
-    fight.commentary.push(progress >= 0.5 ? '降服差一步收緊，你仍保有控制。' : '對手掙脫降服，局勢回到混戰。')
+    const attemptedFromBottom = finishWindow.sourcePosition === 'bottom'
+    const nearFinish = progress >= 0.65
+    if (attemptedFromBottom) {
+      const extraCost = nearFinish ? 12 : 18
+      fight.playerStamina = clamp(fight.playerStamina - extraCost)
+      fight.opponentControl += nearFinish ? 4 : 10
+      fight.initiative = 'opponent'
+      if (nearFinish) {
+        fight.position = 'bottom'
+        fight.commentary.push(`下位降服差一步，但你為攻擊付出額外 ${extraCost} 體力，對手重新壓穩防守架。`)
+      } else {
+        fight.position = finishWindow.failurePosition ?? 'side-control-defense'
+        fight.playerDamage = clamp(fight.playerDamage + 4)
+        fight.playerDamageByPart.body = clamp(fight.playerDamageByPart.body + 4)
+        fight.commentary.push(`下位降服失敗，對手過腿取得側控；你額外消耗 ${extraCost} 體力並承受軀幹壓力。`)
+      }
+    } else {
+      const extraCost = nearFinish ? 6 : 10
+      fight.playerStamina = clamp(fight.playerStamina - extraCost)
+      fight.opponentControl += nearFinish ? 2 : 5
+      fight.initiative = nearFinish ? 'even' : 'opponent'
+      if (!nearFinish) fight.position = finishWindow.failurePosition ?? 'scramble'
+      fight.commentary.push(nearFinish
+        ? `降服差一步收緊；你保住大部分位置，但額外消耗 ${extraCost} 體力。`
+        : `對手掙脫降服並奪回位置；你額外消耗 ${extraCost} 體力。`)
+    }
   } else {
     fight.position = 'scramble'
     fight.initiative = playerWonMinigame ? 'player' : 'even'
@@ -1374,8 +1423,25 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
         fighter.health[weakest] = clamp(fighter.health[weakest] + option.effects.health)
       }
       fighter.history.push({ id: event.id, year: fighter.year, age: fighter.age, title: event.title, summary: option.label, people: [fighter.relationships.find((item) => item.id === event.personId)?.name ?? ''], importance: 1, tags: ['人生'] })
-      next = { ...state, fighter, phase: 'growth', growthDestination: 'weight', insightGained: undefined, lastMessage: option.detail }
+      const personName = fighter.relationships.find((item) => item.id === event.personId)?.name ?? '重要的人'
+      next = {
+        ...state,
+        fighter,
+        phase: 'growth',
+        growthDestination: 'weight',
+        insightGained: undefined,
+        lifeEventResult: {
+          eventTitle: event.title,
+          optionLabel: option.label,
+          personName,
+          story: option.outcome ?? option.detail,
+          effects: option.effects,
+        },
+        lastMessage: option.detail,
+      }
     }
+  } else if (command.type === 'ACK_LIFE_RESULT' && state.lifeEventResult) {
+    next = { ...state, lifeEventResult: undefined }
   } else if (command.type === 'UNLOCK_NODE' && state.phase !== 'retirement') {
     const status = canUnlock(state, command.nodeId)
     if (status.ok) {
