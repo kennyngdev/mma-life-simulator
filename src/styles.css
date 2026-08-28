@@ -283,14 +283,12 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .connection-ground path { stroke-width: 1.7; stroke-dasharray: none; opacity: .45; }
 .cage-pressure-zone path { fill: none; stroke: var(--danger); stroke-width: .65; opacity: .8; }
 .cage-pressure-zone text { fill: #d98270 !important; font-size: 3px !important; font-weight: 800 !important; }
-.position-readout { padding: 9px 10px 10px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; border-top: 1px solid var(--line); background: linear-gradient(90deg, rgb(226 83 53 / .07), rgb(113 134 165 / .05)); }
-.position-readout > div span, .position-readout > div strong { display: block; }
-.position-readout > div span { color: var(--dim); font-size: 8px; font-weight: 800; letter-spacing: .08em; }
-.position-readout > div strong { margin-top: 1px; color: var(--ink); font-size: 13px; }
-.position-readout > em { padding: 4px 7px; border: 1px solid var(--line-bright); border-radius: 999px; color: var(--muted); font-size: 9px; font-style: normal; font-weight: 800; }
+.position-readout { padding: 11px 12px 12px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 10px; border-top: 1px solid var(--line); background: linear-gradient(90deg, rgb(226 83 53 / .07), rgb(113 134 165 / .05)); }
+.position-readout > div strong { display: block; color: var(--ink); font-size: 15px; }
+.position-readout > em { padding: 5px 8px; border: 1px solid var(--line-bright); border-radius: 999px; color: var(--muted); font-size: 10px; font-style: normal; font-weight: 800; }
 .owner-player .position-readout > em { border-color: rgb(226 83 53 / .45); color: #f0a08c; background: rgb(226 83 53 / .09); }
 .owner-opponent .position-readout > em { border-color: rgb(113 134 165 / .5); color: #b5c9e5; background: rgb(113 134 165 / .1); }
-.position-readout > p { grid-column: 1 / -1; margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.position-readout > p { grid-column: 1 / -1; margin: 6px 0 0; color: #bcb0a1; font-size: 13px; line-height: 1.6; }
 .live-log { min-height: 43px; padding: 8px; border-top: 1px solid var(--line); color: #c2b6a7; }
 .live-log p { margin: 0; font-size: 11px; line-height: 1.55; }
 .live-log p + p { margin-top: 3px; color: var(--muted); }

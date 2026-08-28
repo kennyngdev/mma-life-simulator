@@ -1291,7 +1291,7 @@ function PositionScene({ position, playerName, opponentName }: { position: Posit
         <FighterGlyph {...visual.opponent} side="opponent" />
       </>}
     </svg>
-    <div className="position-readout"><div><span>目前位置</span><strong>{positionLabel(position)}</strong></div><em>{ownerLabel}</em><p>{visual.detail}</p></div>
+    <div className="position-readout"><div><strong>{positionLabel(position)}</strong></div><em>{ownerLabel}</em><p>{visual.detail}</p></div>
   </div>
 }
 
