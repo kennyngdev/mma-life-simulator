@@ -4,6 +4,8 @@ Before changing gameplay, progression, combat, content, balance, economy, biogra
 
 For interface work, also read [UI_PRINCIPLES.md](UI_PRINCIPLES.md). The game is mobile-first and Traditional Chinese is the primary player-facing language.
 
+Before drafting, scheduling, or publishing Threads promotion, read [THREADS_PROMOTION_SPEC.md](THREADS_PROMOTION_SPEC.md). It is the accepted baseline for audience, voice, cadence, feedback handling, measurement, and social-account conduct.
+
 Keep these rules while working in this repository:
 
 - Preserve accepted decisions unless the user's current request explicitly replaces one.
@@ -11,6 +13,7 @@ Keep these rules while working in this repository:
 - Do not extend deprecated talent-tree, node-mastery, or practical-sparring systems. Legacy fields may remain only for derived combat values or save compatibility.
 - If an explicit new decision changes the design baseline, update `GAME_DESIGN_SPEC.md` in the same change.
 - Keep implementation, migrations, automated tests, and player-facing causal explanations aligned with the spec.
+- Keep public promotional claims aligned with the current live build and disclose when the game or a featured system remains in development.
 
 ## Versioning and changelog
 

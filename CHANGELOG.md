@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- Added an accepted Threads promotion specification covering Traditional-Chinese audience positioning, content cadence, community engagement, player-feedback intake, moderation, and success measurement.
+
 ### Changed
 
 - Established the official product name as **拳途人生 Cage Life** across the game shell, PWA metadata, sharing text, and design specification.
