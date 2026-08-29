@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } from '../src/game/content'
 import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
-import { advance, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, getTechniqueAffinity, mirrorPosition, offerRefreshCost, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
-import { migrateCareerEndings, migrateMatchmakingCredibility, migrateRankingCredibility, migrateRemovedSideControl, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
+import { advance, bodyMatchupFor, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, generateOffers, getAnthropometrics, getTechniqueAffinity, leagueRankingAfterWin, mirrorPosition, offerRefreshCost, opponentBodyFor, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
+import { migrateBodyMatchupStats, migrateCareerEndings, migrateLeagueRankings, migrateMatchmakingCredibility, migrateRankingCredibility, migrateRemovedSideControl, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
 import { EARNED_TRAITS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, movesForBranch, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
 import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, Position } from '../src/game/types'
 
@@ -77,6 +77,7 @@ function completeCareer(initial: GameState): GameState {
       state = apply(state, { type: 'RESOLVE_LIFE', optionId: option.id })
     }
     else if (state.phase === 'growth') state = apply(state, { type: 'CONTINUE_GROWTH' })
+    else if (state.phase === 'league-decision') state = apply(state, { type: 'CHOOSE_LEAGUE_FUTURE', choice: 'defend' })
     else if (state.phase === 'prefight') state = apply(state, { type: 'START_FIGHT' })
     else if (state.phase === 'round-plan') state = apply(state, { type: 'SET_ROUND_PLAN', plan: 'distance' })
     else if (state.phase === 'critical') {
@@ -358,31 +359,137 @@ describe('拳途人生模擬核心', () => {
     }
   })
 
-  it('冠軍戰只會在有資格時對上世界前十的強敵', () => {
+  it('冠軍戰只會在聯盟前三、兩連勝且達到門檻時對上無排名冠軍', () => {
     const state = createNewRun({ ...input, seed: 'TITLE-CREDIBILITY', startingExperience: 'semi-pro' })
     state.phase = 'offer'
-    state.fighter.evidence.fights = 10
-    state.fighter.wins = 8
-    state.fighter.ranking = 17
+    state.fighter.leagueStanding = { league: 'regional', status: 'ranked', rank: 3 }
+    state.fighter.leagueRecords.regional.winStreak = 2
     state.fighter.technique = { boxing: 84, kicking: 84, clinch: 68, wrestling: 68, ground: 50 }
     state.fighter.mind.fightIQ = 68
 
-    const offers = apply(state, { type: 'DECLINE_OFFERS' }).offers
+    const offers = generateOffers(state.fighter, state.opponents, state.rng).offers
     const titleOffers = offers.filter((offer) => offer.titleFight)
     expect(titleOffers).toHaveLength(1)
     const opponent = state.opponents.find((item) => item.id === titleOffers[0].opponentId)!
-    expect(opponent.rank).toBeLessThanOrEqual(10)
+    expect(opponent.standing).toBe('champion')
+    expect(opponent.rank).toBeUndefined()
+    expect(opponent.league).toBe('regional')
     expect(competitiveRatingForOpponent(opponent)).toBeGreaterThanOrEqual(70)
   })
 
   it('戰績達標但排名或實力不足時不會出現假冠軍戰', () => {
     const state = createNewRun({ ...input, seed: 'NO-PAPER-TITLE' })
     state.phase = 'offer'
-    state.fighter.evidence.fights = 10
-    state.fighter.wins = 8
-    state.fighter.ranking = 17
+    state.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 4 }
+    state.fighter.leagueRecords.amateur.winStreak = 2
 
-    expect(apply(state, { type: 'DECLINE_OFFERS' }).offers.every((offer) => !offer.titleFight)).toBe(true)
+    expect(generateOffers(state.fighter, state.opponents, state.rng).offers.every((offer) => !offer.titleFight)).toBe(true)
+  })
+
+  it('挑戰冠軍成功後不帶數字排名，並進入晉級選擇', () => {
+    let result = reachFirstFightResult(createNewRun({ ...input, seed: 'AMATEUR-TITLE-WIN' }))
+    result.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 2 }
+    const incumbent = result.opponents.find((item) => item.league === 'amateur' && item.standing === 'champion')!
+    result.fight!.opponentId = incumbent.id; result.fight!.offer.opponentId = incumbent.id
+    result.fight!.offer.titleRole = 'challenge'; result.fight!.offer.titleFight = true; result.fight!.winner = 'player'
+
+    result = apply(result, { type: 'ACK_FIGHT_RESULT' })
+    expect(result.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'champion', defenses: 0 })
+    expect(result.fighter.ranking).toBeUndefined()
+    expect(result.fighter.leagueRecords.amateur.titles).toBe(1)
+    expect(result.growthDestination).toBe('league-decision')
+    expect(result.promotionFrom).toBe('amateur')
+    expect(result.promotionTo).toBe('regional')
+    expect(result.fighter.history.at(-1)?.summary).not.toContain('#0')
+    expect(result.opponents.filter((item) => item.league === 'amateur' && item.standing === 'champion')).toHaveLength(0)
+    expect(result.opponents.filter((item) => item.league === 'amateur' && item.standing === 'ranked' && item.rank !== undefined).every((item) => item.rank! >= 1 && item.rank! <= 15)).toBe(true)
+  })
+
+  it('留在聯盟衛冕成功會累計衛冕並再次開啟晉級選擇', () => {
+    let state = reachFirstFightResult(createNewRun({ ...input, seed: 'DEFENSE-WIN' }))
+    state.fighter.leagueStanding = { league: 'amateur', status: 'champion', defenses: 0 }
+    state.fighter.leagueRecords.amateur.titles = 1
+    state.fight!.offer.titleRole = 'defense'; state.fight!.offer.titleFight = true; state.fight!.winner = 'player'
+    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    expect(settled.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'champion', defenses: 1 })
+    expect(settled.fighter.leagueRecords.amateur.defenses).toBe(1)
+    expect(settled.growthDestination).toBe('league-decision')
+  })
+
+  it('衛冕失敗由挑戰者接掌冠軍，前冠軍落到第一名', () => {
+    let state = reachFirstFightResult(createNewRun({ ...input, seed: 'DEFENSE-LOSS' }))
+    state.fighter.leagueStanding = { league: 'amateur', status: 'champion', defenses: 2 }
+    const challenger = state.opponents.find((item) => item.id === state.fight!.opponentId)!
+    const incumbent = state.opponents.find((item) => item.league === 'amateur' && item.standing === 'champion')!
+    incumbent.standing = 'ranked'; incumbent.isChampion = false; incumbent.rank = 1
+    challenger.league = 'amateur'; challenger.standing = 'ranked'; challenger.rank = 3; challenger.isChampion = false
+    state.fight!.offer.titleRole = 'defense'; state.fight!.offer.titleFight = true; state.fight!.winner = 'opponent'
+    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    expect(settled.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'ranked', rank: 1 })
+    expect(settled.fighter.ranking).toBe(1)
+    expect(settled.opponents.find((item) => item.id === challenger.id)).toMatchObject({ standing: 'champion', rank: undefined, isChampion: true })
+    expect(settled.growthDestination).toBe('offer')
+  })
+
+  it('晉級會離開舊腰帶並在下一聯盟從未排名開始', () => {
+    const state = {
+      ...createNewRun({ ...input, seed: 'PROMOTION-CHOICE' }),
+      phase: 'league-decision' as const,
+      promotionFrom: 'amateur' as const,
+      promotionTo: 'regional' as const,
+    }
+    state.fighter.leagueStanding = { league: 'amateur', status: 'champion', defenses: 1 }
+    const promoted = apply(state, { type: 'CHOOSE_LEAGUE_FUTURE', choice: 'promote' })
+    expect(promoted.stage).toBe('regional')
+    expect(promoted.fighter.leagueStanding).toEqual({ league: 'regional', status: 'unranked' })
+    expect(promoted.fighter.ranking).toBeUndefined()
+    expect(promoted.offers.every((offer) => promoted.opponents.find((item) => item.id === offer.opponentId)?.league === 'regional')).toBe(true)
+  })
+
+  it('舊全域排名會映射到目前聯盟並保留冠軍無排名規則', () => {
+    const legacy = structuredClone(createNewRun({ ...input, seed: 'MIGRATE-LEAGUE' })) as any
+    legacy.saveVersion = 13; legacy.rulesVersion = '0.11.0'; legacy.contentVersion = '1.4.0'; legacy.stage = 'world'
+    legacy.fighter.leagueStanding = undefined; legacy.fighter.leagueRecords = undefined; legacy.fighter.ranking = 33
+    legacy.opponents = legacy.opponents.slice(0, 16).map((opponent: any, index: number) => {
+      const copy = { ...opponent }; delete copy.league; delete copy.standing; delete copy.isChampion; copy.rank = index + 1; return copy
+    })
+    const migrated = migrateLeagueRankings(legacy)
+    expect(migrated.fighter.leagueStanding).toEqual({ league: 'world', status: 'ranked', rank: 5 })
+    expect(migrated.fighter.leagueRecords.world.fights).toBe(0)
+    expect(migrated.opponents.filter((item) => item.league === 'world' && item.standing === 'champion')).toHaveLength(1)
+    expect(migrated.opponents.filter((item) => item.league === 'world' && item.standing === 'ranked').every((item) => item.rank! >= 1 && item.rank! <= 15)).toBe(true)
+  })
+
+  it('目前規則舊存檔會補回每名對手的身體資料並升級版本', () => {
+    const legacy = structuredClone(createNewRun({ ...input, seed: 'MIGRATE-BODY' })) as any
+    legacy.rulesVersion = '0.12.0'
+    legacy.contentVersion = '1.5.0'
+    legacy.opponents.forEach((opponent: any) => {
+      delete opponent.naturalWeight
+      delete opponent.frame
+      opponent.heightCm = legacy.fighter.heightCm
+      opponent.reachCm = legacy.fighter.reachCm
+    })
+
+    const migrated = migrateBodyMatchupStats(legacy)
+
+    expect(migrated).toMatchObject({ saveVersion: 14, rulesVersion: '0.12.1', contentVersion: '1.5.1' })
+    for (const opponent of migrated.opponents) {
+      expect(opponent).toMatchObject(opponentBodyFor(migrated.seed, migrated.fighter.naturalWeight, opponent.id))
+    }
+    expect(migrated.phase).toBe(legacy.phase)
+    expect(migrated.fighter.history).toEqual(legacy.fighter.history)
+
+    const activeLegacy = structuredClone(reachFirstRoundPlan(createNewRun({ ...input, seed: 'MIGRATE-BODY-ACTIVE' }))) as any
+    activeLegacy.rulesVersion = '0.12.0'
+    activeLegacy.contentVersion = '1.5.0'
+    activeLegacy.opponents.forEach((opponent: any) => {
+      delete opponent.naturalWeight
+      delete opponent.frame
+    })
+    const activeMigrated = migrateBodyMatchupStats(activeLegacy)
+    expect(activeMigrated.fight).toBeDefined()
+    expect(apply(activeMigrated, { type: 'SET_ROUND_PLAN', plan: 'distance' }).phase).toBe('critical')
   })
 
   it('載入現有生涯時會移除低評級對手的錯誤冠軍標籤與獎金', () => {
@@ -403,16 +510,19 @@ describe('拳途人生模擬核心', () => {
     expect(repaired.offers[0].purseBreakdown.titleBonus).toBe(0)
   })
 
-  it('排名五十九時的三份邀約會圍繞較低、同級與較高排名', () => {
+  it('聯盟排名第八時的三份邀約會圍繞較低、同級與較高排名', () => {
     const state = createNewRun({ ...input, seed: 'RANK-LED-OFFERS' })
     state.phase = 'offer'
-    state.fighter.ranking = 59
+    state.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 8 }
 
-    const migrated = migrateMatchmakingCredibility(state)
+    const migrated = { ...state, offers: generateOffers(state.fighter, state.opponents, state.rng).offers }
     const ranks = migrated.offers.map((offer) => migrated.opponents.find((opponent) => opponent.id === offer.opponentId)!.rank)
-    expect(Math.abs(ranks[0] - 69)).toBeLessThanOrEqual(5)
-    expect(Math.abs(ranks[1] - 59)).toBeLessThanOrEqual(5)
-    expect(Math.abs(ranks[2] - 49)).toBeLessThanOrEqual(5)
+    expect(ranks[0]).toBeGreaterThanOrEqual(10)
+    expect(ranks[0]).toBeLessThanOrEqual(12)
+    expect(ranks[1]).toBeGreaterThanOrEqual(7)
+    expect(ranks[1]).toBeLessThanOrEqual(9)
+    expect(ranks[2]).toBeGreaterThanOrEqual(4)
+    expect(ranks[2]).toBeLessThanOrEqual(6)
   })
 
   it('排名五十九擊敗第九名後會躍升至第十二名', () => {
@@ -421,17 +531,19 @@ describe('拳途人生模擬核心', () => {
     expect(rankingAfterWin(59, 69)).toBe(57)
   })
 
-  it('賽後結算不再使用舊合約內最多六名的排名獎勵', () => {
+  it('賽後結算依聯盟對手位置移動，不使用舊合約排名獎勵', () => {
     const result = reachFirstFightResult(createNewRun({ ...input, seed: 'UPSET-SETTLEMENT' }))
     const opponent = result.opponents.find((item) => item.id === result.fight!.opponentId)!
-    result.fighter.ranking = 59
+    result.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 12 }
     opponent.rank = 9
+    opponent.standing = 'ranked'
+    opponent.league = 'amateur'
     result.fight!.winner = 'player'
     result.fight!.offer.rankReward = 6
 
     const settled = apply(result, { type: 'ACK_FIGHT_RESULT' })
-    expect(settled.fighter.ranking).toBe(12)
-    expect(settled.fighter.history.at(-1)?.summary).toContain('排名從 #59 升至 #12')
+    expect(settled.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'ranked', rank: 9 })
+    expect(settled.fighter.history.at(-1)?.summary).toContain('排名從 #12 升至 #9')
   })
 
   it('載入舊規則生涯時會修正最近一場重大爆冷的排名', () => {
@@ -621,11 +733,66 @@ describe('拳途人生模擬核心', () => {
     expect(offer.fighter.insight).toBe(0)
   })
 
-  it('體格資料與自然體重相關，並會改變遠距對位結果', () => {
+  it('每名對手都有獨立且可重現的身體資料', () => {
     const state = createNewRun(input)
     expect(state.fighter.frame).toMatch(/骨架$/)
-    expect(Math.abs(state.fighter.reachCm - state.fighter.heightCm)).toBeLessThanOrEqual(10)
     expect(state.fighter.heightCm).toBeGreaterThan(160)
+    expect(state.opponents.every((opponent) => opponent.naturalWeight >= 64 && opponent.naturalWeight <= 94)).toBe(true)
+    expect(state.opponents.every((opponent) => opponent.frame)).toBe(true)
+    for (const opponent of state.opponents) {
+      expect(opponent).toMatchObject(opponentBodyFor(state.seed, state.fighter.naturalWeight, opponent.id))
+      expect(getAnthropometrics(state.seed, opponent.naturalWeight, opponent.id)).toMatchObject({
+        heightCm: opponent.heightCm, reachCm: opponent.reachCm, frame: opponent.frame,
+      })
+    }
+    expect(new Set(state.opponents.map((opponent) => opponent.naturalWeight)).size).toBeGreaterThan(1)
+  })
+
+  it('身高臂展會實際提高遠距機會，厚重骨架會提高壓迫與抱摔開局', () => {
+    const neutralBody = (state: GameState) => {
+      const opponent = state.opponents.find((item) => item.id === state.fight!.opponentId)!
+      state.fighter.naturalWeight = 80
+      state.fighter.heightCm = 180
+      state.fighter.reachCm = 180
+      state.fighter.frame = '均衡骨架'
+      state.fighter.technique = { boxing: 60, kicking: 60, clinch: 60, wrestling: 60, ground: 60 }
+      state.fighter.mind = { fightIQ: 55, composure: 55 }
+      state.fighter.traits = []
+      opponent.naturalWeight = 80
+      opponent.heightCm = 180
+      opponent.reachCm = 180
+      opponent.frame = '均衡骨架'
+      opponent.technique = { boxing: 60, kicking: 60, clinch: 60, wrestling: 60, ground: 60 }
+      opponent.composure = 55
+      opponent.traits = []
+      opponent.rating = competitiveRatingForOpponent(opponent)
+      return state
+    }
+    const base = neutralBody(reachFirstRoundPlan(createNewRun({ ...input, seed: 'BODY-EDGES' })))
+    const neutralRange = apply(structuredClone(base), { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const rangeAdvantage = structuredClone(base)
+    rangeAdvantage.fighter.heightCm = 190
+    rangeAdvantage.fighter.reachCm = 195
+    const range = apply(rangeAdvantage, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const rangeOption = (state: GameState) => state.fight!.prompt!.allOptions.find((option) => option.intentId === 'front-kick')!
+    expect(range.fight!.momentum).toBeGreaterThan(neutralRange.fight!.momentum)
+    expect(rangeOption(range).chance.min).toBeGreaterThan(rangeOption(neutralRange).chance.min)
+
+    const neutralPressure = apply(structuredClone(base), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
+    const pressureAdvantage = structuredClone(base)
+    pressureAdvantage.fighter.naturalWeight = 90
+    pressureAdvantage.fighter.frame = '厚實骨架'
+    pressureAdvantage.opponents.find((item) => item.id === pressureAdvantage.fight!.opponentId)!.naturalWeight = 70
+    pressureAdvantage.opponents.find((item) => item.id === pressureAdvantage.fight!.opponentId)!.frame = '修長骨架'
+    const pressure = apply(pressureAdvantage, { type: 'SET_ROUND_PLAN', plan: 'pressure' })
+    const neutralTakedown = apply(structuredClone(base), { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    const takedownAdvantage = structuredClone(pressureAdvantage)
+    const takedown = apply(takedownAdvantage, { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    expect(pressure.fight!.momentum).toBeGreaterThan(neutralPressure.fight!.momentum)
+    expect(takedown.fight!.momentum).toBeGreaterThan(neutralTakedown.fight!.momentum)
+    expect(bodyMatchupFor(pressureAdvantage.fighter, pressureAdvantage.opponents.find((item) => item.id === pressureAdvantage.fight!.opponentId)!)).toMatchObject({
+      insideEdge: expect.any(Number), clinchEdge: expect.any(Number),
+    })
   })
 
   it('雙方都以滿體力開始比賽', () => {
@@ -704,26 +871,17 @@ describe('拳途人生模擬核心', () => {
     }
   })
 
-  it('早期對手池依家鄉形成不同濃度，之後逐步轉向亞洲與世界', () => {
-    const regions = ['hong-kong', 'taiwan', 'mainland'] as const
-    const rates = Object.fromEntries(regions.map((region) => {
-      let local = 0
-      let total = 0
-      for (let index = 0; index < 80; index += 1) {
-        const state = createNewRun({ ...input, region, seed: `REGION-MIX-${index}` })
-        const early = state.opponents.slice(0, 8)
-        local += early.filter((opponent) => opponent.originRegion === region).length
-        total += early.length
-        expect(state.opponents.slice(8, 14).every((opponent) => !opponent.originRegion)).toBe(true)
-      }
-      return [region, local / total]
-    }))
-    expect(rates['hong-kong']).toBeGreaterThan(.43)
-    expect(rates['hong-kong']).toBeLessThan(.58)
-    expect(rates.taiwan).toBeGreaterThan(.58)
-    expect(rates.taiwan).toBeLessThan(.72)
-    expect(rates.mainland).toBeGreaterThan(.68)
-    expect(rates.mainland).toBeLessThan(.82)
+  it('對手池固定生成四組獨立的冠軍與前十五名聯盟名單', () => {
+    const first = createNewRun({ ...input, seed: 'LEAGUE-ROSTERS' })
+    const second = createNewRun({ ...input, seed: 'LEAGUE-ROSTERS' })
+    expect(first.opponents).toEqual(second.opponents)
+    for (const league of ['amateur', 'regional', 'asia', 'world'] as const) {
+      const roster = first.opponents.filter((opponent) => opponent.league === league)
+      expect(roster).toHaveLength(16)
+      expect(roster.filter((opponent) => opponent.standing === 'champion')).toHaveLength(1)
+      expect(roster.filter((opponent) => opponent.standing === 'ranked').map((opponent) => opponent.rank).sort((a, b) => (a ?? 99) - (b ?? 99))).toEqual(Array.from({ length: 15 }, (_, index) => index + 1))
+    }
+    expect(first.opponents.filter((opponent) => opponent.league === 'grassroots')).toHaveLength(5)
   })
 
   it('地方收入與治療費使用同一經濟倍率，貨幣顯示依出身地改變', () => {

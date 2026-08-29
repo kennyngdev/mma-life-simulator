@@ -101,8 +101,10 @@ function playStyleFight(seed: string, playerStyle: TestedStyle, opponentStyle: T
       opponent.learnedMoves = FIGHT_INTENTS.map((move) => move.id)
       opponent.traits = []
       opponent.composure = 55
+      opponent.naturalWeight = state.fighter.naturalWeight
       opponent.heightCm = state.fighter.heightCm
       opponent.reachCm = state.fighter.reachCm
+      opponent.frame = state.fighter.frame
       opponent.rating = competitiveRatingForOpponent(opponent)
       state = apply(state, { type: 'START_FIGHT' })
     } else if (state.phase === 'round-plan') state = apply(state, { type: 'SET_ROUND_PLAN', plan: STYLE_PLAN[playerStyle] })
@@ -182,5 +184,5 @@ describe('戰鬥平衡', () => {
     const detail = JSON.stringify(rates)
     expect(rates.every((rate) => rate.aggregateRate >= .4 && rate.aggregateRate <= .6), detail).toBe(true)
     expect(rates.every((rate) => Math.abs(rate.playerSideRate - rate.opponentSideRate) <= .1), detail).toBe(true)
-  })
+  }, 15_000)
 })

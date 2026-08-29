@@ -195,6 +195,40 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .status-region-card em { display: block; margin-top: 3px; color: #dfd2bf; font-size: 12px; font-style: normal; }
 .status-region-card p { margin: 9px 0 6px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .status-region-card small { color: #c8baa4; font-size: 11px; line-height: 1.5; }
+.league-status-card { margin: 14px 0 18px; padding: 15px; border: 1px solid rgb(226 83 53 / .38); border-left: 3px solid var(--accent); border-radius: 12px; background: linear-gradient(145deg, rgb(111 45 29 / .2), var(--surface)); }
+.league-status-card > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.league-status-card span { color: var(--accent); font-size: 11px; font-weight: 900; letter-spacing: .08em; }
+.league-status-card strong { font-size: 17px; text-align: right; }
+.league-status-card p { margin: 8px 0 0; color: #d1c3b2; font-size: 12px; line-height: 1.6; }
+.league-status-card.league-champion { border-color: rgb(215 189 131 / .58); border-left-color: var(--gold); background: linear-gradient(145deg, rgb(215 189 131 / .15), var(--surface)); }
+.league-status-card.league-champion span, .league-status-card.league-champion strong { color: var(--gold); }
+.league-requirements { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 11px; }
+.league-requirements span { padding: 7px 5px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: rgb(0 0 0 / .15); font-size: 10px; font-weight: 700; text-align: center; letter-spacing: 0; }
+.league-requirements span.met { border-color: rgb(98 169 123 / .6); color: #9fd3ad; background: rgb(98 169 123 / .1); }
+.league-standings { margin: 22px 0 26px; }
+.league-standings .section-title { margin-top: 0; }
+.standings-table { max-height: 420px; display: grid; gap: 5px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.standing-row, .standing-player-unranked { min-width: 0; padding: 9px 10px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.standing-row > span, .standing-player-unranked > span { color: var(--gold); font: 800 11px "IBM Plex Mono", monospace; }
+.standing-row strong, .standing-player-unranked strong { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.standing-row small, .standing-player-unranked small { min-width: 0; max-width: 13ch; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; text-align: right; }
+.standing-row.champion-row { margin-bottom: 4px; grid-template-columns: 42px minmax(0, 1fr) auto; border-color: rgb(215 189 131 / .55); background: linear-gradient(90deg, rgb(215 189 131 / .12), var(--surface)); }
+.standing-row.champion-row > span, .standing-row.champion-row strong { color: var(--gold); }
+.standing-player-unranked { margin-bottom: 4px; border-style: dashed; }
+.standing-player-unranked > span { color: var(--accent); font-family: inherit; }
+.standing-player { border-color: var(--accent); background: rgb(226 83 53 / .14); box-shadow: inset 3px 0 var(--accent); }
+.standing-player > span, .standing-player strong { color: #fff; }
+.league-decision-screen { min-height: 100%; display: flex; flex-direction: column; justify-content: center; }
+.promotion-card { padding: 26px 20px; border: 1px solid rgb(215 189 131 / .55); border-radius: 18px; background: radial-gradient(circle at 50% 0, rgb(215 189 131 / .2), transparent 58%), linear-gradient(150deg, #292218, #171411); text-align: center; box-shadow: 0 16px 50px rgb(0 0 0 / .28); }
+.promotion-belt { width: 62px; height: 62px; margin: 0 auto 9px; display: grid; place-items: center; border: 1px solid var(--gold); border-radius: 50%; color: var(--gold); font-size: 26px; box-shadow: 0 0 0 8px rgb(215 189 131 / .08); }
+.promotion-card h2 { margin: 7px 0; color: var(--gold); font-size: 28px; }
+.promotion-card > p:not(.eyebrow) { margin: 0 auto; max-width: 35ch; color: #ddcfb9; font-size: 14px; line-height: 1.75; }
+.promotion-summary { margin-top: 21px; padding-top: 14px; display: grid; grid-template-columns: auto 1fr; gap: 8px 13px; border-top: 1px solid rgb(215 189 131 / .25); text-align: left; }
+.promotion-summary span { color: var(--muted); font-size: 11px; }
+.promotion-summary strong { color: var(--ink); font-size: 14px; }
+.promotion-actions { margin-top: 16px; }
+.promotion-actions .primary-action, .promotion-actions .secondary-action { margin-top: 0; }
+.promotion-actions .secondary-action { margin-top: 9px; border-color: rgb(215 189 131 / .48); color: var(--gold); }
 .biography-alias, .biography-origin { display: block; }
 .biography-alias { margin-top: -6px; color: var(--gold); font-size: 14px; font-style: normal; }
 .biography-origin { margin: 5px 0 13px; color: var(--muted); font-size: 12px; }
@@ -719,6 +753,8 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .biography-card p:last-child { margin: 14px 0 0; font-size: 13px; line-height: 1.75; }
 .biography-card blockquote { margin: 14px 0 0; padding: 11px 12px; border-left: 3px solid #8f3b27; color: #4b3d2d; background: rgb(255 255 255 / .22); font-size: 12px; line-height: 1.65; }
 .career-record { margin-top: 10px; padding-block: 8px; border-block: 1px solid rgb(43 37 28 / .25); font: 700 17px "IBM Plex Mono", monospace; }
+.biography-titles { display: grid; gap: 3px; margin-top: 10px; color: #6e2e20; font-size: 11px; letter-spacing: .04em; }
+.biography-titles strong { font-size: 13px; line-height: 1.5; }
 .timeline > div { display: grid; grid-template-columns: 52px 1fr; gap: 12px; }
 .timeline > div > span { padding-top: 3px; color: var(--accent); font: 600 11px "IBM Plex Mono", monospace; }
 .timeline > div > span small { display: block; margin-top: 3px; color: var(--dim); font-family: inherit; }

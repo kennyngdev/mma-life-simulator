@@ -59,15 +59,15 @@ All three experiences receive the same seeded body, aptitude, relationship, and 
 
 Normie opponents in the grassroots prologue should be low-skill, distinctive gym smokers and exhibitions. Keep this phase playful and aspirational; do not frame ordinary criminal assaults as the fighter's career ladder.
 
-### 3.2 Stage thresholds — Accepted
+### 3.2 League structure and progression — Accepted
 
-| Experience | Grassroots | Amateur | Regional | Asia | World | Legacy |
-|---|---:|---:|---:|---:|---:|---:|
-| Normie | fights 0–2 | 3–5 | 6–8 | 9–12 | 13–15 | 16+ |
-| Hobbyist | — | 0–2 | 3–5 | 6–9 | 10–12 | 13+ |
-| Semi-pro | — | — | 0–2 | 3–6 | 7–9 | 10+ |
+Grassroots is an unranked Normie prologue. Competitive play then uses four independent top-15 leagues in this order: **Amateur → Regional → Asia → World**. Each league has exactly one unranked champion above numbered ranks #1–#15. Legacy is the post-World-title career phase, not a fifth league.
 
-Stages must change opposition, stakes, money, reputation, and the interpretation of preparation. They must not be merely renamed number bands.
+The player enters a league as `未排名`, receives opponents around #13–#15, and earns a numbered place through player-involved results. Every league stores its own fights, wins, losses, draws, consecutive wins, best rank, titles, and defenses. A champion has no numeric rank and must never be rendered as #0 or another numbered slot.
+
+Starting placement is deliberately legible: Normie completes three Grassroots fights before entering Amateur unranked; Hobbyist starts Amateur unranked; Semi-pro starts Regional unranked. Moving up is irreversible. After winning an Amateur, Regional, or Asia title, the player chooses between joining the next league unranked (vacating the old belt) or staying to defend. A successful defense presents the same choice again. Winning the World title keeps the player World champion and enters Legacy; there is no higher league.
+
+Only player-involved fights change standings in v1. League rosters are seeded once and persist, so every rise, fall, rematch, and title change has an understandable cause.
 
 ### 3.3 Career endings — Accepted
 
@@ -82,19 +82,25 @@ The player may also choose retirement from the offer screen after five fights or
 
 The interface must state the exact health threshold, show the fighter's current weakest long-term health value in ordinary career context, warn when a value approaches the line, and name injury as the cause when it ends the career. A retirement trigger must never arrive as an unexplained seeded timer.
 
-### 3.4 World-title credibility — Accepted
+### 3.4 League rankings, matchmaking, and titles — Accepted
 
-A world-title offer is earned through both results and credible competitive standing. It becomes available only after at least 10 fights and 8 wins, when the player is ranked in the top 20 and has a competitive rating of at least 70. The championship opponent must be ranked in the top 10 with a competitive rating of at least 70. A development opponent cannot be relabeled as a champion merely because the career has reached a fight-count threshold.
+Within a top-15 ladder, an unranked winner takes the defeated ranked opponent's slot. Beating a higher-ranked opponent places the player at or immediately behind that opponent; a gap of 10 or more places leaves the player one slot behind. Beating a peer or lower-ranked opponent climbs two places. Ordinary losses drop three places and draws drop one; falling below #15 makes the player unranked. Affected opponents shift so the champion and every numbered slot remain unique.
 
-Ordinary matchmaking is led by career ranking rather than competitive rating alone. Each offer cycle should center its three choices around an opponent roughly 10 places below the player, a peer near the player's rank, and an opponent roughly 10 places above the player, subject to roster boundaries and rematch availability. Competitive-rating differences remain visible as risk; a fighter whose ranking has outpaced their ability should face a legibly dangerous slate rather than being silently matched far down the rankings.
+Unranked offers target roughly #13–#15. Ranked offers target roughly three places below, a peer, and three places above. A championship offer requires all three current-league conditions: player ranked #1–#3, at least two consecutive wins in that league (a loss or draw resets form), and competitive rating of at least 35 / 50 / 70 / 80 for Amateur / Regional / Asia / World. A challenge always names the league champion, who never displays a numeric rank. Other offers remain ordinary ranked fights.
 
-Ranking movement must reflect the defeated opponent's standing. Beating a peer or lower-ranked opponent produces a modest two-place climb. Beating a higher-ranked opponent places the winner at or just behind that opponent: zero places behind for a gap below 10, one for 10–19, two for 20–29, and three for a gap of 30 or more. Thus a #59 fighter who defeats #9 becomes #12; the result cannot be compressed into a generic six-place gain.
+A failed title challenge leaves the player's rank unchanged and resets form; a draw leaves both champion and ranking unchanged. Winning a title removes the player from the numbered table and inserts the former champion at #1. A defense win records a defense; a defense draw retains the belt without reopening the promotion choice; a defense loss makes the challenger champion and places the former champion at #1. Championship results explicitly describe becoming, retaining, or losing the belt and never report a move to #0.
 
 ### 3.5 Weight-cut strategy — Deprecated
 
 Weight-cut planning is not part of the player loop. A fighter's displayed division is a stable presentation derived from natural body weight and has no readiness, fatigue, health, or competitive modifier. Do not restore a pre-fight dehydration choice unless a future explicit decision establishes a strategically central, evidence-backed replacement.
 
 Older saves on the removed weight screen must migrate directly to the pre-fight briefing without losing career progress.
+
+### 3.6 Seeded body matchup — Accepted
+
+Natural weight, height, reach, and frame are persistent seeded body traits. They create small matchup edges: height and reach favor range, while a thicker or heavier frame favors pressure, takedowns, and clinch control. These edges affect tactical exchanges and round-plan entry only; they do not modify competitive rating, finish opportunity, scouting, purse, ranking, readiness, fatigue, or health directly. The displayed division remains a presentation label derived from natural weight and is still non-mechanical.
+
+The opponent roster stores its own deterministic body records. Opponent natural weight is hidden, while the pre-fight briefing shows visible measurements and the coach translates the matchup into a subtle tactical recommendation alongside overall rating, skill, readiness, and scouting risk.
 
 ## 4. Skills, training, and moves
 
@@ -277,6 +283,13 @@ Gameplay changes should preserve or explicitly revise these tests:
 - Unlearned non-emergency moves never appear in combat.
 - Trait evidence uses the correct finish method and move attribution, awards once, and persists to history and biography.
 - All three starting experiences remain viable; the longest route is not automatically optimal.
+- Every league has one champion with no numeric rank and a unique #1–#15 table; identical seeds produce identical league rosters and preserve the intended rating curves.
+- Normie Grassroots entry, unranked placement, rank shifts, displacement below #15, losses, draws, rematches, and per-league title-form resets remain causal and player-driven.
+- Championship requirements are enforced at their exact boundaries (top three, two current-league wins, and rating floors 35 / 50 / 70 / 80); challenge, defense, belt turnover, promotion, and World-to-Legacy behavior are distinct.
+- Offer, standings, promotion, accessible-label, and 320 px UI surfaces expose league standing without rendering a champion as a number.
+- Legacy active careers migrate to World, old global ranks map with `ceil(oldRank × 15 / 99)`, current records and title history are preserved where possible, and unsigned offers are rebuilt deterministically.
+- Seeded height, reach, natural weight, and frame persist for each opponent; range, pressure, takedown, and clinch outcomes receive only the documented small body-matchup edges, while displayed division remains non-mechanical.
+- Existing `0.12.0 / 1.5.0` and `0.12.1 / 1.5.1` saves deterministically backfill league standings and opponent body records, then load as `0.13.0 / 1.6.0` without losing an active fight or career.
 - Fight count never triggers retirement, while age 38 and post-fight health at 25 or below do.
 - Offer, status, and injury-retirement surfaces state the health ending rule and current relevant condition.
 - Retired practical-sparring state migrates back to a playable camp without losing a slot.
@@ -302,3 +315,4 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-29 | Accepted | Remove side control and its dedicated move family. Ground progression now goes directly from guard passing to mount, keeping fewer positions with clearer strategic roles. |
 | 2026-08-29 | Accepted | Use GitHub Pages at `playcagelife.com` as the sole production distribution site. Do not deploy or maintain a ChatGPT Sites version. |
 | 2026-08-29 | Accepted | At character creation, prompt browser-tab players in Traditional Chinese to install or add the PWA to their home screen; do not show the prompt in standalone PWA mode. |
+| 2026-08-29 | Accepted | Replace the global #1–#99 ladder and fight-count progression with independent Amateur, Regional, Asia, and World top-15 leagues. Each league has one unranked champion; title challenges require top-three standing, two current-league wins, and rating floors 35 / 50 / 70 / 80. After a non-World title, the player chooses irreversible promotion or continued defenses; World gold enters Legacy. |

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
-import { advance, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
+import { advance, bodyMatchupFor, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, fighterStandingLabel, getOpponent, getRelationshipBenefit, LEAGUE_LABELS, LEAGUE_TITLE_RATING_FLOORS, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
 import { aptitudeLabel, minimumMoveLevel, nextSkillThreshold, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
@@ -30,6 +30,7 @@ import type {
   RiskLabel,
   RoundPlan,
   StartingExperience,
+  LeagueId,
 } from './game/types'
 import { t } from './i18n'
 
@@ -272,7 +273,7 @@ function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx, relaxed
   return (
     <header className="game-header">
       <div className="identity-block">
-        <span className="stage-mark">{STAGE_LABELS[game.stage]}</span>
+        <span className="stage-mark">{fighterStandingLabel(fighter, game.stage)}</span>
         <strong>{fighter.name}</strong>
         <small>{fighter.age} 歲 · {fighter.weightClass} · {fighter.wins}-{fighter.losses}-{fighter.draws}</small>
       </div>
@@ -296,6 +297,7 @@ function GameView({ game, dispatch, onNew, relaxedDrills }: { game: GameState; d
     case 'training-reward': return <TrainingRewardView game={game} dispatch={dispatch} />
     case 'life': return <LifeView game={game} dispatch={dispatch} />
     case 'growth': return <GrowthView game={game} dispatch={dispatch} />
+    case 'league-decision': return <LeagueDecisionView game={game} dispatch={dispatch} />
     case 'prefight': return <PreFightView game={game} dispatch={dispatch} />
     case 'round-plan': return <RoundPlanView game={game} dispatch={dispatch} />
     case 'critical': return <CriticalView game={game} dispatch={dispatch} />
@@ -325,10 +327,10 @@ function RevealView({ game, dispatch }: ViewProps) {
       </article>
       <div className="body-reveal">
         <Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} />
-        <Metric label="身高" value={`${fighter.heightCm} cm`} note="影響站立距離與重心" />
-        <Metric label="臂展" value={`${fighter.reachCm} cm`} note={`${fighter.reachCm - fighter.heightCm >= 4 ? '遠距覆蓋較長' : fighter.reachCm - fighter.heightCm <= -2 ? '近身結構緊湊' : '接近身高比例'}`} />
+        <Metric label="身高" value={`${fighter.heightCm} cm`} note="小幅影響站立距離與重心" />
+        <Metric label="臂展" value={`${fighter.reachCm} cm`} note={`${fighter.reachCm - fighter.heightCm >= 4 ? '遠距覆蓋略長' : fighter.reachCm - fighter.heightCm <= -2 ? '近身結構略緊湊' : '接近身高比例'} · 只帶來小幅對位差異`} />
         <Metric label="生涯起點" value={experienceLabel(fighter.startingExperience)} note={STAGE_LABELS[game.stage]} />
-        <Metric label="比賽量級" value={fighter.weightClass} note="依體格與自然體重安排" />
+        <Metric label="比賽量級" value={fighter.weightClass} note="依體格與自然體重安排 · 不改變戰鬥規則" />
       </div>
       <SkillOverview fighter={fighter} />
       <section><SectionTitle title="天生特質" subtitle="稀有度影響力量；每項效果都有明確生效條件。" /><TraitGrid traits={fighter.traits} /></section>
@@ -349,8 +351,9 @@ function OfferView({ game, dispatch }: ViewProps) {
   const canRefresh = !game.offerRefreshUsed && game.fighter.money >= refreshCost
   const weakestHealth = weakestHealthEntry(game.fighter)
   return (
-    <Screen title="下一場戰鬥" kicker={`${game.fighter.year} · 排名 #${game.fighter.ranking}`}>
+    <Screen title="下一場戰鬥" kicker={`${game.fighter.year} · ${fighterStandingLabel(game.fighter, game.stage)}`}>
       <ContextStrip fighter={game.fighter} />
+      <LeagueStatusCard game={game} />
       <aside className="coach-note">
         <span className="coach-avatar">教</span>
         <div><strong>{coach?.name ?? '教練'}的話</strong><p>「我替你看過這三份邀約。先看清楚對方靠什麼吃飯、哪裡會露出破口，再決定這一步要走多快。」</p></div>
@@ -359,11 +362,12 @@ function OfferView({ game, dispatch }: ViewProps) {
         {game.offers.map((offer) => {
           const opponent = game.opponents.find((item) => item.id === offer.opponentId)!
           const strength = strongestBranch(opponent)
+          const titleRole = offer.titleRole ?? (offer.titleFight ? 'challenge' : 'ordinary')
           return <article className={`offer-card risk-${riskTone(offer.riskLabel)}`} key={offer.id}>
-            <div className="offer-top"><span>{offer.promotion}</span><b>{offer.titleFight ? '冠軍戰' : offer.riskLabel}</b></div>
+            <div className="offer-top"><span>{offer.promotion}</span><b>{titleRole === 'challenge' ? '挑戰冠軍' : titleRole === 'defense' ? '衛冕戰' : offer.riskLabel}</b></div>
             <h2>{opponent.name}</h2>
             {opponent.alias && <span className="opponent-alias">{opponent.alias}</span>}
-            <p>{opponent.hometown ? `${opponent.hometown} · ` : ''}{opponent.nationality ?? opponent.region} · {opponent.style} · 戰績 {opponent.record.wins}-{opponent.record.losses} · 排名 #{opponent.rank} · 競技評級 {competitiveRatingForOpponent(opponent)}</p>
+            <p>{opponent.hometown ? `${opponent.hometown} · ` : ''}{opponent.nationality ?? opponent.region} · {opponent.style} · 戰績 {opponent.record.wins}-{opponent.record.losses} · {opponent.standing === 'champion' ? `${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍` : opponent.rank !== undefined ? `排名 #${opponent.rank}` : '未排名'} · 競技評級 {competitiveRatingForOpponent(opponent)}</p>
             <div className="scout-grid" aria-label={`${opponent.name}的賽前情報`}>
               <div><span>他最擅長</span><strong>{BRANCH_META[strength].name}</strong></div>
               <div><span>可以針對</span><strong>{BRANCH_META[opponent.weakness].name}</strong></div>
@@ -390,6 +394,66 @@ function OfferView({ game, dispatch }: ViewProps) {
       {(game.fighter.evidence.fights >= 5 || game.fighter.age >= 34) && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>現在退役</button>}
     </Screen>
   )
+}
+
+function leagueForGame(game: GameState): LeagueId | undefined {
+  const standing = game.fighter.leagueStanding
+  if (standing) return standing.league
+  return game.stage === 'amateur' || game.stage === 'regional' || game.stage === 'asia' || game.stage === 'world' || game.stage === 'legacy'
+    ? game.stage === 'legacy' ? 'world' : game.stage : undefined
+}
+
+function LeagueStatusCard({ game }: { game: GameState }) {
+  const standing = game.fighter.leagueStanding
+  const league = leagueForGame(game)
+  const rating = competitiveRatingForFighter(game.fighter)
+  if (!league || !standing) return <aside className="league-status-card"><div><span>目前階段</span><strong>草根試煉 · 未納入聯盟排名</strong></div><p>完成這段草根試煉後，你會以未排名拳手加入業餘聯盟。</p></aside>
+  const record = game.fighter.leagueRecords?.[league]
+  const streak = Math.max(record?.winStreak ?? 0, record?.consecutiveWins ?? 0)
+  const floor = LEAGUE_TITLE_RATING_FLOORS[league]
+  const champion = standing.status === 'champion'
+  return <aside className={`league-status-card${champion ? ' league-champion' : ''}`} aria-label="目前聯盟排名">
+    <div><span>{LEAGUE_LABELS[league]}</span><strong>{standing.status === 'champion' ? '聯盟冠軍' : standing.status === 'ranked' ? `排名 #${standing.rank}` : '未排名'}</strong></div>
+    {champion
+      ? <p>{standing.defenses ? `已成功衛冕 ${standing.defenses} 次。` : '你剛剛拿下這條腰帶。下一步可以選擇升上更大的舞台，或留下來衛冕。'}</p>
+      : <><p>{standing.status === 'unranked' ? '先擊敗 #13–#15 的對手，取得這個聯盟的第一個排名。' : '排名前 3、目前聯盟兩連勝，並達到競技評級門檻，才會收到冠軍戰邀請。'}</p><div className="league-requirements"><span className={standing.status === 'ranked' && standing.rank <= 3 ? 'met' : ''}>前 3 {standing.status === 'ranked' ? (standing.rank <= 3 ? '✓' : `#${standing.rank}`) : '—'}</span><span className={streak >= 2 ? 'met' : ''}>連勝 {Math.min(2, streak)}／2</span><span className={rating >= floor ? 'met' : ''}>評級 {rating}／{floor}</span></div></>}
+  </aside>
+}
+
+function LeagueStandingsTable({ game }: { game: GameState }) {
+  const league = leagueForGame(game)
+  if (!league) return null
+  const standing = game.fighter.leagueStanding
+  const championOpponent = game.opponents.find((opponent) => opponent.league === league && opponent.standing === 'champion')
+  const ranked = game.opponents.filter((opponent) => opponent.league === league && opponent.standing === 'ranked' && opponent.rank !== undefined).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99)).slice(0, 15)
+  const playerRank = standing?.status === 'ranked' ? standing.rank : undefined
+  const rows = [
+    ...ranked.map((opponent) => ({ rank: opponent.rank!, id: opponent.id, name: opponent.name, note: `${opponent.record.wins}-${opponent.record.losses} · 評級 ${competitiveRatingForOpponent(opponent)}`, player: false })),
+    ...(playerRank !== undefined ? [{ rank: playerRank, id: 'player-standing', name: `${game.fighter.name}（你）`, note: `本聯盟 ${game.fighter.leagueRecords?.[league]?.wins ?? 0} 勝 · 競技評級 ${competitiveRatingForFighter(game.fighter)}`, player: true }] : []),
+  // A malformed or hand-edited save can temporarily contain an NPC in the
+  // same slot as the player. Prefer the player on a tie so the status table
+  // never hides the player's own standing.
+  ].sort((a, b) => a.rank - b.rank || Number(b.player) - Number(a.player)).slice(0, 15)
+  return <section className="league-standings" aria-labelledby="league-standings-title"><SectionTitle title={`${LEAGUE_LABELS[league]}排名`} subtitle="冠軍不列入數字排名；只有前 15 名會出現在表內。" /><div className="standings-table"><div className="standing-row champion-row"><span>冠軍</span><strong>{standing?.status === 'champion' ? `${game.fighter.name}（你）` : championOpponent?.name ?? '冠軍席位'}</strong><small>{standing?.status === 'champion' ? '目前持有腰帶' : '等待下一場冠軍戰'}</small></div>{standing?.status === 'unranked' && <div className="standing-player-unranked"><span>你的狀態</span><strong>未排名</strong><small>先擊敗排名對手取得席位</small></div>}{rows.map((row) => <div className={`standing-row${row.player ? ' standing-player' : ''}`} aria-current={row.player ? 'true' : undefined} key={row.id}><span>#{row.rank}</span><strong>{row.name}</strong><small>{row.note}</small></div>)}</div></section>
+}
+
+function LeagueDecisionView({ game, dispatch }: ViewProps) {
+  const from = game.promotionFrom!
+  const to = game.promotionTo!
+  const standing = game.fighter.leagueStanding
+  return <Screen className="league-decision-screen" title="冠軍之後" kicker={`${LEAGUE_LABELS[from]} · 你已經登頂`}>
+    <article className="promotion-card">
+      <span className="promotion-belt" aria-hidden="true">◆</span>
+      <p className="eyebrow">TITLE WON</p>
+      <h2>{LEAGUE_LABELS[from]}冠軍</h2>
+      <p>這條腰帶不會替你回答下一個問題。你可以帶著冠軍身分走向更強的{LEAGUE_LABELS[to]}，也可以留下來讓整個聯盟挑戰你的王座。</p>
+      <div className="promotion-summary"><span>目前</span><strong>{standing?.status === 'champion' ? '聯盟冠軍' : '冠軍'}</strong><span>下一站</span><strong>{LEAGUE_LABELS[to]} · 從未排名開始</strong></div>
+    </article>
+    <div className="promotion-actions">
+      <button type="button" className="primary-action" onClick={() => dispatch({ type: 'CHOOSE_LEAGUE_FUTURE', choice: 'promote' })}><span>加入{LEAGUE_LABELS[to]}</span><small>永久離開目前聯盟，重新從未排名開始</small></button>
+      <button type="button" className="secondary-action" onClick={() => dispatch({ type: 'CHOOSE_LEAGUE_FUTURE', choice: 'defend' })}>留下來衛冕{LEAGUE_LABELS[from]}</button>
+    </div>
+  </Screen>
 }
 
 function PurseBreakdown({ offer, region }: { offer: FightOffer; region: Region }) {
@@ -740,7 +804,7 @@ function GrowthView({ game, dispatch }: ViewProps) {
       {awards.length ? <div className="trait-awards">{awards.map((trait) => trait && <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity)}</span><h2>{trait.name}</h2><p>{trait.description}</p><strong>{trait.effect}</strong><small>生效：{trait.condition}</small></article>)}</div>
         : <div className="growth-complete"><span>✓</span><div><strong>沒有憑空出現的新能力</strong><small>真正的招式來自訓練；重複的實戰行為則會逐步形成特質。</small></div></div>}
       {game.fighter.traitProgress.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="第一次做出符合條件的表現後，進度會保持可見。" /><TraitProgressList fighter={game.fighter} /></>}
-      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : game.growthDestination === 'prefight' ? '查看賽前簡報' : '繼續生涯'}</button></ActionDock>
+      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : game.growthDestination === 'prefight' ? '查看賽前簡報' : game.growthDestination === 'league-decision' ? '查看晉級選擇' : '繼續生涯'}</button></ActionDock>
     </Screen>
   )
 }
@@ -754,25 +818,31 @@ function PreFightView({ game, dispatch }: ViewProps) {
   const playerWeakness = weakestBranch(game.fighter)
   const playerRating = competitiveRatingForFighter(game.fighter)
   const opponentRating = competitiveRatingForOpponent(opponent)
+  const bodyMatchup = bodyMatchupFor(game.fighter, opponent)
   const readinessForecast = Math.round((game.fighter.readiness - 70) * 0.12)
   const scoutingForecast = Math.min(6, Math.floor(game.scouting / 17))
-  const forecast = playerRating - opponentRating + readinessForecast + scoutingForecast
+  const bodyForecast = Math.round((bodyMatchup.rangeEdge + bodyMatchup.insideEdge + bodyMatchup.clinchEdge) / 3)
+  const forecast = playerRating - opponentRating + readinessForecast + scoutingForecast + bodyForecast
+  const opponentStanding = opponent.standing === 'champion'
+    ? `${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
+    : opponent.rank !== undefined ? `排名 #${opponent.rank}` : '未排名'
   return <Screen title="籠門之前" kicker={offer.promotion}>
     <div className="tale-of-tape">
-      <FighterFace label="你" name={game.fighter.name} value={playerRating} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} />
+      <FighterFace label="你" name={game.fighter.name} value={playerRating} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} body={`體重 ${game.fighter.naturalWeight} kg · ${game.fighter.frame}`} />
       <span className="versus">VS</span>
-      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={opponentRating} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} opponent />
+      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={opponentRating} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} body={`骨架 ${opponent.frame}`} opponent />
     </div>
     <div className="briefing">
-      <Metric label="比賽" value={offer.titleFight ? '五回合冠軍戰' : '三回合'} note={offer.riskLabel} />
+      <Metric label="比賽" value={offer.titleFight ? '五回合冠軍戰' : '三回合'} note={`${opponentStanding} · ${offer.riskLabel}`} />
       <Metric label="比賽量級" value={game.fighter.weightClass} note={`準備度 ${game.fighter.readiness}`} />
       <Metric label="情報" value={game.scouting >= 50 ? '充分' : game.scouting >= 25 ? '基本' : '有限'} note={`最強 ${BRANCH_META[strength].name}／最弱 ${BRANCH_META[opponent.weakness].name}`} />
       <Metric label="技術對位" value={`${BRANCH_META[playerStrength].name} 對 ${BRANCH_META[opponent.weakness].name}`} note={`你的弱項 ${BRANCH_META[playerWeakness].name}／他最強 ${BRANCH_META[strength].name}`} />
-      <Metric label="賽前評估" value={forecast >= 5 ? '你略佔優勢' : forecast <= -5 ? '對手略佔優勢' : '旗鼓相當'} note={`評級 ${playerRating} vs ${opponentRating} · 狀態 ${readinessForecast >= 0 ? '+' : ''}${readinessForecast} · 情報 +${scoutingForecast}`} />
+      <Metric label="體格對位" value={bodyMatchupLabel(bodyMatchup)} note={`你 ${game.fighter.frame}／對手 ${opponent.frame} · 身高差 ${signedDelta(bodyMatchup.heightDelta)} cm · 臂展差 ${signedDelta(bodyMatchup.reachDelta)} cm · 只帶來小幅影響`} />
+      <Metric label="賽前評估" value={forecast >= 5 ? '你略佔優勢' : forecast <= -5 ? '對手略佔優勢' : '旗鼓相當'} note={`競技評級 ${playerRating} vs ${opponentRating} · 狀態 ${signedDelta(readinessForecast)} · 情報 +${scoutingForecast} · 體格 ${signedDelta(bodyForecast)}`} />
     </div>
     <aside className="coach-note compact">
       <span className="coach-avatar">教</span>
-      <div><strong>{coach?.name ?? '教練'}最後提醒</strong><p>「記住，{BRANCH_META[strength].name}是他的本事，{BRANCH_META[opponent.weakness].name}是你要找的門。別跟著他的節奏打。」</p></div>
+      <div><strong>{coach?.name ?? '教練'}最後提醒</strong><p>「{prefightCoachRecommendation(game.fighter, opponent, offer.riskLabel, playerRating, opponentRating, forecast, readinessForecast, scoutingForecast, bodyMatchup)}」</p></div>
     </aside>
     <p className="memory-callout">畫面只會顯示大致勝算。傷勢、招式熟練度、場上位置和對手反應都會影響結果。</p>
     <ActionDock><button className="primary-action danger" onClick={() => dispatch({ type: 'START_FIGHT' })}>關上籠門</button></ActionDock>
@@ -787,6 +857,54 @@ function strongestBranch(combatant: { technique: Record<Branch, number> }): Bran
 function weakestBranch(combatant: { technique: Record<Branch, number> }): Branch {
   return (Object.keys(combatant.technique) as Branch[]).reduce((worst, branch) =>
     combatant.technique[branch] < combatant.technique[worst] ? branch : worst)
+}
+
+function signedDelta(value: number): string {
+  return `${value >= 0 ? '+' : ''}${value}`
+}
+
+function bodyMatchupLabel(body: ReturnType<typeof bodyMatchupFor>): string {
+  const edges = [
+    { label: '遠距', value: body.rangeEdge },
+    { label: '近身', value: body.insideEdge },
+    { label: '纏抱', value: body.clinchEdge },
+  ]
+  const strongest = edges.reduce((best, edge) => Math.abs(edge.value) > Math.abs(best.value) ? edge : best)
+  if (Math.abs(strongest.value) < 2) return '體格接近'
+  return `${strongest.label}${strongest.value > 0 ? '略有利' : '略吃虧'}`
+}
+
+function bodyMatchupNote(fighter: FighterState, opponent: Opponent, body: ReturnType<typeof bodyMatchupFor>): string {
+  const notes: string[] = []
+  if (body.rangeEdge >= 2) notes.push('你的身高與臂展讓遠距略有利')
+  else if (body.rangeEdge <= -2) notes.push('對手的身高與臂展讓你在遠距略吃虧')
+  if (body.insideEdge >= 2) notes.push(`你的${fighter.frame}在近身壓迫略有利`)
+  else if (body.insideEdge <= -2) notes.push(`對手的${opponent.frame}在近身壓迫略有利`)
+  if (body.clinchEdge >= 2) notes.push(`你的${fighter.frame}在纏抱與摔法略有利`)
+  else if (body.clinchEdge <= -2) notes.push(`對手的${opponent.frame}在纏抱與摔法略有利`)
+  return notes.length ? notes.join('，') : '雙方體格接近，身高、臂展與骨架只帶來很小的戰術差異'
+}
+
+function prefightCoachRecommendation(
+  fighter: FighterState,
+  opponent: Opponent,
+  risk: RiskLabel,
+  playerRating: number,
+  opponentRating: number,
+  forecast: number,
+  readinessForecast: number,
+  scoutingForecast: number,
+  body: ReturnType<typeof bodyMatchupFor>,
+): string {
+  const overall = forecast >= 5 ? `整體你略佔優勢，競技評級 ${playerRating} 對 ${opponentRating}`
+    : forecast <= -5 ? `整體對手略佔優勢，競技評級 ${playerRating} 對 ${opponentRating}`
+      : `整體旗鼓相當，競技評級 ${playerRating} 對 ${opponentRating}`
+  const majorRisk = risk === '低風險' ? `主要風險是他的${BRANCH_META[strongestBranch(opponent)].name}，別讓他舒服地打`
+    : `主要風險是他的${BRANCH_META[strongestBranch(opponent)].name}，尤其別在這裡硬碰`
+  const condition = readinessForecast < 0 ? '準備度讓你少一點犯錯餘裕'
+    : scoutingForecast === 0 ? '情報有限，對手的反應要留意'
+      : '準備和情報給你一些調整空間'
+  return `${overall}。${majorRisk}。${bodyMatchupNote(fighter, opponent, body)}。${condition}。`
 }
 
 function riskTone(risk: RiskLabel) {
@@ -1196,12 +1314,20 @@ function RoundResultView({ game, dispatch }: ViewProps) {
 function FightResultView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const opponent = getOpponent(game)!
+  const offer = fight.offer
+  const titleRole = offer.titleRole ?? (offer.titleFight ? 'challenge' : 'ordinary')
   const won = fight.winner === 'player'
   const celebratedFinish = won && fight.method !== undefined && ['ko', 'tko', 'submission'].includes(fight.method)
   const finishingMove = FIGHT_INTENTS.find((move) => move.id === fight.finishingMoveId)
   const finishAction = finishingMove?.label ?? (fight.method === 'submission' ? '這次降服' : '這波攻勢')
   const praise = celebratedFinish ? finishVictoryPraise(game, opponent, finishAction) : undefined
-  return <Screen className={`fight-result-screen${celebratedFinish ? ' finish-victory' : ''}`} title={fight.winner === 'draw' ? '本場平手' : won ? '你贏了' : `${opponent.name}獲勝`} kicker={`${methodLabel(fight.method)}${fight.finishRound ? ` · 第 ${fight.finishRound} 回合` : ''}`}>
+  const resultTitle = fight.winner === 'draw'
+    ? titleRole === 'defense' ? '平手，冠軍仍在你手上' : '本場平手'
+    : titleRole === 'challenge' && won ? `你成為${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
+      : titleRole === 'defense' && won ? `你衛冕${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
+        : titleRole === 'defense' ? `${opponent.name}成為新的${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
+          : won ? '你贏了' : `${opponent.name}獲勝`
+  return <Screen className={`fight-result-screen${celebratedFinish ? ' finish-victory' : ''}`} title={resultTitle} kicker={`${methodLabel(fight.method)}${fight.finishRound ? ` · 第 ${fight.finishRound} 回合` : ''}`}>
     {celebratedFinish ? <>
       <section className={`victory-hero method-${fight.method}`} aria-label="終結勝利">
         <span className="victory-burst" aria-hidden="true" />
@@ -1263,7 +1389,7 @@ function RetirementView({ game, onNew }: { game: GameState; onNew: () => void })
   const bio = game.biography!
   return <Screen title="最後一回合之後" kicker={`${bio.retiredAt} 歲退役 · Seed ${bio.seed}`}>
     <article className="biography-card" id="biography-card">
-      <p className="eyebrow">CAREER BIOGRAPHY</p><h2>{bio.name}</h2>{bio.alias && <em className="biography-alias">{bio.alias}</em>}<small className="biography-origin">{REGION_LABELS[bio.region]}{bio.hometown ? ` · ${bio.hometown}` : ''} · {REGION_PROFILES[bio.region].circuit}</small><strong>{bio.title}</strong><div className="career-record">{bio.record}</div><p>{bio.summary}</p>{bio.financialLegacy && <blockquote>{bio.financialLegacy}</blockquote>}
+      <p className="eyebrow">CAREER BIOGRAPHY</p><h2>{bio.name}</h2>{bio.alias && <em className="biography-alias">{bio.alias}</em>}<small className="biography-origin">{REGION_LABELS[bio.region]}{bio.hometown ? ` · ${bio.hometown}` : ''} · {REGION_PROFILES[bio.region].circuit}</small><strong>{bio.title}</strong><div className="career-record">{bio.record}</div>{bio.leagueTitles?.length ? <div className="biography-titles" aria-label="聯盟冠軍履歷"><span>冠軍履歷</span><strong>{bio.leagueTitles.map((league) => `${LEAGUE_LABELS[league]}冠軍`).join(' · ')}</strong></div> : null}<p>{bio.summary}</p>{bio.financialLegacy && <blockquote>{bio.financialLegacy}</blockquote>}
     </article>
     <section><SectionTitle title="生涯轉捩點" subtitle="勝敗會被記錄，但真正留下來的是你做過的選擇。" />
       <div className="timeline">{bio.turningPoints.map((entry) => <div key={entry.id}><span>{entry.age} 歲</span><article><strong>{entry.title}</strong><p>{entry.summary}</p></article></div>)}</div>
@@ -1427,8 +1553,8 @@ function StatusBar({ label, value, tone }: { label: string; value: number; tone:
   return <div className={`status-bar ${tone}`} aria-label={`${label} 體力 ${value}`}><div><span>{label}</span><b><small>體力</small>{value}</b></div><i><span style={{ width: `${value}%` }} /></i></div>
 }
 
-function FighterFace({ label, name, value, measurements, opponent = false }: { label: string; name: string; value: number; measurements: string; opponent?: boolean }) {
-  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span>{name.slice(0, 1)}</span><small>{label}</small><strong>{name}</strong><em>身高／臂展 {measurements}</em><em>競技評級 {value}</em></div>
+function FighterFace({ label, name, value, measurements, body, opponent = false }: { label: string; name: string; value: number; measurements: string; body: string; opponent?: boolean }) {
+  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span>{name.slice(0, 1)}</span><small>{label}</small><strong>{name}</strong><em>身高／臂展 {measurements}</em><em>{body}</em><em>競技評級 {value}</em></div>
 }
 
 function Metric({ label, value, note }: { label: string; value: string; note: string }) {
@@ -1555,8 +1681,10 @@ function StatusDetails({ game }: { game: GameState; dispatch: (command: GameComm
   return <>
     <SectionTitle title="家鄉與賽事生態" subtitle="出身地影響人物、早期對手、地方賽事與經濟，不會直接改變戰鬥能力。" />
     <article className="status-region-card"><div><span>{REGION_LABELS[fighter.region]} · {fighter.hometown}</span><strong>{REGION_PROFILES[fighter.region].circuit}</strong></div>{fighter.alias && <em>{fighter.alias}</em>}<p>{REGION_PROFILES[fighter.region].description}</p><small>{REGION_PROFILES[fighter.region].opponentMix} · 資金 {formatRegionalMoney(fighter.money, fighter.region)} · {careerRunwayLabel(fighter)}</small></article>
-    <SectionTitle title="體格資料" subtitle="身高與臂展由 Seed 決定，會影響遠距及近身對位。" />
-    <div className="health-grid"><Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} /><Metric label="身高" value={`${fighter.heightCm} cm`} note="影響重心與對戰距離" /><Metric label="臂展" value={`${fighter.reachCm} cm`} note={`臂展差 ${fighter.reachCm - fighter.heightCm >= 0 ? '+' : ''}${fighter.reachCm - fighter.heightCm} cm`} /><Metric label="比賽量級" value={fighter.weightClass} note="依體格與自然體重安排" /></div>
+    <LeagueStatusCard game={game} />
+    <LeagueStandingsTable game={game} />
+    <SectionTitle title="體格資料" subtitle="身高、臂展、自然體重與骨架由 Seed 決定，會小幅影響遠距、壓迫與纏抱對位。" />
+    <div className="health-grid"><Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} /><Metric label="身高" value={`${fighter.heightCm} cm`} note="小幅影響重心與對戰距離" /><Metric label="臂展" value={`${fighter.reachCm} cm`} note={`臂展差 ${fighter.reachCm - fighter.heightCm >= 0 ? '+' : ''}${fighter.reachCm - fighter.heightCm} cm · 小幅影響遠距`} /><Metric label="比賽量級" value={fighter.weightClass} note="依體格與自然體重安排 · 不改變戰鬥規則" /></div>
     <SkillOverview fighter={fighter} />
     <SectionTitle title="已學招式" subtitle={`${fighter.learnedMoves.length} 招；戰鬥中只會出現已學招式與緊急基本動作。`} />
     <MoveChips moveIds={fighter.learnedMoves} />

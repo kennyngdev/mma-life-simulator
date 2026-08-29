@@ -227,6 +227,30 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: /支付費用，查看新邀約/ })).toBeEnabled()
   })
 
+  it('賽前教練建議整合整體評級、主要風險與體格對位', async () => {
+    const game = createNewRun({ ...input, seed: 'PREFIGHT-BODY-UI' })
+    game.phase = 'prefight'
+    game.selectedOfferId = game.offers[0].id
+    const opponent = game.opponents.find((item) => item.id === game.offers[0].opponentId)!
+    game.fighter.naturalWeight = 90
+    game.fighter.heightCm = 190
+    game.fighter.reachCm = 205
+    game.fighter.frame = '厚實骨架'
+    opponent.naturalWeight = 70
+    opponent.heightCm = 170
+    opponent.reachCm = 170
+    opponent.frame = '修長骨架'
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    const coachNote = await screen.findByText(/整體.*主要風險/)
+    expect(coachNote).toHaveTextContent('競技評級')
+    expect(coachNote).toHaveTextContent(/身高|骨架/)
+    expect(screen.getByText('體格對位')).toBeInTheDocument()
+    expect(screen.getByText(/只帶來小幅影響/)).toBeInTheDocument()
+  })
+
   it('邀約畫面公開說明沒有場數上限及因傷退役線', async () => {
     const game = createNewRun({ ...input, seed: 'VISIBLE-RETIREMENT-RULES' })
     game.phase = 'offer'

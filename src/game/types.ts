@@ -1,6 +1,25 @@
 export type Region = 'hong-kong' | 'taiwan' | 'mainland'
 export type Motive = 'family' | 'prove' | 'honor' | 'fame'
 export type Stage = 'grassroots' | 'amateur' | 'regional' | 'asia' | 'world' | 'legacy'
+export type LeagueId = 'amateur' | 'regional' | 'asia' | 'world'
+export type LeagueStanding =
+  | { league: LeagueId; status: 'unranked' }
+  | { league: LeagueId; status: 'ranked'; rank: number }
+  | { league: LeagueId; status: 'champion'; defenses: number }
+
+export interface LeagueRecord {
+  fights: number
+  wins: number
+  losses: number
+  draws: number
+  /** Current consecutive wins in this league; a loss or draw resets it. */
+  consecutiveWins: number
+  /** Deprecated compatibility alias for early league saves. */
+  winStreak?: number
+  bestRank?: number
+  titles: number
+  defenses: number
+}
 export type Branch = 'boxing' | 'kicking' | 'clinch' | 'wrestling' | 'ground'
 export type StartingExperience = 'normie' | 'hobbyist' | 'semi-pro'
 export type SkillLevel = 0 | 1 | 2 | 3 | 4 | 5
@@ -48,6 +67,7 @@ export type GamePhase =
   | 'finish-minigame'
   | 'round-result'
   | 'fight-result'
+  | 'league-decision'
   | 'retirement'
 
 export interface NumericRange {
@@ -196,7 +216,10 @@ export interface FighterState {
   readiness: number
   insight: number
   money: number
-  ranking: number
+  leagueStanding?: LeagueStanding
+  leagueRecords: Record<LeagueId, LeagueRecord>
+  /** @deprecated Use leagueStanding. Retained for old saves and callers. */
+  ranking?: number
   reputation: number
   promoterTrust: number
   wins: number
@@ -218,10 +241,16 @@ export interface Opponent {
   hometown?: string
   alias?: string
   age: number
+  naturalWeight: number
   heightCm: number
   reachCm: number
+  frame: string
   style: string
-  rank: number
+  league: LeagueId | 'grassroots'
+  standing: 'unranked' | 'ranked' | 'champion'
+  /** Numeric only for ranked opponents; champions intentionally have no rank. */
+  rank?: number
+  isChampion?: boolean
   rating: number
   technique: Record<Branch, number>
   skills: Record<Branch, SkillProgress>
@@ -245,8 +274,11 @@ export interface FightOffer {
     shortNoticePremium: number
     titleBonus: number
   }
-  rankReward: number
+  /** @deprecated Rank movement is resolved from league standings. */
+  rankReward?: number
   riskLabel: RiskLabel
+  titleRole?: 'ordinary' | 'challenge' | 'defense'
+  /** @deprecated Use titleRole. */
   titleFight: boolean
   shortNotice: boolean
   venueRegion?: Region
@@ -630,6 +662,7 @@ export interface Biography {
   finalSkills: Record<Branch, SkillLevel>
   learnedMoves: string[]
   traits: OwnedTrait[]
+  leagueTitles?: LeagueId[]
   financialLegacy?: string
   retiredAt: number
   createdAt: number
@@ -667,7 +700,9 @@ export interface GameState {
   trainingMoveBranch?: Branch
   lifeEvent?: LifeEvent
   lifeEventResult?: LifeEventResult
-  growthDestination?: 'prefight' | 'offer' | 'retirement'
+  growthDestination?: 'prefight' | 'offer' | 'retirement' | 'league-decision'
+  promotionFrom?: LeagueId
+  promotionTo?: LeagueId
   insightGained?: number
   traitAwards?: string[]
   scouting: number
@@ -699,6 +734,7 @@ export type GameCommand =
   | { type: 'CONTINUE_ROUND' }
   | { type: 'SET_CORNER_ADJUSTMENT'; adjustment: CornerAdjustment }
   | { type: 'ACK_FIGHT_RESULT' }
+  | { type: 'CHOOSE_LEAGUE_FUTURE'; choice: 'promote' | 'defend' }
   | { type: 'RETIRE' }
 
 export interface TransitionResult {

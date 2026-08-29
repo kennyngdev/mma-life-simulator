@@ -1,7 +1,7 @@
 import { openDB } from 'idb'
 import { BACKGROUNDS, REGION_PROFILES } from './content'
-import { generateOffers, getCompetitionWeightClass, rankingAfterWin } from './engine'
-import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LoadGameResult, Position, SaveEnvelope } from './types'
+import { ensureLeagueRosters, generateOffers, getCompetitionWeightClass, opponentBodyFor, rankingAfterWin } from './engine'
+import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LeagueId, LeagueRecord, LoadGameResult, Position, SaveEnvelope } from './types'
 
 const DATABASE = 'cage-life'
 const STORE = 'records'
@@ -18,7 +18,7 @@ async function database() {
 export async function saveGame(game: GameState): Promise<void> {
   const db = await database()
   const envelope: SaveEnvelope = {
-    saveVersion: 13,
+    saveVersion: 15,
     rulesVersion: game.rulesVersion,
     contentVersion: game.contentVersion,
     savedAt: Date.now(),
@@ -31,30 +31,39 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.13.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateLeagueRankings(envelope.game) }
+  }
+  if (envelope.saveVersion === 14 && envelope.rulesVersion === '0.12.1' && envelope.contentVersion === '1.5.1') {
+    return { game: migrateLeagueRankings(migrateBodyMatchupStats(envelope.game)) }
+  }
+  if (envelope.saveVersion === 14 && envelope.rulesVersion === '0.12.0' && envelope.contentVersion === '1.5.0') {
+    return { game: migrateLeagueRankings(envelope.game) }
+  }
   if (envelope.saveVersion === 13 && envelope.rulesVersion === '0.11.0' && envelope.contentVersion === '1.4.0') {
-    return { game: migrateVersion13(envelope.game) }
+    return { game: migrateLeagueRankings(migrateVersion13(envelope.game)) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.10.0' && envelope.contentVersion === '1.3.0') {
-    return { game: migrateVersion13(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))) }
+    return { game: migrateLeagueRankings(migrateVersion13(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.10.0' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateVersion13(migrateRemovedSideControl(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
+    return { game: migrateLeagueRankings(migrateVersion13(migrateRemovedSideControl(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.3' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))) }
+    return { game: migrateLeagueRankings(migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.2' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))))) }
+    return { game: migrateLeagueRankings(migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.1' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))))) }
+    return { game: migrateLeagueRankings(migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.0' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))))) }
+    return { game: migrateLeagueRankings(migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))))))) }
   }
-  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.8.0' && envelope.contentVersion === '1.1.0') return { game: migrateVersion12(envelope.game) }
-  if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion11(envelope.game) }
-  if (envelope.saveVersion === 10 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion10(envelope.game) }
+  if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.8.0' && envelope.contentVersion === '1.1.0') return { game: migrateLeagueRankings(migrateVersion12(envelope.game)) }
+  if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0') return { game: migrateLeagueRankings(migrateVersion11(envelope.game)) }
+  if (envelope.saveVersion === 10 && envelope.rulesVersion === '0.7.0') return { game: migrateLeagueRankings(migrateVersion10(envelope.game)) }
   return { resetReason: 'combat-rules-upgrade' }
 }
 
@@ -167,17 +176,19 @@ function storedCompetitiveRating(technique: Record<Branch, number>, mind: number
 export function repairTitleCredibility(game: GameState): GameState {
   if (game.phase !== 'offer') return { ...game, rulesVersion: '0.10.0' }
   const fighterRating = storedCompetitiveRating(game.fighter.technique, game.fighter.mind.fightIQ)
+  const fighterRank = game.fighter.ranking ?? 99
   const playerEligible = game.fighter.evidence.fights >= 10 && game.fighter.wins >= 8
-    && game.fighter.ranking <= 20 && fighterRating >= 70
+    && fighterRank <= 20 && fighterRating >= 70
   const offers = game.offers.map((offer) => {
     if (!offer.titleFight) return offer
     const opponent = game.opponents.find((item) => item.id === offer.opponentId)
-    const opponentEligible = Boolean(opponent && opponent.rank <= 10
+    const opponentEligible = Boolean(opponent && (opponent.rank ?? 99) <= 10
       && storedCompetitiveRating(opponent.technique, opponent.composure) >= 70)
     if (playerEligible && opponentEligible) return offer
     const titleBonus = offer.purseBreakdown.titleBonus
     return {
       ...offer,
+      titleRole: 'ordinary' as const,
       titleFight: false,
       purse: Math.max(500, offer.purse - titleBonus),
       purseBreakdown: { ...offer.purseBreakdown, titleBonus: 0 },
@@ -206,11 +217,11 @@ export function migrateRankingCredibility(game: GameState): GameState {
   const opponent = game.opponents.find((item) => lastFight.people.includes(item.name))
   if (!opponent) return migrated
   const previousRank = Array.from({ length: 99 }, (_, index) => index + 1)
-    .filter((rank) => Math.max(1, rank - oldRankReward(rank, opponent.rank)) === game.fighter.ranking)
+    .filter((rank) => Math.max(1, rank - oldRankReward(rank, opponent.rank ?? 99)) === (game.fighter.ranking ?? 99))
     .at(-1)
   if (previousRank === undefined) return migrated
-  const correctedRank = rankingAfterWin(previousRank, opponent.rank)
-  if (correctedRank >= game.fighter.ranking) return migrated
+  const correctedRank = rankingAfterWin(previousRank, opponent.rank ?? 99)
+  if (correctedRank >= (game.fighter.ranking ?? 99)) return migrated
   const history = game.fighter.history.map((entry) => entry.id === lastFight.id
     ? { ...entry, summary: `${entry.summary} 排名從 #${previousRank} 修正為 #${correctedRank}。` }
     : entry)
@@ -293,6 +304,206 @@ export function migrateVersion13(game: unknown): GameState {
     activeCampDrill,
     campDrillOutcome: undefined,
   } as GameState
+}
+
+const LEAGUE_IDS: LeagueId[] = ['amateur', 'regional', 'asia', 'world']
+
+function freshLeagueRecords(): Record<LeagueId, LeagueRecord> {
+  return Object.fromEntries(LEAGUE_IDS.map((league) => [league, {
+    fights: 0, wins: 0, losses: 0, draws: 0, winStreak: 0, consecutiveWins: 0, titles: 0, defenses: 0,
+  }])) as Record<LeagueId, LeagueRecord>
+}
+
+function legacyLeague(stage: GameState['stage']): LeagueId | undefined {
+  return stage === 'legacy' ? 'world' : stage === 'amateur' || stage === 'regional' || stage === 'asia' || stage === 'world' ? stage : undefined
+}
+
+function hasWorldTitle(fighter: GameState['fighter']): boolean {
+  return fighter.history?.some((entry) => entry.tags.includes('冠軍戰') && entry.tags.includes('勝利')
+    && (entry.tags.includes('世界聯盟') || entry.title.includes('世界聯盟冠軍') || entry.title === '世界冠軍之夜')) ?? false
+}
+
+function mappedLegacyRank(rank: number | undefined): number | undefined {
+  if (rank === undefined || rank >= 99) return undefined
+  return Math.max(1, Math.min(15, Math.ceil(rank * 15 / 99)))
+}
+
+/** Introduces four independent top-15 league ladders while preserving active careers. */
+export function migrateLeagueRankings(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  const fighter = migrated.fighter
+  const league = fighter.leagueStanding?.league ?? legacyLeague(migrated.stage)
+  if (!fighter.leagueRecords) fighter.leagueRecords = freshLeagueRecords()
+  for (const leagueId of LEAGUE_IDS) {
+    const record = fighter.leagueRecords[leagueId] ?? (fighter.leagueRecords[leagueId] = freshLeagueRecords()[leagueId])
+    record.fights ??= 0; record.wins ??= 0; record.losses ??= 0; record.draws ??= 0
+    record.winStreak = Math.max(record.winStreak ?? 0, record.consecutiveWins ?? 0); record.consecutiveWins = record.winStreak
+    record.titles ??= 0; record.defenses ??= 0
+  }
+  const alreadyMigrated = Boolean(fighter.leagueStanding && migrated.opponents.every((opponent) => opponent.league && opponent.standing))
+  if (alreadyMigrated) {
+    const playerStanding = fighter.leagueStanding!
+    const championSeen = new Set<LeagueId>()
+    const occupied = new Map<LeagueId, Set<number>>()
+    for (const opponent of migrated.opponents) {
+      if (opponent.league === 'grassroots') { opponent.rank = undefined; opponent.isChampion = false; opponent.standing = 'unranked'; continue }
+      if (!occupied.has(opponent.league)) occupied.set(opponent.league, new Set())
+      if (opponent.standing === 'champion' && playerStanding.status === 'champion' && opponent.league === playerStanding.league) {
+        opponent.standing = 'unranked'; opponent.rank = undefined; opponent.isChampion = false
+      } else if (opponent.standing === 'champion' && !championSeen.has(opponent.league)) {
+        championSeen.add(opponent.league); opponent.rank = undefined; opponent.isChampion = true
+      } else if (opponent.standing === 'ranked') {
+        const requested = Math.max(1, Math.min(15, Math.round(opponent.rank ?? 15)))
+        const slots = occupied.get(opponent.league)!
+        let rank = requested
+        while (slots.has(rank) && rank < 15) rank += 1
+        if (slots.has(rank)) { opponent.standing = 'unranked'; opponent.rank = undefined; opponent.isChampion = false }
+        else { opponent.rank = rank; opponent.isChampion = false; slots.add(rank) }
+      } else { opponent.standing = 'unranked'; opponent.rank = undefined; opponent.isChampion = false }
+    }
+    fighter.ranking = fighter.leagueStanding?.status === 'ranked' ? fighter.leagueStanding.rank : undefined
+    const normalizeCurrentOffer = (offer: FightOffer): FightOffer => {
+      const legacyRole = offer.titleRole as string | undefined
+      const titleRole: FightOffer['titleRole'] = legacyRole === 'none' ? 'ordinary' : offer.titleRole ?? (offer.titleFight ? 'challenge' : 'ordinary')
+      const { rankReward: _rankReward, ...withoutLegacyReward } = offer
+      return { ...withoutLegacyReward, titleRole, titleFight: titleRole !== 'ordinary' }
+    }
+    migrated.offers = migrated.offers.map(normalizeCurrentOffer)
+    if (migrated.fight) migrated.fight.offer = normalizeCurrentOffer(migrated.fight.offer)
+    const roster = ensureLeagueRosters(fighter, migrated.opponents, migrated.rng, migrated.seed)
+    migrated.opponents = roster.opponents
+    migrated.rng = roster.rng
+    migrated.stage = playerStanding.league === 'world' && (playerStanding.status === 'champion' || hasWorldTitle(fighter)) ? 'legacy' : playerStanding.league
+    migrated.saveVersion = 15; migrated.rulesVersion = '0.13.0'; migrated.contentVersion = '1.6.0'
+    return finalizeLeagueMigration(migrated)
+  }
+
+  if (!fighter.leagueStanding && league) {
+    const latestTitle = [...fighter.history].reverse().find((entry) => entry.tags.includes('冠軍戰') && entry.tags.includes('勝利'))
+    const currentRecord = fighter.leagueRecords[league]
+    const allFightEntries = fighter.history.filter((entry) => entry.tags.includes('比賽'))
+    const taggedCurrent = allFightEntries.filter((entry) => entry.tags.includes(({ amateur: '業餘聯盟', regional: '地區聯盟', asia: '亞洲聯盟', world: '世界聯盟' } as const)[league]))
+    // Pre-league saves did not tag fights with a league. When possible, use
+    // the latest authored stage milestone as the boundary for the current
+    // league rather than counting the entire career again.
+    const stageTitles: Record<LeagueId, string> = { amateur: '業餘起步', regional: '地區職業', asia: '亞洲舞台', world: '國際舞台' }
+    const milestoneIndex = fighter.history.map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.tags.includes('階段') && entry.title.includes(stageTitles[league]))
+      .at(-1)?.index
+    const postMilestone = milestoneIndex === undefined
+      ? allFightEntries
+      : fighter.history.filter((entry, index) => index > milestoneIndex && entry.tags.includes('比賽'))
+    const fightEntries = taggedCurrent.length ? taggedCurrent : postMilestone
+    const winEntries = fightEntries.filter((entry) => entry.tags.includes('勝利'))
+    const lossEntries = fightEntries.filter((entry) => entry.tags.includes('失敗'))
+    const drawEntries = fightEntries.filter((entry) => entry.tags.includes('平手'))
+    currentRecord.fights = fightEntries.length
+    currentRecord.wins = winEntries.length
+    currentRecord.losses = lossEntries.length
+    currentRecord.draws = drawEntries.length
+    currentRecord.winStreak = 0
+    for (const entry of [...fightEntries].reverse()) {
+      if (!entry.tags.includes('勝利')) break
+      currentRecord.winStreak += 1
+    }
+    currentRecord.consecutiveWins = currentRecord.winStreak
+    if (latestTitle) currentRecord.titles = 1
+    const mappedRank = mappedLegacyRank(fighter.ranking)
+    if (mappedRank !== undefined) currentRecord.bestRank = mappedRank
+    fighter.leagueStanding = latestTitle ? { league, status: 'champion', defenses: 0 } : (() => {
+      return mappedRank ? { league, status: 'ranked', rank: mappedRank } : { league, status: 'unranked' }
+    })()
+  }
+
+  const currentLeague = fighter.leagueStanding?.league
+  const titlePeople = [...fighter.history].reverse().find((entry) => entry.tags.includes('冠軍戰') && entry.tags.includes('勝利'))?.people ?? []
+  const isChallengeOffer = (offer: FightOffer) => offer.titleRole === 'challenge' || (!offer.titleRole && offer.titleFight)
+  const activeTitleOpponentId = migrated.fight?.offer && isChallengeOffer(migrated.fight.offer)
+    ? migrated.fight.offer.opponentId
+    : migrated.offers.find(isChallengeOffer)?.opponentId
+  const activeOpponentIds = new Set([
+    migrated.fight?.opponentId,
+    migrated.fight?.offer.opponentId,
+    migrated.selectedOfferId ? migrated.offers.find((offer) => offer.id === migrated.selectedOfferId)?.opponentId : undefined,
+  ].filter((id): id is string => Boolean(id)))
+  const normalized = migrated.opponents.map((opponent) => ({ ...opponent }))
+  if (currentLeague) {
+    const oldOrder = [...normalized].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+    const playerIsChampion = fighter.leagueStanding?.status === 'champion'
+    const champion = playerIsChampion ? undefined : normalized.find((opponent) => opponent.id === activeTitleOpponentId)
+      ?? normalized.find((opponent) => titlePeople.includes(opponent.name))
+      ?? oldOrder[0]
+    const rankedCandidates = oldOrder.filter((opponent) => opponent.id !== champion?.id)
+    // A signed fight/camp must keep its named opponent in the active league,
+    // even when an old global rank would otherwise place that rival outside
+    // the new top-15 table.
+    const activeRivals = rankedCandidates.filter((opponent) => activeOpponentIds.has(opponent.id))
+    const ranked = [...activeRivals, ...rankedCandidates.filter((opponent) => !activeOpponentIds.has(opponent.id))].slice(0, 15)
+    const currentRosterIds = new Set([champion?.id, ...ranked.map((opponent) => opponent.id)].filter((id): id is string => Boolean(id)))
+    normalized.forEach((opponent) => {
+      // Keep every named rival in the save, but cap the active league roster at
+      // one champion plus fifteen numbered slots. Overflow rivals remain as
+      // historical Grassroots contacts and never pollute matchmaking.
+      if (!currentRosterIds.has(opponent.id)) {
+        opponent.league = 'grassroots'; opponent.standing = 'unranked'; opponent.isChampion = false; opponent.rank = undefined
+        return
+      }
+      opponent.league = currentLeague
+      opponent.standing = opponent.id === champion?.id ? 'champion' : 'unranked'
+      opponent.isChampion = opponent.id === champion?.id
+      opponent.rank = undefined
+    })
+    ranked.slice(0, 15).forEach((opponent, index) => { opponent.standing = 'ranked'; opponent.rank = index + 1; opponent.isChampion = false })
+  } else {
+    normalized.forEach((opponent) => { opponent.league = 'grassroots'; opponent.standing = 'unranked'; opponent.isChampion = false; opponent.rank = undefined })
+  }
+  let roster = ensureLeagueRosters(fighter, normalized, migrated.rng, migrated.seed)
+  migrated.opponents = roster.opponents
+  migrated.rng = roster.rng
+  fighter.ranking = fighter.leagueStanding?.status === 'ranked' ? fighter.leagueStanding.rank : undefined
+  migrated.stage = fighter.leagueStanding?.league === 'world' && (fighter.leagueStanding.status === 'champion' || hasWorldTitle(fighter))
+    ? 'legacy' : fighter.leagueStanding?.league ?? 'grassroots'
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.13.0'
+  migrated.contentVersion = '1.6.0'
+
+  const normalizeOffer = (offer: FightOffer): FightOffer => {
+    const legacyRole = offer.titleRole as string | undefined
+    const titleRole: FightOffer['titleRole'] = legacyRole === 'none' ? 'ordinary' : offer.titleRole ?? (offer.titleFight ? 'challenge' : 'ordinary')
+    const { rankReward: _rankReward, ...withoutLegacyReward } = offer
+    return { ...withoutLegacyReward, titleRole, titleFight: titleRole !== 'ordinary' }
+  }
+  if (migrated.fight) migrated.fight.offer = normalizeOffer(migrated.fight.offer)
+  migrated.offers = migrated.offers.map(normalizeOffer)
+  if (!migrated.selectedOfferId && (migrated.phase === 'reveal' || migrated.phase === 'offer' || migrated.phase === 'growth')) {
+    const generated = generateOffers(fighter, migrated.opponents, migrated.rng)
+    migrated.rng = generated.rng
+    migrated.offers = generated.offers
+  }
+  return finalizeLeagueMigration(migrated)
+}
+
+function finalizeLeagueMigration(game: GameState): GameState {
+  const migrated = migrateBodyMatchupStats(game)
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.13.0'
+  migrated.contentVersion = '1.6.0'
+  return migrated
+}
+
+/** Repairs legacy opponent body records and makes the subtle matchup layer deterministic. */
+export function migrateBodyMatchupStats(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.opponents = migrated.opponents.map((opponent) => ({
+    ...opponent,
+    ...opponentBodyFor(migrated.seed, migrated.fighter.naturalWeight, opponent.id),
+  }))
+  migrated.saveVersion = 14
+  migrated.rulesVersion = '0.12.1'
+  migrated.contentVersion = '1.5.1'
+  return migrated
 }
 
 type LegacyGame = Omit<GameState, 'saveVersion' | 'rulesVersion' | 'contentVersion' | 'fighter' | 'opponents' | 'campActions' | 'campDrillHistory' | 'activeCampDrill' | 'campDrillOutcome' | 'fight'> & {
@@ -450,7 +661,14 @@ export async function listBiographies(): Promise<Biography[]> {
   for (const key of keys) {
     if (typeof key === 'string' && key.startsWith('bio:')) {
       const biography = await db.get(STORE, key) as Biography
-      entries.push(biography)
+      // Archived biographies predate the league title list. Keep them fully
+      // playable/displayable while recovering the unambiguous World title
+      // marker used by the former global ladder.
+      if (!biography.leagueTitles) {
+        const worldTitle = biography.title.includes('國際舞台登頂')
+          || biography.turningPoints?.some((entry) => entry.title === '世界冠軍之夜' || (entry.tags.includes('冠軍戰') && entry.tags.includes('勝利') && entry.tags.includes('世界聯盟')))
+        entries.push(worldTitle ? { ...biography, leagueTitles: ['world'] } : biography)
+      } else entries.push(biography)
     }
   }
   return entries.sort((a, b) => b.createdAt - a.createdAt)

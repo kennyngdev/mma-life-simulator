@@ -76,6 +76,9 @@ import type {
   StartingExperience,
   TacticalMatchup,
   TransitionResult,
+  LeagueId,
+  LeagueRecord,
+  LeagueStanding,
 } from './types'
 
 const HEALTH_PARTS: HealthPart[] = ['head', 'hands', 'knees', 'torso']
@@ -92,7 +95,20 @@ function clamp(value: number, min = 0, max = 100): number {
   return Math.max(min, Math.min(max, Math.round(value)))
 }
 
-function stageFor(fights: number, experience: StartingExperience = 'hobbyist'): Stage {
+const LEAGUES: LeagueId[] = ['amateur', 'regional', 'asia', 'world']
+const NEXT_LEAGUE: Partial<Record<LeagueId, LeagueId>> = { amateur: 'regional', regional: 'asia', asia: 'world' }
+export const LEAGUE_LABELS: Record<LeagueId, string> = {
+  amateur: '業餘聯盟', regional: '地區聯盟', asia: '亞洲聯盟', world: '世界聯盟',
+}
+export const LEAGUE_TITLE_RATING_FLOORS: Record<LeagueId, number> = { amateur: 35, regional: 50, asia: 70, world: 80 }
+const LEAGUE_RATING_CURVES: Record<LeagueId, { bottom: number; top: number; champion: number }> = {
+  amateur: { bottom: 28, top: 48, champion: 52 },
+  regional: { bottom: 42, top: 65, champion: 70 },
+  asia: { bottom: 60, top: 82, champion: 86 },
+  world: { bottom: 72, top: 91, champion: 94 },
+}
+
+function stageForLegacy(fights: number, experience: StartingExperience = 'hobbyist'): Stage {
   if (experience === 'normie') {
     if (fights < 3) return 'grassroots'
     if (fights < 6) return 'amateur'
@@ -114,6 +130,53 @@ function stageFor(fights: number, experience: StartingExperience = 'hobbyist'): 
   return 'legacy'
 }
 
+function leagueForStage(stage: Stage): LeagueId | undefined {
+  return stage === 'amateur' || stage === 'regional' || stage === 'asia' || stage === 'world' ? stage : undefined
+}
+
+function stageForFighter(fighter: FighterState): Stage {
+  const standing = fighter.leagueStanding
+  const worldTitleWon = fighter.history?.some((entry) => entry.tags.includes('冠軍戰') && entry.tags.includes('勝利')
+    && (entry.tags.includes(LEAGUE_LABELS.world) || entry.title.includes(`${LEAGUE_LABELS.world}冠軍`) || entry.title === '世界冠軍之夜')) ?? false
+  if (standing) return standing.league === 'world' && (standing.status === 'champion' || worldTitleWon) ? 'legacy' : standing.league
+  return stageForLegacy(fighter.evidence.fights, fighter.startingExperience)
+}
+
+function blankLeagueRecords(): Record<LeagueId, LeagueRecord> {
+  return Object.fromEntries(LEAGUES.map((league) => [league, {
+    fights: 0, wins: 0, losses: 0, draws: 0, winStreak: 0, consecutiveWins: 0, titles: 0, defenses: 0,
+  }])) as Record<LeagueId, LeagueRecord>
+}
+
+function standingRank(standing: LeagueStanding | undefined): number | undefined {
+  return standing?.status === 'ranked' ? standing.rank : undefined
+}
+
+function standingLabel(standing: LeagueStanding | undefined, stage: Stage): string {
+  if (standing?.status === 'champion') return `${LEAGUE_LABELS[standing.league]}冠軍`
+  if (standing?.status === 'ranked') return `${LEAGUE_LABELS[standing.league]} #${standing.rank}`
+  if (standing?.status === 'unranked') return `${LEAGUE_LABELS[standing.league]} 未排名`
+  return stage === 'grassroots' ? '草根試煉 · 未納入聯盟排名' : STAGE_LABELS[stage]
+}
+
+export function fighterStandingLabel(fighter: FighterState, stage = stageForFighter(fighter)): string {
+  return standingLabel(fighter.leagueStanding, stage)
+}
+
+function syncLegacyRanking(fighter: FighterState): FighterState {
+  const rank = standingRank(fighter.leagueStanding)
+  fighter.ranking = rank
+  return fighter
+}
+
+function isChampion(fighter: FighterState): boolean {
+  return fighter.leagueStanding?.status === 'champion'
+}
+
+function currentLeague(fighter: FighterState): LeagueId | undefined {
+  return fighter.leagueStanding?.league ?? leagueForStage(stageForLegacy(fighter.evidence.fights, fighter.startingExperience))
+}
+
 function roundMoney(value: number): number {
   return Math.max(0, Math.round(value / 100) * 100)
 }
@@ -123,7 +186,7 @@ function isLocalStage(stage: Stage): boolean {
 }
 
 export function typicalPurseForFighter(fighter: FighterState): number {
-  const stage = stageFor(fighter.evidence.fights, fighter.startingExperience)
+  const stage = stageForFighter(fighter)
   const base = stage === 'grassroots' ? 1_000 : 4_000 + fighter.evidence.fights * 3_500
   const regionalMultiplier = isLocalStage(stage) ? REGION_PROFILES[fighter.region].economyMultiplier : 1
   return roundMoney(base * regionalMultiplier)
@@ -185,6 +248,45 @@ export function getAnthropometrics(seed: string, naturalWeight: number, identity
   const density = naturalWeight / ((heightCm / 100) ** 2)
   const frame = density >= 27.2 ? '厚實骨架' : density <= 22.8 ? '修長骨架' : '均衡骨架'
   return { heightCm, reachCm, frame }
+}
+
+export function opponentBodyFor(seed: string, playerNaturalWeight: number, opponentId: string) {
+  const naturalWeight = clamp(playerNaturalWeight + stableOffset(`${seed}:${opponentId}:natural-weight`, -3, 3), 64, 94)
+  return { naturalWeight, ...getAnthropometrics(seed, naturalWeight, opponentId) }
+}
+
+export interface BodyMatchup {
+  heightDelta: number
+  reachDelta: number
+  frameDelta: number
+  massDelta: number
+  rangeEdge: number
+  insideEdge: number
+  clinchEdge: number
+}
+
+function frameValue(frame: string): number {
+  return frame === '厚實骨架' ? 1 : frame === '修長骨架' ? -1 : 0
+}
+
+/** Small, legible matchup edges shared by fight resolution and prefight advice. */
+export function bodyMatchupFor(
+  fighter: Pick<FighterState, 'heightCm' | 'reachCm' | 'naturalWeight' | 'frame'>,
+  opponent: Pick<Opponent, 'heightCm' | 'reachCm' | 'naturalWeight' | 'frame'>,
+): BodyMatchup {
+  const heightDelta = fighter.heightCm - opponent.heightCm
+  const reachDelta = fighter.reachCm - opponent.reachCm
+  const frameDelta = frameValue(fighter.frame) - frameValue(opponent.frame)
+  const massDelta = clamp((fighter.naturalWeight - opponent.naturalWeight) / 3, -2, 2)
+  return {
+    heightDelta,
+    reachDelta,
+    frameDelta,
+    massDelta,
+    rangeEdge: clamp(reachDelta * 0.5 + heightDelta * 0.15, -8, 8),
+    insideEdge: clamp(frameDelta * 1.5 + massDelta * 0.5 - reachDelta * 0.18 - heightDelta * 0.1, -5, 5),
+    clinchEdge: clamp(frameDelta * 1.5 + massDelta * 0.5 + heightDelta * 0.16, -5, 5),
+  }
 }
 
 function baseTechnique(primary: Branch, secondary: Branch, streams: RngStreams): [Record<Branch, number>, RngStreams] {
@@ -290,6 +392,7 @@ export function createNewRun(input: NewRunInput): GameState {
       : `來自${REGION_LABELS[input.region]}${hometown}的${fighterName}原本是${background.name}，如今從「${REGION_PROFILES[input.region].circuit}」踏進綜合格鬥，開始補上其他領域的技術。`,
     people: [relationships[0].name], importance: 3, tags: ['起點', '家鄉', REGION_LABELS[input.region], background.id],
   }]
+  const initialLeague = startingExperience === 'normie' ? undefined : startingExperience === 'semi-pro' ? 'regional' : 'amateur'
   const fighter: FighterState = {
     name: fighterName, alias, region: input.region, hometown, motive: input.motive, age: 18, year: 2026,
     backgroundId: background.id, background: background.name, backgroundDescription: background.description, startingExperience, naturalWeight,
@@ -297,45 +400,55 @@ export function createNewRun(input: NewRunInput): GameState {
     frame: anthropometrics.frame, technique, techniquePotential, skills, learnedMoves: [...new Set(learnedMoves)], traits, traitProgress: [],
     mind: { fightIQ: 36, composure: 40 }, health: { head: 100, hands: 100, knees: 100, torso: 100 },
     fatigue: 0, readiness: 82, insight: 0, money: startingExperience === 'normie' ? 2_000 : startingExperience === 'semi-pro' ? 14_000 : 8_000,
-    ranking: startingExperience === 'semi-pro' ? 70 : 99, reputation: startingExperience === 'semi-pro' ? 15 : 5,
+    leagueStanding: initialLeague ? { league: initialLeague, status: 'unranked' } : undefined,
+    leagueRecords: blankLeagueRecords(),
+    ranking: undefined, reputation: startingExperience === 'semi-pro' ? 15 : 5,
     promoterTrust: 50, wins: 0, losses: 0, draws: 0,
     unlockedNodes, mastery, evidence: { fights: 0, wins: 0, finishes: 0, takedowns: 0, submissions: 0,
       bottomEscapes: 0, knockdowns: 0, cageMinutes: 0, decisions: 0, punchKos: 0, kickKos: 0, comebackWins: 0, survivedFinishWindows: 0 }, relationships, history,
   }
-  const generated = generateOpponents(fighter, rng, 20, input.seed.trim().toUpperCase())
+  const generated = generateOpponents(fighter, rng, input.seed.trim().toUpperCase())
   rng = generated.rng
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 13, rulesVersion: '0.11.0', contentVersion: '1.4.0', seed: input.seed.trim().toUpperCase(),
-    phase: 'reveal', stage: stageFor(0, startingExperience), fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
+    saveVersion: 15, rulesVersion: '0.13.0', contentVersion: '1.6.0', seed: input.seed.trim().toUpperCase(),
+    phase: 'reveal', stage: initialLeague ?? 'grassroots', fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
     offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
 }
 
-function generateOpponents(fighter: FighterState, streams: RngStreams, count: number, seed: string): { opponents: Opponent[]; rng: RngStreams } {
+function opponentRatingForLeague(league: LeagueId, rank: number | undefined): number {
+  const curve = LEAGUE_RATING_CURVES[league]
+  if (rank === undefined) return curve.champion
+  return curve.bottom + ((15 - rank) / 14) * (curve.top - curve.bottom)
+}
+
+function generateOpponents(fighter: FighterState, streams: RngStreams, seed: string): { opponents: Opponent[]; rng: RngStreams } {
   const opponents: Opponent[] = []
   const usedNames = new Set<string>([fighter.name])
   let rng = streams
-  const entryRating = competitiveRatingForFighter(fighter)
   const asianNationalities = new Set(['日本', '南韓', '哈薩克', '吉爾吉斯', '孟加拉', '印度', '巴基斯坦', '泰國', '越南', '印尼', '馬來西亞'])
   const asianPool = INTERNATIONAL_OPPONENTS.filter((opponent) => asianNationalities.has(opponent.nationality))
   const worldPool = INTERNATIONAL_OPPONENTS.filter((opponent) => !asianNationalities.has(opponent.nationality))
-  const homeMix = fighter.region === 'hong-kong' ? { home: .5, neighbor: .25 }
-    : fighter.region === 'taiwan' ? { home: .65, neighbor: .2 }
-      : { home: .75, neighbor: .15 }
-  for (let index = 0; index < count; index += 1) {
+  const regionalPool = (['hong-kong', 'taiwan', 'mainland'] as Region[]).flatMap((region) => REGION_PROFILES[region].identities.map((identity) => ({
+    name: identity.name, alias: identity.alias, nationality: OPPONENT_NATIONALITIES[region], originRegion: region, hometown: REGION_PROFILES[region].hometowns[0],
+  })))
+  const pools: Array<{ league: LeagueId | 'grassroots'; rank?: number; source: 'regional' | 'asia' | 'world' }> = [
+    ...Array.from({ length: 5 }, (_, index) => ({ league: 'grassroots' as const, rank: undefined, source: 'regional' as const, index })),
+    ...LEAGUES.flatMap((league) => [
+      { league, rank: undefined, source: league === 'world' ? 'world' as const : league === 'asia' ? 'asia' as const : 'regional' as const },
+      ...Array.from({ length: 15 }, (_, index) => ({ league, rank: index + 1, source: league === 'world' ? 'world' as const : league === 'asia' ? 'asia' as const : 'regional' as const })),
+    ]),
+  ]
+  for (let index = 0; index < pools.length; index += 1) {
+    const slot = pools[index]
     let name: string
     let nationality: string
     let originRegion: Region | undefined
     let hometown: string | undefined
     let alias: string | undefined
-    let poolKind: 'home' | 'neighbor' | 'asia' | 'world'
-    if (index < 8) {
-      let originRoll: number
-      ;[originRoll, rng] = draw(rng, 'opponents')
-      poolKind = originRoll < homeMix.home ? 'home' : originRoll < homeMix.home + homeMix.neighbor ? 'neighbor' : 'asia'
-    } else poolKind = index < 14 ? 'asia' : 'world'
+    const poolKind = slot.source
     if (poolKind === 'asia' || poolKind === 'world') {
       const source = poolKind === 'asia' ? asianPool : worldPool
       const available = source.filter((opponent) => !usedNames.has(opponent.name))
@@ -345,56 +458,150 @@ function generateOpponents(fighter: FighterState, streams: RngStreams, count: nu
       nationality = identity.nationality
       hometown = INTERNATIONAL_HOMETOWNS[nationality]
     } else {
-      if (poolKind === 'home') originRegion = fighter.region
-      else [originRegion, rng] = pick(rng, 'opponents', (['hong-kong', 'taiwan', 'mainland'] as const).filter((region) => region !== fighter.region))
-      let identity: RegionalIdentity
-      ;[identity, rng] = generatedRegionalIdentity(originRegion, rng, 'opponents')
-      while (usedNames.has(identity.name)) [identity, rng] = generatedRegionalIdentity(originRegion, rng, 'opponents')
-      name = identity.name
-      alias = identity.alias
-      nationality = OPPONENT_NATIONALITIES[originRegion]
-      ;[hometown, rng] = generatedHometown(originRegion, rng, 'opponents')
+      const available = regionalPool.filter((identity) => !usedNames.has(identity.name))
+      let identity: (typeof regionalPool)[number]
+      ;[identity, rng] = pick(rng, 'opponents', available)
+      name = identity.name; alias = identity.alias; nationality = identity.nationality; originRegion = identity.originRegion; hometown = identity.hometown
     }
     usedNames.add(name)
     let styleBranch: Branch
     let weakness: Branch
     ;[styleBranch, rng] = pick(rng, 'opponents', BRANCHES)
     ;[weakness, rng] = pick(rng, 'opponents', BRANCHES.filter((branch) => branch !== styleBranch))
-    // The initial pool must actually contain fighters around a debuting #99 prospect;
-    // otherwise every offered opponent begins above the player's development band.
-    const rank = Math.max(1, 99 - index * 5)
-    const earlyRatingOffsets = [-4, 1, 7, -2, 3, 9]
+    const rank = slot.rank
     let ratingRoll: number
-    ;[ratingRoll, rng] = drawInt(rng, 'opponents', index < earlyRatingOffsets.length ? -1 : -3, index < earlyRatingOffsets.length ? 1 : 3)
-    const grassrootsRating = fighter.startingExperience === 'normie' && index < 5 ? 14 + index * 3 : undefined
-    const targetRating = grassrootsRating ?? clamp(index < earlyRatingOffsets.length
-      ? entryRating + earlyRatingOffsets[index] + ratingRoll
-      : entryRating + 11 + (index - earlyRatingOffsets.length) * 3.5 + ratingRoll, 24, 90)
+    ;[ratingRoll, rng] = drawInt(rng, 'opponents', slot.league === 'grassroots' ? -1 : slot.rank === undefined ? 0 : -2, slot.league === 'grassroots' ? 1 : slot.rank === undefined ? 0 : 2)
+    let targetRating = slot.league === 'grassroots' ? 14 + index * 2 : clamp(opponentRatingForLeague(slot.league, rank) + ratingRoll, 20, 96)
+    // The seeded noise should make rosters feel individual without ever
+    // contradicting the table: a higher numbered slot cannot be stronger
+    // than the champion or the fighter immediately above it.
+    if (slot.league !== 'grassroots') {
+      const previous = [...opponents].reverse().find((item) => item.league === slot.league)
+      if (previous) targetRating = Math.min(targetRating, previous.rating - 1)
+    }
     const baseline = targetRating - 4.4
     const technique = {} as Record<Branch, number>
-    for (const branch of BRANCHES) technique[branch] = clamp(baseline + (branch === styleBranch ? 8 : branch === weakness ? -8 : 0), grassrootsRating ? 10 : 25, 94)
+    for (const branch of BRANCHES) technique[branch] = clamp(baseline + (branch === styleBranch ? 8 : branch === weakness ? -8 : 0), slot.league === 'grassroots' ? 10 : 25, 94)
+    let composure = clamp(baseline, 25, 94)
+    if (slot.league !== 'grassroots') {
+      const previous = [...opponents].reverse().find((item) => item.league === slot.league)
+      const minimum = 25
+      let computed = competitiveRatingForTechnique(technique, composure)
+      for (let guard = 0; previous && computed >= previous.rating && guard < 40; guard += 1) {
+        const before = computed
+        if (technique[styleBranch] > minimum) technique[styleBranch] -= 1
+        else if (composure > 25) composure -= 1
+        else for (const branch of BRANCHES) if (technique[branch] > minimum) technique[branch] -= 1
+        computed = competitiveRatingForTechnique(technique, composure)
+        if (computed === before && technique[styleBranch] <= minimum && composure <= 25) break
+      }
+    }
     const skills = {} as Opponent['skills']
     for (const branch of BRANCHES) {
       const value = technique[branch]
       const xp = value >= 90 ? 1_500 : value >= 76 ? 1_000 : value >= 58 ? 600 : value >= 40 ? 300 : value >= 22 ? 100 : 0
       skills[branch] = { xp, aptitude: 1 }
     }
-    const learnedMoves = BRANCHES.flatMap((branch) => movesForBranch(branch, skillLevel(skills[branch].xp)).map((move) => move.id))
+    // Every generated opponent needs at least one legal action.  Low-rated
+    // grassroots seeds can otherwise have no branch moves unlocked at all.
+    const learnedMoves = [...new Set([
+      ...BRANCHES.flatMap((branch) => movesForBranch(branch, skillLevel(skills[branch].xp)).map((move) => move.id)),
+      'probe-range',
+    ])]
     let traits: Opponent['traits']
     ;[traits, rng] = generateBirthTraits(rng, 'opponents')
-    const measurements = getAnthropometrics(seed, fighter.naturalWeight, `opponent-${index + 1}`)
-    const composure = clamp(baseline, 25, 94)
+    const opponentId = `opponent-${index + 1}`
+    const body = opponentBodyFor(seed, fighter.naturalWeight, opponentId)
     const rating = competitiveRatingForTechnique(technique, composure)
     opponents.push({
-      id: `opponent-${index + 1}`, name, region: nationality, nationality,
+      id: opponentId, name, region: nationality, nationality,
       originRegion, hometown, alias,
-      age: 20 + (index % 13), heightCm: measurements.heightCm, reachCm: measurements.reachCm,
-      style: `${BRANCH_META[styleBranch].name}型`, rank, rating,
+      age: 20 + (index % 13), naturalWeight: body.naturalWeight, heightCm: body.heightCm, reachCm: body.reachCm, frame: body.frame,
+      style: `${BRANCH_META[styleBranch].name}型`, league: slot.league, standing: slot.league === 'grassroots' ? 'unranked' : rank === undefined ? 'champion' : 'ranked', rank,
+      isChampion: slot.league !== 'grassroots' && rank === undefined,
+      rating,
       technique, skills, learnedMoves, traits, composure,
       weakness, relationship: 0, meetings: 0, record: { wins: Math.max(0, index + 1), losses: index % 5 },
     })
   }
   return { opponents, rng }
+}
+
+/** Adds deterministic league rosters to migrated careers without replacing named rivals. */
+export function ensureLeagueRosters(fighter: FighterState, opponents: Opponent[], streams: RngStreams, seed: string): { opponents: Opponent[]; rng: RngStreams } {
+  const standing = fighter.leagueStanding
+  const rostersComplete = opponents.filter((opponent) => opponent.league === 'grassroots').length >= 5
+    && LEAGUES.every((league) => {
+      const leagueOpponents = opponents.filter((opponent) => opponent.league === league)
+      const npcChampions = leagueOpponents.filter((opponent) => opponent.standing === 'champion')
+      const playerInLeague = standing?.league === league
+      const playerChampion = playerInLeague && standing.status === 'champion'
+      if (playerChampion ? npcChampions.length !== 0 : npcChampions.length !== 1) return false
+      const npcRanks = leagueOpponents.filter((opponent) => opponent.standing === 'ranked' && opponent.rank !== undefined)
+      const playerRank = playerInLeague && standing.status === 'ranked' ? standing.rank : undefined
+      const occupied = new Set(npcRanks.map((opponent) => opponent.rank!))
+      if (playerRank !== undefined) occupied.add(playerRank)
+      return npcRanks.length + (playerRank === undefined ? 0 : 1) === 15
+        && occupied.size === 15
+        && Array.from({ length: 15 }, (_, index) => occupied.has(index + 1)).every(Boolean)
+    })
+  // Loading an already complete save should not consume gameplay RNG merely
+  // to rediscover the same persistent roster.
+  if (rostersComplete) return { opponents, rng: streams }
+  const generated = generateOpponents(fighter, streams, seed)
+  const activeLeague = fighter.leagueStanding?.league
+  const activeRank = fighter.leagueStanding?.status === 'ranked' ? fighter.leagueStanding.rank : undefined
+  const activeChampion = fighter.leagueStanding?.status === 'champion'
+  // A player occupies their numbered slot, so an imported roster entry at the
+  // same slot becomes an unranked historical rival rather than a duplicate.
+  let baseOpponents = opponents.map((opponent) => activeLeague && activeRank !== undefined
+    && opponent.league === activeLeague && opponent.standing === 'ranked' && opponent.rank === activeRank
+    ? updateOpponentRank(opponent, undefined)
+    : opponent)
+  const existingNames = new Set(baseOpponents.map((opponent) => opponent.name))
+  const existingIds = new Set(baseOpponents.map((opponent) => opponent.id))
+  const additions: Opponent[] = []
+  const occupied = new Map<LeagueId | 'grassroots', Set<number | 'champion'>>()
+  for (const league of [...LEAGUES, 'grassroots' as const]) {
+    occupied.set(league, new Set(baseOpponents.filter((opponent) => opponent.league === league).map((opponent) =>
+      opponent.standing === 'champion' ? 'champion' : opponent.rank ?? -1)))
+  }
+  for (const opponent of generated.opponents) {
+    if (existingNames.has(opponent.name)) continue
+    const slots = occupied.get(opponent.league)!
+    if (opponent.league === 'grassroots') {
+      if (baseOpponents.filter((item) => item.league === 'grassroots').length + additions.filter((item) => item.league === 'grassroots').length >= 5) continue
+      const id = existingIds.has(opponent.id) ? `league-${opponent.id}-${additions.length + 1}` : opponent.id
+      additions.push({ ...opponent, id }); existingNames.add(opponent.name); existingIds.add(id)
+      continue
+    }
+    const slot = opponent.standing === 'champion' ? 'champion' : opponent.rank
+    if (activeChampion && activeLeague === opponent.league && slot === 'champion') continue
+    if (activeLeague === opponent.league && activeRank !== undefined && slot === activeRank) continue
+    if (slot === undefined || slots.has(slot)) continue
+    const id = existingIds.has(opponent.id) ? `league-${opponent.id}-${additions.length + 1}` : opponent.id
+    additions.push({ ...opponent, id })
+    existingNames.add(opponent.name); existingIds.add(id); slots.add(slot)
+  }
+  // A promoted champion vacates a belt, which can leave one empty numbered
+  // slot after the former #1 becomes champion. Fill that slot deterministically
+  // with a clearly marked reserve while retaining all named historical rivals.
+  for (const league of LEAGUES) {
+    const slots = occupied.get(league)!
+    const missing = Array.from({ length: 15 }, (_, index) => index + 1)
+      .filter((rank) => rank !== activeRank || activeLeague !== league)
+      .filter((rank) => !slots.has(rank))
+    for (const rank of missing) {
+      const template = generated.opponents.find((item) => item.league === league && item.standing === 'ranked' && item.rank === rank)
+      if (!template) continue
+      const id = `league-${league}-reserve-${rank}`
+      if (existingIds.has(id)) continue
+      const name = existingNames.has(template.name) ? `${template.name}（替補${rank}）` : template.name
+      additions.push({ ...template, id, name, standing: 'ranked', rank, isChampion: false, meetings: 0, relationship: 0, record: { wins: 0, losses: 0 } })
+      existingNames.add(name); existingIds.add(id); slots.add(rank)
+    }
+  }
+  return { opponents: [...baseOpponents, ...additions], rng: generated.rng }
 }
 
 function riskPurseMultiplier(risk: RiskLabel): number {
@@ -405,41 +612,56 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
   let rng = streams
   const fights = fighter.evidence.fights
   const rating = averageRating(fighter)
-  const eligible = opponents.filter((opponent) => opponent.meetings < 2 || opponent.relationship > 25)
+  const stage = stageForFighter(fighter)
+  const league = currentLeague(fighter)
+  const currentOpponents = opponents.filter((opponent) => opponent.league === (league ?? 'grassroots'))
+  const eligible = currentOpponents.filter((opponent) => opponent.meetings < 2 || opponent.relationship > 25)
   const alternatives = eligible.filter((opponent) => !excludedOpponentIds.includes(opponent.id))
   const replacementPool = alternatives.length >= 3 ? alternatives : eligible
   const selected: Opponent[] = []
-  const titleShotEligible = fights >= 10 && fighter.wins >= 8 && fighter.ranking <= 20 && rating >= 70
-  const titleOpponent = titleShotEligible
-    ? alternatives
-      .filter((opponent) => opponent.rank <= 10 && competitiveRatingForOpponent(opponent) >= 70)
-      .sort((a, b) => Math.abs(competitiveRatingForOpponent(a) - rating) - Math.abs(competitiveRatingForOpponent(b) - rating)
-        || a.rank - b.rank)[0]
-    : undefined
-  const roles: Array<{ rankOffset: number; ratingTarget: number }> = [
-    { rankOffset: 10, ratingTarget: -3.5 },
-    { rankOffset: 0, ratingTarget: 1 },
-    { rankOffset: -10, ratingTarget: 7.5 },
-  ]
-  for (const role of roles) {
-    const remaining = replacementPool.filter((opponent) => !selected.includes(opponent))
-    const targetRank = clamp(fighter.ranking + role.rankOffset, 1, 99)
-    const pool = remaining
-      .sort((a, b) => Math.abs(a.rank - targetRank) + a.meetings * 6
-        - (Math.abs(b.rank - targetRank) + b.meetings * 6)
-        || Math.abs((a.rating - rating) - role.ratingTarget) - Math.abs((b.rating - rating) - role.ratingTarget))
-      .slice(0, 2)
-    if (pool.length) {
-      let chosen: Opponent
-      ;[chosen, rng] = pick(rng, 'offers', pool)
-      selected.push(chosen)
+  const fighterRank = standingRank(fighter.leagueStanding) ?? fighter.ranking
+  const fighterIsChampion = isChampion(fighter)
+  const titleShotEligible = Boolean(league && !fighterIsChampion && fighter.leagueStanding?.status === 'ranked'
+    && fighter.leagueStanding.rank <= 3
+    && Math.max(fighter.leagueRecords?.[league]?.winStreak ?? 0, fighter.leagueRecords?.[league]?.consecutiveWins ?? 0) >= 2
+    && rating >= LEAGUE_TITLE_RATING_FLOORS[league])
+  // The belt holder is always a valid title target.  Meeting/rivalry cooldowns
+  // apply to ordinary matchmaking, never to a championship opportunity.
+  const championOpponent = currentOpponents.find((opponent) => opponent.league === league && opponent.standing === 'champion')
+  const ranked = (pool: Opponent[]) => pool.filter((opponent) => opponent.standing === 'ranked' && opponent.rank !== undefined)
+  const targetOpponent = (pool: Opponent[], targetRank: number) => ranked(pool)
+    .sort((a, b) => Math.abs((a.rank ?? 15) - targetRank) + a.meetings * 6
+      - (Math.abs((b.rank ?? 15) - targetRank) + b.meetings * 6)
+      || Math.abs((competitiveRatingForOpponent(a) - rating)) - Math.abs((competitiveRatingForOpponent(b) - rating)))
+    .slice(0, 2)
+  if (fighterIsChampion && league) {
+    const defensePool = currentOpponents.filter((opponent) => opponent.standing === 'ranked' && opponent.rank !== undefined)
+    for (const challenger of [1, 2, 3]) {
+      const exact = defensePool.find((opponent) => opponent.rank === challenger && !selected.includes(opponent))
+      if (exact) selected.push(exact)
+    }
+  } else if (!league) {
+    for (const opponent of replacementPool.slice(0, 6)) {
+      if (selected.length >= 3) break
+      if (!selected.includes(opponent)) selected.push(opponent)
+    }
+  } else {
+    const unrankedTarget = [14, 15, 13]
+    const baseRank = fighterRank ?? 15
+    const targets = fighterRank === undefined ? unrankedTarget : [baseRank + 3, baseRank, baseRank - 3]
+    for (const target of targets) {
+      const pool = targetOpponent(replacementPool.filter((opponent) => !selected.includes(opponent)), clamp(target, 1, 15))
+      if (pool.length) {
+        let chosen: Opponent
+        ;[chosen, rng] = pick(rng, 'offers', pool)
+        selected.push(chosen)
+      }
     }
   }
-  if (titleOpponent && !selected.includes(titleOpponent)) {
-    if (selected.length >= 3) selected[selected.length - 1] = titleOpponent
-    else selected.push(titleOpponent)
+  if (titleShotEligible && championOpponent && !selected.includes(championOpponent)) {
+    if (selected.length >= 3) selected[selected.length - 1] = championOpponent
+    else selected.push(championOpponent)
   }
-  const stage = stageFor(fights, fighter.startingExperience)
   const localStage = isLocalStage(stage)
   const localPromotions = stage === 'grassroots' || stage === 'amateur' || stage === 'regional'
     ? REGION_PROFILES[fighter.region].promotions[stage]
@@ -447,7 +669,8 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
   const promotion = localPromotions?.[fights % localPromotions.length] ?? (stage === 'asia' ? '東亞戰線' : '世界鐵籠系列')
   const offers = selected.map((opponent, index): FightOffer => {
     const gap = opponent.rating - rating
-    const titleFight = opponent.id === titleOpponent?.id
+    const titleRole: FightOffer['titleRole'] = opponent.standing === 'champion' && titleShotEligible ? 'challenge' : fighterIsChampion ? 'defense' : 'ordinary'
+    const titleFight = titleRole !== 'ordinary'
     const shortNotice = index === 1 && fights > 2
     const riskLabel = riskLabelForGap(gap)
     const base = typicalPurseForFighter(fighter)
@@ -458,8 +681,8 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
       id: `offer-${fights}-${opponent.id}`, opponentId: opponent.id, promotion,
       purse: Math.max(500, base + riskAdjustment + shortNoticePremium + titleBonus),
       purseBreakdown: { base, riskAdjustment, shortNoticePremium, titleBonus },
-      rankReward: fighter.ranking - rankingAfterWin(fighter.ranking, opponent.rank), riskLabel,
-      titleFight, shortNotice,
+      titleRole,
+      titleFight, shortNotice, riskLabel,
       venueRegion: localStage ? fighter.region : undefined,
       opponentIsLocal: localStage && opponent.originRegion === fighter.region,
     }
@@ -491,6 +714,97 @@ export function rankingAfterWin(currentRank: number, opponentRank: number): numb
   return clamp(opponentRank + placementBehindOpponent, 1, 99)
 }
 
+export function leagueRankingAfterWin(currentRank: number | undefined, opponentRank: number): number {
+  if (currentRank === undefined) return clamp(opponentRank, 1, 15)
+  if (opponentRank >= currentRank) return clamp(currentRank - 2, 1, 15)
+  const gap = currentRank - opponentRank
+  return clamp(opponentRank + (gap >= 10 ? 1 : 0), 1, 15)
+}
+
+function updateOpponentRank(opponent: Opponent, rank: number | undefined): Opponent {
+  if (opponent.league === 'grassroots') return { ...opponent, standing: 'unranked', rank: undefined, isChampion: false }
+  return rank === undefined || rank > 15
+    ? { ...opponent, standing: 'unranked', rank: undefined, isChampion: false }
+    : { ...opponent, standing: 'ranked', rank, isChampion: false }
+}
+
+function shiftRanksForPlayerWin(opponents: Opponent[], league: LeagueId, playerRank: number | undefined, opponentRank: number): Opponent[] {
+  const nextRank = leagueRankingAfterWin(playerRank, opponentRank)
+  return opponents.map((item) => {
+    if (item.league !== league || item.standing !== 'ranked' || item.rank === undefined) return item
+    if (playerRank === undefined) return updateOpponentRank(item, item.rank >= opponentRank ? item.rank + 1 : item.rank)
+    if (nextRank < playerRank && item.rank >= nextRank && item.rank < playerRank) return updateOpponentRank(item, item.rank + 1)
+    return item
+  })
+}
+
+function shiftRanksForPlayerLoss(opponents: Opponent[], league: LeagueId, playerRank: number, nextRank?: number): Opponent[] {
+  if (nextRank !== undefined && nextRank <= playerRank) return opponents
+  return opponents.map((item) => {
+    if (item.league !== league || item.standing !== 'ranked' || item.rank === undefined || item.rank <= playerRank) return item
+    // Every NPC between the player's old slot and the new slot moves up one;
+    // include the destination slot so it is not duplicated by the player.
+    if (nextRank === undefined || item.rank <= nextRank) return updateOpponentRank(item, item.rank - 1)
+    return item
+  })
+}
+
+/** When the player falls out of the table, restore the NPC roster to all 15 slots. */
+function restoreLeagueRosterDepth(opponents: Opponent[], league: LeagueId): Opponent[] {
+  const ranked = opponents.filter((item) => item.league === league && item.standing === 'ranked' && item.rank !== undefined)
+  const occupied = new Set(ranked.map((item) => item.rank!))
+  const missing = Array.from({ length: 15 }, (_, index) => index + 1).filter((rank) => !occupied.has(rank))
+  if (!missing.length) return opponents
+  const candidates = opponents.filter((item) => item.league === league && item.standing === 'unranked')
+    .sort((a, b) => competitiveRatingForOpponent(b) - competitiveRatingForOpponent(a) || a.id.localeCompare(b.id))
+  let next = opponents
+  missing.forEach((rank, index) => {
+    const candidate = candidates[index]
+    if (!candidate) return
+    next = next.map((item) => item.id === candidate.id ? updateOpponentRank(item, rank) : item)
+  })
+  return next
+}
+
+function removeRankedChampion(opponents: Opponent[], league: LeagueId, champion: Opponent): Opponent[] {
+  const remaining = opponents
+    .filter((item) => item.league === league && item.id !== champion.id && item.standing === 'ranked' && item.rank !== undefined)
+    .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+  const assigned = new Map(remaining.map((item, index) => [item.id, index + 2]))
+  return opponents.map((item) => {
+    if (item.id === champion.id) return { ...item, standing: 'champion' as const, rank: undefined, isChampion: true }
+    const rank = assigned.get(item.id)
+    return rank === undefined ? item : updateOpponentRank(item, rank)
+  })
+}
+
+function insertFormerChampionAtTop(opponents: Opponent[], league: LeagueId, formerChampionId: string, playerRank: number | undefined): Opponent[] {
+  const removedPlayerSlot = playerRank === undefined ? opponents : opponents.map((item) => item.league === league && item.standing === 'ranked' && item.rank !== undefined && item.rank > playerRank
+    ? updateOpponentRank(item, item.rank - 1) : item)
+  return removedPlayerSlot.map((item) => {
+    if (item.id === formerChampionId) return updateOpponentRank(item, 1)
+    if (item.league === league && item.standing === 'ranked' && item.rank !== undefined) return updateOpponentRank(item, item.rank + 1)
+    return item
+  })
+}
+
+/** A promoted champion leaves a playable old-league title scene behind. */
+function restoreVacatedLeagueChampion(opponents: Opponent[], league: LeagueId): Opponent[] {
+  const formerChampion = opponents.find((item) => item.league === league && item.standing === 'ranked' && item.rank === 1)
+  if (!formerChampion) return opponents
+  let next = opponents.map((item) => item.id === formerChampion.id
+    ? { ...item, standing: 'champion' as const, rank: undefined, isChampion: true }
+    : item.league === league && item.standing === 'ranked' && item.rank !== undefined
+      ? updateOpponentRank(item, item.rank - 1) : item)
+  return restoreLeagueRosterDepth(next, league)
+}
+
+function titleRoleFor(offer: FightOffer): 'ordinary' | 'challenge' | 'defense' {
+  const legacyRole = offer.titleRole as string | undefined
+  if (legacyRole === 'none') return 'ordinary'
+  return (legacyRole as 'ordinary' | 'challenge' | 'defense' | undefined) ?? (offer.titleFight ? 'challenge' : 'ordinary')
+}
+
 function averageRating(fighter: FighterState): number {
   return competitiveRatingForFighter(fighter)
 }
@@ -507,7 +821,7 @@ function createLifeEvent(state: GameState): [LifeEvent, RngStreams] {
   let rng = state.rng
   const selectedOffer = state.offers.find((offer) => offer.id === state.selectedOfferId)
   const historyHasTag = (tag: string) => state.fighter.history.some((entry) => entry.tags.includes(tag))
-  const lateCareer = stageFor(state.fighter.evidence.fights, state.fighter.startingExperience) === 'legacy' || state.fighter.age >= 34
+  const lateCareer = state.stage === 'legacy' || stageForFighter(state.fighter) === 'legacy' || state.fighter.age >= 34
   if (!state.offerRefreshUsed && lateCareer && !historyHasTag('傳承')) return [createLegacyLifeEvent(state), rng]
   if (!state.offerRefreshUsed && selectedOffer && (selectedOffer.shortNotice || (!isLocalStage(state.stage) && !historyHasTag('客場後勤')))) {
     return [createLogisticsLifeEvent(state), rng]
@@ -1310,12 +1624,16 @@ function chanceFor(state: GameState, opponent: Opponent, branch: Branch, categor
   const positional = defensiveGround && branch !== 'ground' && branch !== 'wrestling' ? -12
     : dominantGround && branch === 'ground' ? 10
       : clinchPosition && (branch === 'clinch' || branch === 'wrestling') ? 8 : 0
-  const reachDelta = state.fighter.reachCm - opponent.reachCm
-  const reachEffect = position === 'range' && (branch === 'boxing' || branch === 'kicking')
-    ? Math.max(-7, Math.min(7, reachDelta * 0.6))
+  const bodyMatchup = bodyMatchupFor(state.fighter, opponent)
+  const bodyEffect = position === 'range' && (branch === 'boxing' || branch === 'kicking')
+    ? bodyMatchup.rangeEdge
     : position === 'pocket' && branch === 'boxing'
-      ? Math.max(-4, Math.min(4, reachDelta * -0.28))
-      : 0
+      ? bodyMatchup.insideEdge
+      : fight.plan === 'pressure' && category === 'transition'
+        ? bodyMatchup.insideEdge
+        : clinchPosition && (branch === 'clinch' || branch === 'wrestling')
+          ? bodyMatchup.clinchEdge
+          : 0
   // Branch execution decides the exchange, while the shared competitive rating
   // keeps a large overall development gap meaningful instead of letting a single
   // favorable branch erase it completely.
@@ -1326,7 +1644,7 @@ function chanceFor(state: GameState, opponent: Opponent, branch: Branch, categor
   const bottomTrait = defensiveGround ? traitModifier(state.fighter.traits, 'bottomEscape') : 0
   const comebackTrait = fight.openingRoundLost && fight.round > 1 ? traitModifier(state.fighter.traits, 'comeback') : 0
   const criticalTrait = Math.max(...Object.values(fight.playerDamageByPart)) >= 75 ? traitModifier(state.fighter.traits, 'criticalDefense') : 0
-  const center = 50 + (playerSkill - opponentSkill) * 0.65 + competitiveGap * 0.4 + positional + reachEffect
+  const center = 50 + (playerSkill - opponentSkill) * 0.65 + competitiveGap * 0.4 + positional + bodyEffect
     + rangeTrait + pocketTrait + transitionTrait + bottomTrait + comebackTrait + (category === 'defense' ? criticalTrait : 0)
     + (state.fighter.readiness - 70) * 0.12 + (health - 75) * 0.08
   const uncertainty = Math.max(6, 15 - state.scouting * 0.08)
@@ -1338,7 +1656,7 @@ function startFight(state: GameState): GameState {
   const offer = state.offers.find((item) => item.id === state.selectedOfferId)!
   const opponent = state.opponents.find((item) => item.id === offer.opponentId)!
   const fight: FightState = {
-    offer, opponentId: opponent.id, round: 1, totalRounds: offer.titleFight ? 5 : 3, position: 'range',
+    offer, opponentId: opponent.id, round: 1, totalRounds: titleRoleFor(offer) !== 'ordinary' ? 5 : 3, position: 'range',
     playerStamina: 100, opponentStamina: 100, playerDamage: 0, opponentDamage: 0,
     playerEffective: 0, opponentEffective: 0, criticalCount: 0, sequenceStep: 1,
     initiative: 'even', momentum: 0, opponentIntent: {
@@ -1365,11 +1683,13 @@ function setRoundPlan(state: GameState, plan: RoundPlan): GameState {
     - damageSkillPenalty(fight.opponentDamageByPart, branch, plan === 'takedown' || plan === 'cage' ? 'transition' : 'offense')
   let variance: number
   ;[variance, rng] = drawInt(rng, 'fights', -10, 10)
-  const reachDelta = state.fighter.reachCm - opponent.reachCm
-  const bodyMatchup = plan === 'distance' ? Math.max(-6, Math.min(6, reachDelta * 0.5)) : plan === 'pressure' ? Math.max(-3, Math.min(3, reachDelta * -0.22)) : 0
+  const bodyMatchup = bodyMatchupFor(state.fighter, opponent)
+  const bodyEdge = plan === 'distance' ? bodyMatchup.rangeEdge
+    : plan === 'pressure' ? bodyMatchup.insideEdge
+      : plan === 'takedown' || plan === 'cage' ? bodyMatchup.clinchEdge : 0
   const legPlanPenalty = (plan === 'distance' || plan === 'pressure') ? [0, -3, -7, -12][severityTier(fight.playerDamageByPart.leg, 'leg')] : 0
   const cornerMargin = fight.cornerAdjustment === 'recover' ? -10 : fight.cornerAdjustment === 'protect' ? -4 : 0
-  const margin = playerRating - opponentRating + variance + bodyMatchup + (plan === 'recover' ? -5 : 0) + legPlanPenalty + cornerMargin
+  const margin = playerRating - opponentRating + variance + bodyEdge + (plan === 'recover' ? -5 : 0) + legPlanPenalty + cornerMargin
   fight.plan = plan
   fight.sequenceStep = 1
   fight.stageName = 'contact'
@@ -1999,6 +2319,15 @@ function processFightResult(state: GameState): GameState {
   const opponent = state.opponents.find((item) => item.id === fight.opponentId)!
   const won = fight.winner === 'player'
   const drawResult = fight.winner === 'draw'
+  const titleRole = titleRoleFor(fight.offer)
+  const league = opponent.league === 'grassroots' ? currentLeague(fighter) : opponent.league
+  if (!fighter.leagueRecords) fighter.leagueRecords = blankLeagueRecords()
+  if (!fighter.leagueStanding && league) {
+    const legacyRank = fighter.ranking !== undefined && fighter.ranking < 99 ? Math.max(1, Math.min(15, Math.ceil(fighter.ranking * 15 / 99))) : undefined
+    fighter.leagueStanding = legacyRank ? { league, status: 'ranked', rank: legacyRank } : { league, status: 'unranked' }
+  }
+  const previousStanding = fighter.leagueStanding
+  const previousRank = standingRank(previousStanding)
   fighter.wins += won ? 1 : 0
   fighter.losses += !won && !drawResult ? 1 : 0
   fighter.draws += drawResult ? 1 : 0
@@ -2010,9 +2339,41 @@ function processFightResult(state: GameState): GameState {
   if (won && fight.method === 'ko' && fight.finishingStrikeKind === 'kick') fighter.evidence.kickKos += 1
   if (won && fight.openingRoundLost) fighter.evidence.comebackWins += 1
   fighter.money += fight.offer.purse
-  const rankingBefore = fighter.ranking
-  fighter.ranking = won ? rankingAfterWin(fighter.ranking, opponent.rank)
-    : clamp(fighter.ranking - (drawResult ? 1 : -3), 1, 99)
+  if (league) {
+    const record = fighter.leagueRecords[league] ?? { fights: 0, wins: 0, losses: 0, draws: 0, winStreak: 0, consecutiveWins: 0, titles: 0, defenses: 0 }
+    record.fights ??= 0; record.wins ??= 0; record.losses ??= 0; record.draws ??= 0
+    record.winStreak = Math.max(record.winStreak ?? 0, record.consecutiveWins ?? 0); record.titles ??= 0; record.defenses ??= 0
+    record.fights += 1
+    if (won) { record.wins += 1; record.winStreak += 1 } else { record.winStreak = 0; drawResult ? record.draws += 1 : record.losses += 1 }
+    record.consecutiveWins = record.winStreak
+    if (previousRank !== undefined) record.bestRank = record.bestRank === undefined ? previousRank : Math.min(record.bestRank, previousRank)
+    if (won && titleRole === 'challenge') { record.titles += 1; record.defenses = 0 }
+    if (won && titleRole === 'defense') { record.defenses += 1 }
+    fighter.leagueRecords[league] = record
+  }
+  let nextStanding = previousStanding
+  if (league && titleRole === 'challenge') {
+    if (won) nextStanding = { league, status: 'champion', defenses: 0 }
+    else if (!previousStanding) nextStanding = { league, status: 'unranked' }
+  } else if (league && titleRole === 'defense') {
+    if (!won && !drawResult && opponent.rank !== undefined) nextStanding = { league, status: 'ranked', rank: 1 }
+    else if (won) nextStanding = { league, status: 'champion', defenses: previousStanding?.status === 'champion' ? previousStanding.defenses + 1 : 1 }
+    else nextStanding = previousStanding ?? { league, status: 'champion', defenses: 0 }
+  } else if (league && previousStanding?.status !== 'champion') {
+    if (won && opponent.rank !== undefined) {
+      nextStanding = { league, status: 'ranked', rank: leagueRankingAfterWin(previousRank, opponent.rank) }
+    } else if (!won && previousRank !== undefined) {
+      const dropped = clamp(previousRank + (drawResult ? 1 : 3), 1, 16)
+      nextStanding = dropped > 15 ? { league, status: 'unranked' } : { league, status: 'ranked', rank: dropped }
+    }
+  }
+  fighter.leagueStanding = nextStanding
+  const nextRank = standingRank(nextStanding)
+  if (league && nextRank !== undefined) {
+    const record = fighter.leagueRecords[league]
+    record.bestRank = record.bestRank === undefined ? nextRank : Math.min(record.bestRank, nextRank)
+  }
+  syncLegacyRanking(fighter)
   fighter.reputation = clamp(fighter.reputation + (won ? 7 : drawResult ? 2 : 3))
   fighter.promoterTrust = clamp(fighter.promoterTrust + (won ? 5 : -2))
   fighter.age += fighter.evidence.fights % 2 === 0 ? 1 : 0
@@ -2024,18 +2385,43 @@ function processFightResult(state: GameState): GameState {
   fighter.health[damagePart] = clamp(fighter.health[damagePart] - Math.max(2, Math.round(fight.playerDamage * 0.12)))
   for (const node of Object.values(fighter.mastery)) node.gainedThisFight = 0
   const closeFight = Math.abs(fight.scores.reduce((sum, item) => sum + item.player - item.opponent, 0)) <= 2
-  const title = won ? (fight.offer.titleFight ? '世界冠軍之夜' : `擊敗 ${opponent.name}`) : drawResult ? `與 ${opponent.name} 戰成平手` : `敗給 ${opponent.name}`
+  const title = titleRole === 'challenge' && won
+    ? `${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍之夜`
+    : titleRole === 'defense' && won
+      ? `衛冕${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍`
+      : titleRole === 'defense' && !won && !drawResult
+        ? `失去${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍`
+        : won ? `擊敗 ${opponent.name}` : drawResult ? `與 ${opponent.name} 戰成平手` : `敗給 ${opponent.name}`
   const summary = won
-    ? `${fight.method === 'decision' ? '你按照自己的節奏贏下了更多回合' : `你在第 ${fight.finishRound} 回合終結了對手`}，排名從 #${rankingBefore} 升至 #${fighter.ranking}。`
-    : drawResult ? '裁判無法分出勝負。終場鐘聲才剛響起，重賽的話題就已經出現。' : `這場失利讓你看清：即使抓到對手在${BRANCH_META[opponent.weakness].name}方面的弱點，你的技術仍不夠全面。`
-  fighter.history.push({ id: `fight-${fighter.evidence.fights}`, year: fighter.year, age: fighter.age, title, summary, people: [opponent.name], importance: fight.offer.titleFight || closeFight ? 3 : 2, tags: ['比賽', won ? '勝利' : drawResult ? '平手' : '失敗', ...(fight.offer.titleFight ? ['冠軍戰'] : [])] })
+    ? titleRole === 'challenge'
+      ? `${fight.method === 'decision' ? '你按照自己的節奏贏下了更多回合' : `你在第 ${fight.finishRound} 回合終結了對手`}，成為${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍；冠軍不列入數字排名。`
+      : titleRole === 'defense'
+        ? `你守住了${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍，這是第 ${(fighter.leagueRecords[league!]?.defenses ?? 0)} 次成功衛冕。`
+        : previousRank === undefined ? `你擊敗對手，進入${league ? LEAGUE_LABELS[league] : '聯盟'}排名第 ${nextRank} 名。` : `你按照自己的節奏贏下了更多回合，排名從 #${previousRank} 升至 #${nextRank}。`
+    : titleRole === 'challenge' ? `你未能撼動${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍，先前排名維持不變。` : titleRole === 'defense' && drawResult ? `平手讓你保住${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍，但下一場仍要面對挑戰。` : titleRole === 'defense' ? `${opponent.name}擊敗你，成為新的${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍；你失去了這條腰帶。` : drawResult ? '裁判無法分出勝負。終場鐘聲才剛響起，重賽的話題就已經出現。' : `這場失利讓你看清：即使抓到對手在${BRANCH_META[opponent.weakness].name}方面的弱點，你的技術仍不夠全面。`
+  fighter.history.push({ id: `fight-${fighter.evidence.fights}`, year: fighter.year, age: fighter.age, title, summary, people: [opponent.name], importance: titleRole !== 'ordinary' || closeFight ? 3 : 2, tags: ['比賽', won ? '勝利' : drawResult ? '平手' : '失敗', ...(titleRole !== 'ordinary' ? ['冠軍戰'] : []), ...(league ? [LEAGUE_LABELS[league]] : [])] })
   let updatedFighter = updateRelationship(fighter, 'coach', won ? 3 : closeFight ? 1 : -1, `${title}時站在你的場邊`)
   if (closeFight) updatedFighter = updateRelationship(updatedFighter, 'family', 1, `看完你與${opponent.name}的苦戰`)
-  const opponents = state.opponents.map((item) => item.id === opponent.id ? {
+  let opponents = state.opponents.map((item) => item.id === opponent.id ? {
     ...item, meetings: item.meetings + 1, relationship: clamp(item.relationship + (closeFight ? 24 : won ? 8 : 12)),
     record: { wins: item.record.wins + (!won && !drawResult ? 1 : 0), losses: item.record.losses + (won ? 1 : 0) },
   } : item)
-  const nextStage = stageFor(updatedFighter.evidence.fights, updatedFighter.startingExperience)
+  if (league && titleRole === 'challenge' && won && opponent.standing === 'champion') opponents = insertFormerChampionAtTop(opponents, league, opponent.id, previousRank)
+  else if (league && titleRole === 'defense' && !won && !drawResult && opponent.rank !== undefined) opponents = removeRankedChampion(opponents, league, opponent)
+  else if (league && won && opponent.rank !== undefined && previousStanding?.status !== 'champion') opponents = shiftRanksForPlayerWin(opponents, league, previousRank, opponent.rank)
+  else if (league && !won && !drawResult && previousRank !== undefined) opponents = shiftRanksForPlayerLoss(opponents, league, previousRank, nextRank)
+  let offerStreams = state.rng
+  if (league && fighter.leagueStanding?.status === 'unranked') {
+    const roster = ensureLeagueRosters(fighter, opponents, offerStreams, state.seed)
+    opponents = roster.opponents
+    offerStreams = roster.rng
+  }
+  if (!league && fighter.evidence.fights >= 3 && fighter.startingExperience === 'normie') {
+    fighter.leagueStanding = { league: 'amateur', status: 'unranked' }
+    syncLegacyRanking(fighter)
+    updatedFighter = syncLegacyRanking({ ...updatedFighter, leagueStanding: fighter.leagueStanding })
+  }
+  const nextStage = stageForFighter(fighter)
   if (nextStage !== state.stage) {
     updatedFighter.history.push({ id: `stage-${nextStage}`, year: updatedFighter.year, age: updatedFighter.age, title: `踏上${STAGE_LABELS[nextStage]}`, summary: '接下來的對手更強、報酬更高，風險也更大。你的打法也開始被其他人仔細研究。', people: [], importance: 3, tags: ['階段'] })
   }
@@ -2045,7 +2431,11 @@ function processFightResult(state: GameState): GameState {
     updatedFighter.history.push({ id: `trait-${id}`, year: updatedFighter.year, age: updatedFighter.age, title: `獲得特質：${trait.name}`, summary: `${trait.condition}；${trait.effect}`, people: [], importance: 2, tags: ['特質', trait.rarity] })
   }
   const shouldRetire = updatedFighter.age >= 38 || Math.min(...Object.values(updatedFighter.health)) <= CAREER_HEALTH_RETIREMENT_THRESHOLD
-  const offerResult = generateOffers(updatedFighter, opponents, state.rng)
+  const wonTitle = won && (titleRole === 'challenge' || titleRole === 'defense')
+  // A successful defense re-opens the same move-up decision. World has no
+  // higher league, so a World defense simply returns to ordinary offers.
+  const promotionTo = wonTitle && league ? NEXT_LEAGUE[league] : undefined
+  const offerResult = generateOffers(updatedFighter, opponents, offerStreams)
   return {
     ...state,
     fighter: updatedFighter,
@@ -2055,7 +2445,9 @@ function processFightResult(state: GameState): GameState {
     offerRefreshUsed: false,
     stage: nextStage,
     phase: 'growth',
-    growthDestination: shouldRetire ? 'retirement' : 'offer',
+    growthDestination: shouldRetire ? 'retirement' : promotionTo ? 'league-decision' : 'offer',
+    promotionFrom: promotionTo ? league : undefined,
+    promotionTo,
     insightGained: undefined,
     traitAwards,
     fight: undefined,
@@ -2075,7 +2467,8 @@ function makeBiography(state: GameState): Biography {
   const hybrid = TECHNIQUE_NODES.find((node) => node.branch === 'hybrid' && fighter.unlockedNodes.includes(node.id))
   const weakestHealth = (Object.entries(fighter.health) as Array<[HealthPart, number]>).sort((a, b) => a[1] - b[1])[0]
   const important = [...fighter.history].sort((a, b) => b.importance - a.importance || a.year - b.year).slice(0, 4)
-  const title = fighter.history.some((entry) => entry.title === '世界冠軍之夜') ? '在國際舞台登頂的冠軍' : fighter.wins > fighter.losses ? '打出自己風格的職業拳手' : '一次次敗退，卻從未停止上場的人'
+  const leagueTitles = (Object.keys(fighter.leagueRecords) as LeagueId[]).filter((league) => (fighter.leagueRecords[league]?.titles ?? 0) > 0)
+  const title = leagueTitles.includes('world') || fighter.history.some((entry) => entry.title.includes('世界聯盟冠軍') || entry.title === '世界冠軍之夜') ? '在國際舞台登頂的冠軍' : fighter.wins > fighter.losses ? '打出自己風格的職業拳手' : '一次次敗退，卻從未停止上場的人'
   const definingPerson = fighter.relationships.sort((a, b) => b.trust - a.trust)[0]
   const style = hybrid?.name ?? `${BRANCH_META[(Object.entries(fighter.technique) as Array<[Branch, number]>).sort((a, b) => b[1] - a[1])[0][0]].name}專家`
   const financialLegacy = [...fighter.history].reverse().find((entry) => entry.tags.includes('傳承'))?.summary
@@ -2087,7 +2480,7 @@ function makeBiography(state: GameState): Biography {
     turningPoints: important, unlockedNodes: fighter.unlockedNodes,
     startingExperience: fighter.startingExperience,
     finalSkills: Object.fromEntries(BRANCHES.map((branch) => [branch, skillLevel(fighter.skills[branch].xp)])) as Biography['finalSkills'],
-    learnedMoves: fighter.learnedMoves, traits: fighter.traits, financialLegacy,
+    learnedMoves: fighter.learnedMoves, traits: fighter.traits, leagueTitles, financialLegacy,
     retiredAt: fighter.age, createdAt: Date.UTC(fighter.year, 0, fighter.evidence.fights + 1),
   }
 }
@@ -2130,10 +2523,27 @@ function selectOffer(state: GameState, offerId: string): GameState {
 
 function declineOffers(state: GameState): GameState {
   if (state.phase !== 'offer') return state
-  const fighter = { ...state.fighter, age: state.fighter.age + 1, year: state.fighter.year + 1, ranking: clamp(state.fighter.ranking + 3, 1, 99), promoterTrust: clamp(state.fighter.promoterTrust - 8), fatigue: clamp(state.fighter.fatigue - 18) }
+  const fighter = structuredClone(state.fighter)
+  fighter.age += 1; fighter.year += 1
+  let opponents = state.opponents
+  if (fighter.leagueStanding?.status === 'ranked') {
+    const previousRank = fighter.leagueStanding.rank
+    const nextRank = previousRank + 3
+    fighter.leagueStanding = nextRank > 15 ? { league: fighter.leagueStanding.league, status: 'unranked' } : { ...fighter.leagueStanding, rank: nextRank }
+    opponents = shiftRanksForPlayerLoss(opponents, fighter.leagueStanding.league, previousRank, nextRank > 15 ? undefined : nextRank)
+    syncLegacyRanking(fighter)
+  }
+  fighter.promoterTrust = clamp(fighter.promoterTrust - 8)
+  fighter.fatigue = clamp(fighter.fatigue - 18)
   if (fighter.age >= 38) return retireGame({ ...state, fighter }, 'age-limit')
-  const offerResult = generateOffers(fighter, state.opponents, state.rng)
-  return { ...state, fighter, rng: offerResult.rng, offers: offerResult.offers, offerRefreshUsed: false, lastMessage: '你拒絕了所有邀約。身體得到休息，但排名下滑，聯盟也漸漸失去耐心。' }
+  if (fighter.leagueStanding?.status === 'unranked') {
+    const roster = ensureLeagueRosters(fighter, opponents, state.rng, state.seed)
+    opponents = roster.opponents
+    const offerResult = generateOffers(fighter, opponents, roster.rng)
+    return { ...state, fighter, opponents, rng: offerResult.rng, offers: offerResult.offers, offerRefreshUsed: false, lastMessage: '你拒絕了所有邀約。身體得到休息，但排名下滑，聯盟也漸漸失去耐心。' }
+  }
+  const offerResult = generateOffers(fighter, opponents, state.rng)
+  return { ...state, fighter, opponents, rng: offerResult.rng, offers: offerResult.offers, offerRefreshUsed: false, lastMessage: fighter.leagueStanding?.status === 'champion' ? '你拒絕了所有邀約。冠軍頭銜仍在，但聯盟開始催促下一場衛冕。' : '你拒絕了所有邀約。身體得到休息，但排名下滑，聯盟也漸漸失去耐心。' }
 }
 
 function purchaseOfferRefresh(state: GameState): GameState {
@@ -2152,6 +2562,27 @@ function purchaseOfferRefresh(state: GameState): GameState {
     people: [], importance: 2, tags: ['金錢', '合約'],
   })
   return { ...state, fighter, rng: offerResult.rng, offers: offerResult.offers, offerRefreshUsed: true, lastMessage: '你用積蓄保住了時間，也換來一組新的對手選擇。' }
+}
+
+function chooseLeagueFuture(state: GameState, choice: 'promote' | 'defend'): GameState {
+  if (state.phase !== 'league-decision' || !state.promotionFrom || !state.promotionTo) return state
+  const from = state.promotionFrom
+  const to = state.promotionTo
+  if (choice === 'defend') {
+    const offerResult = generateOffers(state.fighter, state.opponents, state.rng)
+    return { ...state, phase: 'offer', rng: offerResult.rng, offers: offerResult.offers, growthDestination: undefined, promotionFrom: undefined, promotionTo: undefined, offerRefreshUsed: false, lastMessage: `你選擇留在${LEAGUE_LABELS[from]}衛冕。下一輪邀約會由前幾名挑戰者組成。` }
+  }
+  const fighter = structuredClone(state.fighter)
+  fighter.leagueStanding = { league: to, status: 'unranked' }
+  fighter.leagueRecords[to].winStreak = 0
+  fighter.leagueRecords[to].consecutiveWins = 0
+  syncLegacyRanking(fighter)
+  const restoredOldLeague = restoreVacatedLeagueChampion(state.opponents, from)
+  const roster = ensureLeagueRosters(fighter, restoredOldLeague, state.rng, state.seed)
+  const oldLeagueOpponents = roster.opponents
+  fighter.history.push({ id: `promotion-${to}-${fighter.evidence.fights}`, year: fighter.year, age: fighter.age, title: `加入${LEAGUE_LABELS[to]}`, summary: `你離開${LEAGUE_LABELS[from]}冠軍的位置，帶著新的壓力進入更強的${LEAGUE_LABELS[to]}；在這裡，你必須重新從未排名開始證明自己。`, people: [], importance: 3, tags: ['晉級', LEAGUE_LABELS[to]] })
+  const offerResult = generateOffers(fighter, oldLeagueOpponents, roster.rng)
+  return { ...state, fighter, opponents: oldLeagueOpponents, stage: to, phase: 'offer', rng: offerResult.rng, offers: offerResult.offers, growthDestination: undefined, promotionFrom: undefined, promotionTo: undefined, offerRefreshUsed: false, lastMessage: `你加入${LEAGUE_LABELS[to]}，新的排名從未排名開始。` }
 }
 
 export function advance(state: GameState, command: GameCommand): TransitionResult {
@@ -2221,7 +2652,13 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
       const reason = Math.min(...Object.values(state.fighter.health)) <= CAREER_HEALTH_RETIREMENT_THRESHOLD ? 'injury' : 'age-limit'
       next = retireGame({ ...state, growthDestination: undefined, insightGained: undefined }, reason)
     } else {
-      next = { ...state, phase: state.growthDestination === 'offer' ? 'offer' : 'prefight', growthDestination: undefined, insightGained: undefined, traitAwards: undefined }
+      next = {
+        ...state,
+        phase: state.growthDestination === 'offer' ? 'offer' : state.growthDestination === 'league-decision' ? 'league-decision' : 'prefight',
+        growthDestination: undefined,
+        insightGained: undefined,
+        traitAwards: undefined,
+      }
     }
   }
   else if (command.type === 'START_FIGHT') next = startFight(state)
@@ -2234,6 +2671,7 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
   else if (command.type === 'SET_CORNER_ADJUSTMENT') next = setCornerAdjustment(state, command.adjustment)
   else if (command.type === 'CONTINUE_ROUND') next = continueRound(state)
   else if (command.type === 'ACK_FIGHT_RESULT' && state.phase === 'fight-result') next = processFightResult(state)
+  else if (command.type === 'CHOOSE_LEAGUE_FUTURE') next = chooseLeagueFuture(state, command.choice)
   else if (command.type === 'RETIRE' && state.phase !== 'retirement') next = retireGame(state, 'voluntary')
   return { state: next, events: next.lastMessage && next.lastMessage !== state.lastMessage ? [next.lastMessage] : [] }
 }
