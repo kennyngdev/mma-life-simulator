@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
-import { advance, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, getWeightOptions, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
+import { advance, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, getOpponent, getRelationshipBenefit, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
 import { aptitudeLabel, minimumMoveLevel, nextSkillThreshold, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
@@ -30,7 +30,6 @@ import type {
   RiskLabel,
   RoundPlan,
   StartingExperience,
-  WeightPlan,
 } from './game/types'
 import { t } from './i18n'
 
@@ -156,7 +155,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
       <section className="hero">
         <CageMark />
         <p className="eyebrow">MMA LIFE SIMULATOR</p>
-        <h1>拳途人生</h1>
+        <h1>拳途人生 Cage Life</h1>
         <p className="hero-copy">沒有人能學會所有招式再走進鐵籠。<br />一次次取捨，會決定你成為什麼樣的拳手。</p>
       </section>
 
@@ -247,7 +246,6 @@ function GameView({ game, dispatch, onNew, relaxedDrills }: { game: GameState; d
     case 'training-reward': return <TrainingRewardView game={game} dispatch={dispatch} />
     case 'life': return <LifeView game={game} dispatch={dispatch} />
     case 'growth': return <GrowthView game={game} dispatch={dispatch} />
-    case 'weight': return <WeightView game={game} dispatch={dispatch} />
     case 'prefight': return <PreFightView game={game} dispatch={dispatch} />
     case 'round-plan': return <RoundPlanView game={game} dispatch={dispatch} />
     case 'critical': return <CriticalView game={game} dispatch={dispatch} />
@@ -262,10 +260,6 @@ function RevealView({ game, dispatch }: ViewProps) {
   const fighter = game.fighter
   const regionProfile = REGION_PROFILES[fighter.region]
   const initialMoves = FIGHT_INTENTS.filter((move) => fighter.learnedMoves.includes(move.id))
-  const weightClasses = [...getWeightOptions(fighter.naturalWeight)].sort((a, b) => a.limit - b.limit)
-  const expectedWeightRange = weightClasses[0].name === weightClasses.at(-1)!.name
-    ? weightClasses[0].name
-    : `${weightClasses[0].name}～${weightClasses.at(-1)!.name}`
   return (
     <Screen title="命運揭曉" kicker={`${REGION_LABELS[fighter.region]} · ${game.seed}`}>
       <div className="reveal-card">
@@ -284,7 +278,7 @@ function RevealView({ game, dispatch }: ViewProps) {
         <Metric label="身高" value={`${fighter.heightCm} cm`} note="影響站立距離與重心" />
         <Metric label="臂展" value={`${fighter.reachCm} cm`} note={`${fighter.reachCm - fighter.heightCm >= 4 ? '遠距覆蓋較長' : fighter.reachCm - fighter.heightCm <= -2 ? '近身結構緊湊' : '接近身高比例'}`} />
         <Metric label="生涯起點" value={experienceLabel(fighter.startingExperience)} note={STAGE_LABELS[game.stage]} />
-        <Metric label="預期量級區間" value={expectedWeightRange} note="依減重策略而定" />
+        <Metric label="比賽量級" value={fighter.weightClass} note="依體格與自然體重安排" />
       </div>
       <SkillOverview fighter={fighter} />
       <section><SectionTitle title="天生特質" subtitle="稀有度影響力量；每項效果都有明確生效條件。" /><TraitGrid traits={fighter.traits} /></section>
@@ -365,35 +359,40 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
     const relationship = game.fighter.relationships.find((item) => item.role === role)
     return relationship ? getRelationshipBenefit(relationship) : undefined
   }
-  const techniqueActions: Array<{ id: CampAction; name: string; detail: string; risk: string }> = [
-    { id: 'technique', name: '技術訓練', detail: `累積${BRANCH_META[branch].name} XP，完成後從 3 個招式中選擇 1 個學會`, risk: '疲勞低' },
+  const techniqueActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
+    { id: 'technique', name: '技術訓練', detail: `穩定累積${BRANCH_META[branch].name} XP；有新招式時可從最多 4 招中選 2 招學會`, risk: '增加疲勞', edge: '爭取額外 XP' },
   ]
-  const generalActions: Array<{ id: CampAction; name: string; detail: string; risk: string }> = [
-    { id: 'film', name: '影片研究', detail: '研究對手習慣，讓勝算估計更準確', risk: '增加情報' },
-    { id: 'recovery', name: '休養治療', detail: '降低疲勞，讓受損部位慢慢恢復', risk: '不會成長' },
+  const generalActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
+    { id: 'film', name: '影片研究', detail: '研究對手習慣，穩定增加情報與戰術智商', risk: '疲勞 +3', edge: '爭取更多情報' },
+    { id: 'recovery', name: '休養治療', detail: '穩定降低疲勞，讓受損部位逐步恢復', risk: '不會增加技能 XP', edge: '爭取更多恢復' },
   ]
+  const renderActivity = (action: { id: CampAction; name: string; detail: string; risk: string; edge: string }, actionBranch?: Branch) => {
+    const benefit = benefitFor(action.id)
+    const unavailable = game.campActions.length >= 3
+    return <article className="camp-activity" key={action.id}>
+      <div className="camp-activity-copy"><strong>{action.name}</strong><span>{action.detail}</span>{benefit && <small>{benefit.effect}</small>}<em>{benefit?.tierLabel ?? action.risk}</em></div>
+      <div className="camp-activity-actions">
+        <button type="button" className="camp-standard-action" disabled={unavailable} onClick={() => dispatch({ type: 'COMPLETE_CAMP_ACTIVITY', action: action.id, branch: actionBranch })}>正常完成</button>
+        <button type="button" className="camp-edge-action" disabled={unavailable} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, branch: actionBranch, relaxedTiming: relaxedDrills })}>挑戰：{action.edge}</button>
+      </div>
+    </article>
+  }
   return (
     <Screen title="訓練營" kicker={`第 ${game.fighter.evidence.fights + 1} 場比賽`}>
       <ContextStrip fighter={game.fighter} />
       <RelationshipSupport relationships={game.fighter.relationships} />
       <div className="budget-row"><span>本次營隊</span><div>{[0, 1, 2].map((slot) => <i key={slot} className={slot < game.campActions.length ? 'spent' : ''} />)}</div><strong>剩餘 {3 - game.campActions.length}</strong></div>
+      <p className="camp-flow-note">熟悉或重複的安排可直接以「正常完成」結算。只有想把這次成果推得更高時，才進入挑戰。</p>
       <fieldset className="branch-selector">
         <legend>技術焦點</legend>
         <div className="branch-tabs five">{BRANCHES.map((value) => <button key={value} className={branch === value ? 'selected' : ''} onClick={() => setBranch(value)}>{BRANCH_META[value].short}<small>{BRANCH_META[value].name}</small></button>)}</div>
         <SkillProgressCard branch={branch} fighter={game.fighter} />
-        <div className="choice-list">
-          {techniqueActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, branch, relaxedTiming: relaxedDrills })}>
-            <strong>{action.name}</strong><span>{action.detail}</span>{benefitFor(action.id) && <small>{benefitFor(action.id)?.effect}</small>}<em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
-          </button>)}
-        </div>
+        <div className="camp-activity-list">{techniqueActions.map((action) => renderActivity(action, branch))}</div>
       </fieldset>
       <SectionTitle title="通用訓練" subtitle="不論本次主練哪一門技術，都可以安排以下項目。" />
-      <div className="choice-list">
-        {generalActions.map((action) => <button key={action.id} className="choice-row" disabled={game.campActions.length >= 3} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, relaxedTiming: relaxedDrills })}>
-          <strong>{action.name}</strong><span>{action.detail}</span>{benefitFor(action.id) && <small>{benefitFor(action.id)?.effect}</small>}<em>{benefitFor(action.id)?.tierLabel ?? action.risk}</em>
-        </button>)}
-      </div>
-      <div className="camp-log">{relaxedDrills ? '寬鬆節奏：讀取與執行窗口更長，最高獎勵不變。' : ''}{game.campActions.length ? `已完成：${game.campDrillHistory.map((result) => `${campLabel(result.kind)} · ${Math.round(result.score * 100)}%`).join(' → ')}` : relaxedDrills ? '' : '已完成：尚未安排'}</div>
+      <div className="camp-activity-list">{generalActions.map((action) => renderActivity(action))}</div>
+      <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
+      <div className="camp-log">{relaxedDrills ? '寬鬆節奏只影響挑戰的讀取與操作窗口，最高獎勵不變。 ' : ''}{game.campActions.length ? `已完成：${game.campDrillHistory.map((result) => `${campLabel(result.kind)} · ${Math.round(result.score * 100)}%`).join(' → ')}` : '已完成：尚未安排'}</div>
     </Screen>
   )
 }
@@ -402,23 +401,17 @@ function campLabel(action: CampAction) {
   return ({ technique: '技術', film: '研究', recovery: '恢復' } as const)[action]
 }
 
+function CampActivitySummary({ outcome }: { outcome?: GameState['campDrillHistory'][number] }) {
+  if (!outcome) return null
+  const heading = outcome.source === 'edge' ? '挑戰成果' : outcome.source === 'normal' ? '正常完成' : '訓練成果'
+  return <aside className="camp-activity-summary" aria-label="最近一次訓練成果"><div><span>{heading}</span><strong>{campLabel(outcome.kind)} · {outcome.label}</strong></div><p>{outcome.summary}</p><div>{outcome.effects.map((effect) => <b key={effect}>{effect}</b>)}</div></aside>
+}
+
 function CampDrillView({ game, dispatch }: ViewProps) {
   const drill = game.activeCampDrill!
-  const outcome = game.campDrillOutcome
-  if (outcome) {
-    return <Screen title="訓練結果" kicker={`${outcome.label} · ${Math.round(outcome.score * 100)}%`}>
-      <article className="drill-result-card">
-        <span aria-hidden="true">✓</span>
-        <h2>{campLabel(outcome.kind)}完成</h2>
-        <p>{outcome.summary}</p>
-        <div className="drill-effect-list">{outcome.effects.map((effect) => <b key={effect}>{effect}</b>)}</div>
-      </article>
-      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_CAMP_DRILL_RESULT' })}>{outcome.kind === 'technique' && game.trainingMoveChoices?.length ? '選擇這次學會的招式' : game.campActions.length >= 3 ? '完成營隊，處理生活事件' : '回到訓練營'}</button></ActionDock>
-    </Screen>
-  }
-  return <Screen title={drill.title} kicker={`營隊訓練 ${game.campActions.length + 1}/3`}>
+  return <Screen title="挑戰額外收益" kicker={`${drill.title} · 營隊訓練 ${game.campActions.length + 1}/3`}>
     <ContextStrip fighter={game.fighter} />
-    <article className="drill-brief"><span>{campLabel(drill.kind)}</span><p>{drill.instruction}</p><small>{drill.relaxedTiming ? '寬鬆節奏已開啟：窗口更長、更寬，最高獎勵不變。' : '完成這個短訓練才會消耗本次時段；表現會帶來額外收益。'}</small></article>
+    <article className="drill-brief"><span>{campLabel(drill.kind)} · 正常收益已保留</span><p>{drill.instruction}</p><small>{drill.relaxedTiming ? '寬鬆節奏已開啟：窗口更長、更寬，最高獎勵不變。' : '這是選擇性挑戰：即使表現不理想，也會保有正常訓練的穩定收益。'}</small></article>
     {drill.mode === 'combo' ? <ComboDrill challenge={drill} dispatch={dispatch} />
       : drill.mode === 'film-study' ? <FilmStudyDrill challenge={drill} dispatch={dispatch} />
         : drill.kind === 'recovery' ? <RecoveryDrill challenge={drill} dispatch={dispatch} />
@@ -435,6 +428,7 @@ function TrainingRewardView({ game, dispatch }: ViewProps) {
   const selected = game.trainingMoveSelections ?? []
   const required = Math.min(2, moves.length)
   return <Screen title="把訓練變成你的招式" kicker={`${BRANCH_META[branch].name} · Lv.${skillLevel(game.fighter.skills[branch].xp)}`}>
+    <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
     <p className="lead">{moves.length >= 4 ? '從四條路線選擇兩招，建立下一場就能使用的技術組合。' : `這個分支還有 ${moves.length} 招可學；選擇 ${required} 招帶進下一場比賽。`}沒有重抽；確認前可以重新選擇。</p>
     <p className="training-selection-status" role="status">已選 {selected.length}／{required} 招</p>
     <div className="move-learning-list">{moves.map((move) => {
@@ -657,6 +651,7 @@ function LifeView({ game, dispatch }: ViewProps) {
   const person = game.fighter.relationships.find((item) => item.id === event.personId)!
   return (
     <Screen title={event.title} kicker={event.region ? `${REGION_LABELS[event.region]} · 家鄉機會` : '拳館之外'}>
+      <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
       <div className="person-chip"><span>{person.role === 'coach' ? '教' : person.role === 'family' ? '家' : '伴'}</span><div><strong>{person.name}</strong><small>{person.status}</small></div></div>
       <p className="story-copy">{event.description}</p>
       <div className="choice-list">
@@ -695,22 +690,9 @@ function GrowthView({ game, dispatch }: ViewProps) {
       {awards.length ? <div className="trait-awards">{awards.map((trait) => trait && <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity)}</span><h2>{trait.name}</h2><p>{trait.description}</p><strong>{trait.effect}</strong><small>生效：{trait.condition}</small></article>)}</div>
         : <div className="growth-complete"><span>✓</span><div><strong>沒有憑空出現的新能力</strong><small>真正的招式來自訓練；重複的實戰行為則會逐步形成特質。</small></div></div>}
       {game.fighter.traitProgress.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="第一次做出符合條件的表現後，進度會保持可見。" /><TraitProgressList fighter={game.fighter} /></>}
-      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : '繼續生涯'}</button></ActionDock>
+      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : game.growthDestination === 'prefight' ? '查看賽前簡報' : '繼續生涯'}</button></ActionDock>
     </Screen>
   )
-}
-
-function WeightView({ game, dispatch }: ViewProps) {
-  const options = getWeightOptions(game.fighter.naturalWeight)
-  const copy: Record<WeightPlan, { name: string; detail: string; effect: string }> = {
-    safe: { name: '保守減重', detail: '少脫一點水，讓身體保持在最佳狀態。', effect: '狀態最佳 · 體型較小' },
-    standard: { name: '標準減重', detail: '承受適度疲勞，換取同量級中正常的體型。', effect: '疲勞 +5 · 均衡' },
-    aggressive: { name: '激進減重', detail: '大幅脫水以換取體型優勢，但會傷害恢復能力與長期健康。', effect: '疲勞 +13 · 頭部更脆弱' },
-  }
-  return <Screen title="決定減重策略" kicker={`${game.fighter.heightCm} cm · 臂展 ${game.fighter.reachCm} cm · 自然體重 ${game.fighter.naturalWeight} kg`}>
-    <p className="lead">降到更輕的量級能帶來體型優勢，但脫水越嚴重，體力和恢復狀況就越差。</p>
-    <div className="choice-list">{options.map((option) => <button className={`choice-row weight-${option.plan}`} key={option.plan} onClick={() => dispatch({ type: 'SET_WEIGHT_PLAN', plan: option.plan })}><strong>{copy[option.plan].name}</strong><span>{copy[option.plan].detail}</span><em>{copy[option.plan].effect}</em></button>)}</div>
-  </Screen>
 }
 
 function PreFightView({ game, dispatch }: ViewProps) {
@@ -733,7 +715,7 @@ function PreFightView({ game, dispatch }: ViewProps) {
     </div>
     <div className="briefing">
       <Metric label="比賽" value={offer.titleFight ? '五回合冠軍戰' : '三回合'} note={offer.riskLabel} />
-      <Metric label="量級策略" value={`${game.fighter.weightClass} · ${weightPlanLabel(game.fighter.weightPlan)}`} note={`準備度 ${game.fighter.readiness}`} />
+      <Metric label="比賽量級" value={game.fighter.weightClass} note={`準備度 ${game.fighter.readiness}`} />
       <Metric label="情報" value={game.scouting >= 50 ? '充分' : game.scouting >= 25 ? '基本' : '有限'} note={`最強 ${BRANCH_META[strength].name}／最弱 ${BRANCH_META[opponent.weakness].name}`} />
       <Metric label="技術對位" value={`${BRANCH_META[playerStrength].name} 對 ${BRANCH_META[opponent.weakness].name}`} note={`你的弱項 ${BRANCH_META[playerWeakness].name}／他最強 ${BRANCH_META[strength].name}`} />
       <Metric label="賽前評估" value={forecast >= 5 ? '你略佔優勢' : forecast <= -5 ? '對手略佔優勢' : '旗鼓相當'} note={`評級 ${playerRating} vs ${opponentRating} · 狀態 ${readinessForecast >= 0 ? '+' : ''}${readinessForecast} · 情報 +${scoutingForecast}`} />
@@ -774,10 +756,6 @@ function coachVerdict(opponent: Opponent, risk: RiskLabel) {
         ? '他略佔上風，接了就得按計畫打。'
         : '這不是普通的考驗，現在接要有付出代價的準備。'
   return `${opening}別在${strength}跟他硬碰，想辦法把戰局帶向${weakness}。`
-}
-
-function weightPlanLabel(plan: WeightPlan) {
-  return ({ safe: '保守減重', standard: '標準減重', aggressive: '激進減重' } as const)[plan]
 }
 
 function fightDamagePartLabel(part?: FightDamagePart) {
@@ -1245,8 +1223,8 @@ function RetirementView({ game, onNew }: { game: GameState; onNew: () => void })
 }
 
 async function shareBiography(bio: Biography) {
-  const text = `《拳途人生》${bio.name}｜${REGION_LABELS[bio.region]}${bio.hometown ? `・${bio.hometown}` : ''}｜${bio.record}\n${bio.title}\n${bio.summary}${bio.financialLegacy ? `\n留下的東西：${bio.financialLegacy}` : ''}\nSeed：${bio.seed}`
-  if (navigator.share) await navigator.share({ title: `拳途人生｜${bio.name}`, text })
+  const text = `《拳途人生 Cage Life》${bio.name}｜${REGION_LABELS[bio.region]}${bio.hometown ? `・${bio.hometown}` : ''}｜${bio.record}\n${bio.title}\n${bio.summary}${bio.financialLegacy ? `\n留下的東西：${bio.financialLegacy}` : ''}\nSeed：${bio.seed}`
+  if (navigator.share) await navigator.share({ title: `拳途人生 Cage Life｜${bio.name}`, text })
   else { await navigator.clipboard.writeText(text); window.alert('生涯摘要已複製。') }
 }
 
@@ -1528,7 +1506,7 @@ function StatusDetails({ game }: { game: GameState; dispatch: (command: GameComm
     <SectionTitle title="家鄉與賽事生態" subtitle="出身地影響人物、早期對手、地方賽事與經濟，不會直接改變戰鬥能力。" />
     <article className="status-region-card"><div><span>{REGION_LABELS[fighter.region]} · {fighter.hometown}</span><strong>{REGION_PROFILES[fighter.region].circuit}</strong></div>{fighter.alias && <em>{fighter.alias}</em>}<p>{REGION_PROFILES[fighter.region].description}</p><small>{REGION_PROFILES[fighter.region].opponentMix} · 資金 {formatRegionalMoney(fighter.money, fighter.region)} · {careerRunwayLabel(fighter)}</small></article>
     <SectionTitle title="體格資料" subtitle="身高與臂展由 Seed 決定，會影響遠距及近身對位。" />
-    <div className="health-grid"><Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} /><Metric label="身高" value={`${fighter.heightCm} cm`} note="影響重心與對戰距離" /><Metric label="臂展" value={`${fighter.reachCm} cm`} note={`臂展差 ${fighter.reachCm - fighter.heightCm >= 0 ? '+' : ''}${fighter.reachCm - fighter.heightCm} cm`} /><Metric label="目前量級" value={fighter.weightClass} note={weightPlanLabel(fighter.weightPlan)} /></div>
+    <div className="health-grid"><Metric label="自然體重" value={`${fighter.naturalWeight} kg`} note={fighter.frame} /><Metric label="身高" value={`${fighter.heightCm} cm`} note="影響重心與對戰距離" /><Metric label="臂展" value={`${fighter.reachCm} cm`} note={`臂展差 ${fighter.reachCm - fighter.heightCm >= 0 ? '+' : ''}${fighter.reachCm - fighter.heightCm} cm`} /><Metric label="比賽量級" value={fighter.weightClass} note="依體格與自然體重安排" /></div>
     <SkillOverview fighter={fighter} />
     <SectionTitle title="已學招式" subtitle={`${fighter.learnedMoves.length} 招；戰鬥中只會出現已學招式與緊急基本動作。`} />
     <MoveChips moveIds={fighter.learnedMoves} />

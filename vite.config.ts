@@ -13,9 +13,9 @@ export default defineConfig(({ mode }) => ({
       registerType: 'autoUpdate',
       includeAssets: ['cage-mark.svg'],
       manifest: {
-        name: '拳途人生',
+        name: '拳途人生 Cage Life',
         short_name: '拳途人生',
-        description: '一名綜合格鬥拳手從無名到退役的完整人生。',
+        description: '拳途人生 Cage Life：一名綜合格鬥拳手從無名到退役的完整人生。',
         theme_color: '#12110f',
         background_color: '#12110f',
         display: 'standalone',

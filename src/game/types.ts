@@ -7,7 +7,6 @@ export type SkillLevel = 0 | 1 | 2 | 3 | 4 | 5
 export type TraitRarity = 'common' | 'uncommon' | 'rare' | 'legendary'
 export type MindStat = 'fightIQ' | 'composure'
 export type HealthPart = 'head' | 'hands' | 'knees' | 'torso'
-export type WeightPlan = 'safe' | 'standard' | 'aggressive'
 export type CampAction = 'technique' | 'film' | 'recovery'
 export type CampDrillKind = CampAction
 export type StrikeKind = 'punch' | 'kick'
@@ -43,7 +42,6 @@ export type GamePhase =
   | 'training-reward'
   | 'life'
   | 'growth'
-  | 'weight'
   | 'prefight'
   | 'round-plan'
   | 'critical'
@@ -185,8 +183,6 @@ export interface FighterState {
   heightCm: number
   reachCm: number
   weightClass: string
-  weightLimit: number
-  weightPlan: WeightPlan
   frame: string
   technique: Record<Branch, number>
   techniquePotential: Record<Branch, number>
@@ -287,6 +283,8 @@ export interface CampDrillBase {
   instruction: string
   durationMs: number
   relaxedTiming?: boolean
+  /** Challenges are optional attempts to improve on the already-bankable standard result. */
+  edge?: boolean
 }
 
 export interface LegacyCampDrillChallenge extends CampDrillBase {
@@ -341,6 +339,7 @@ export interface CampDrillOutcome {
   branch?: Branch
   score: number
   label: '穩定完成' | '銳利表現' | '完美節奏'
+  source?: 'normal' | 'edge'
   effects: string[]
   summary: string
 }
@@ -647,9 +646,9 @@ export interface RngStreams {
 }
 
 export interface GameState {
-  saveVersion: 12
-  rulesVersion: '0.10.0'
-  contentVersion: '1.3.0'
+  saveVersion: number
+  rulesVersion: string
+  contentVersion: string
   seed: string
   phase: GamePhase
   stage: Stage
@@ -668,7 +667,7 @@ export interface GameState {
   trainingMoveBranch?: Branch
   lifeEvent?: LifeEvent
   lifeEventResult?: LifeEventResult
-  growthDestination?: 'weight' | 'offer' | 'retirement'
+  growthDestination?: 'prefight' | 'offer' | 'retirement'
   insightGained?: number
   traitAwards?: string[]
   scouting: number
@@ -682,9 +681,9 @@ export type GameCommand =
   | { type: 'SELECT_OFFER'; offerId: string }
   | { type: 'PURCHASE_OFFER_REFRESH' }
   | { type: 'DECLINE_OFFERS' }
+  | { type: 'COMPLETE_CAMP_ACTIVITY'; action: CampAction; branch?: Branch }
   | { type: 'START_CAMP_DRILL'; action: CampAction; branch?: Branch; relaxedTiming?: boolean }
   | { type: 'RESOLVE_CAMP_DRILL'; result: CampDrillResult }
-  | { type: 'ACK_CAMP_DRILL_RESULT' }
   | { type: 'TOGGLE_TRAINING_MOVE'; moveId: string }
   | { type: 'CONFIRM_TRAINING_MOVES' }
   | { type: 'CANCEL_CAMP_DRILL' }
@@ -692,7 +691,6 @@ export type GameCommand =
   | { type: 'ACK_LIFE_RESULT' }
   | { type: 'UNLOCK_NODE'; nodeId: string }
   | { type: 'CONTINUE_GROWTH' }
-  | { type: 'SET_WEIGHT_PLAN'; plan: WeightPlan }
   | { type: 'START_FIGHT' }
   | { type: 'SET_ROUND_PLAN'; plan: RoundPlan }
   | { type: 'ACK_POSITION_ENTRY' }

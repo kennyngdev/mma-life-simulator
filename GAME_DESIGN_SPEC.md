@@ -1,4 +1,4 @@
-# Cage Life — Canonical Game Design Specification
+# 拳途人生 Cage Life — Canonical Game Design Specification
 
 Status: accepted design baseline  
 Last consolidated: 2026-08-29
@@ -17,7 +17,7 @@ When a new explicit product decision conflicts with this document, the new decis
 
 ## 2. Design thesis
 
-`Cage Life` is a seeded, mobile-first MMA career life simulation. A run should answer:
+`拳途人生 Cage Life` is a seeded, mobile-first MMA career life simulation. A run should answer:
 
 > Can this particular fighter turn their body, background, aptitudes, learned techniques, relationships, and accumulated fight history into a meaningful career before injury, time, and stronger opposition close the window?
 
@@ -29,7 +29,7 @@ The intended repeated loop is:
 reveal a particular fighter
 → choose an opponent and the risk to accept
 → spend three camp slots preparing
-→ resolve a life event and weight decision
+→ resolve a life event
 → choose a fight plan and position-specific actions
 → persist damage, relationships, evidence, moves, traits, and history
 → face the next career question or retire into a biography
@@ -82,6 +82,12 @@ Ordinary matchmaking is led by career ranking rather than competitive rating alo
 
 Ranking movement must reflect the defeated opponent's standing. Beating a peer or lower-ranked opponent produces a modest two-place climb. Beating a higher-ranked opponent places the winner at or just behind that opponent: zero places behind for a gap below 10, one for 10–19, two for 20–29, and three for a gap of 30 or more. Thus a #59 fighter who defeats #9 becomes #12; the result cannot be compressed into a generic six-place gain.
 
+### 3.5 Weight-cut strategy — Deprecated
+
+Weight-cut planning is not part of the player loop. A fighter's displayed division is a stable presentation derived from natural body weight and has no readiness, fatigue, health, or competitive modifier. Do not restore a pre-fight dehydration choice unless a future explicit decision establishes a strategically central, evidence-backed replacement.
+
+Older saves on the removed weight screen must migrate directly to the pre-fight briefing without losing career progress.
+
 ## 4. Skills, training, and moves
 
 ### 4.1 Canonical skill model — Accepted
@@ -105,9 +111,17 @@ Level is an access gate and concise summary. Learned moves and earned traits are
 
 Each fight camp has three slots. The available activities are:
 
-- **Technique training**: the player chooses a branch, performs its drill, gains XP, and then chooses two actual moves to learn from up to four seeded, level-eligible unlearned moves. If fewer than two moves remain, the player learns every remaining offered move.
-- **Film study**: improves scouting accuracy and fight IQ at a small fatigue cost.
-- **Recovery**: reduces fatigue and restores health; it does not create skill growth.
+- **Technique training**: the player chooses a branch, receives a solid standard result immediately, and then chooses two actual moves to learn from up to four seeded, level-eligible unlearned moves. If fewer than two moves remain, the player learns every remaining offered move.
+- **Film study**: immediately improves scouting accuracy and fight IQ at a small fatigue cost.
+- **Recovery**: immediately reduces fatigue and restores health; it does not create skill growth.
+
+Every activity has a normal, auto-resolved result with a camp score of `0.70`. Repeating a familiar activity must not require a drill or a confirmation screen. The player may instead choose **Push for an edge**, which opens the action-specific minigame. Its raw performance is converted to a final score of:
+
+```text
+0.70 + 0.30 × raw drill score
+```
+
+The challenge can add XP, scouting, or recovery above the normal result, but cannot reduce the standard result. Its outcome should flow directly to the next meaningful decision (for example, move selection or the next camp slot), with a compact causal recap rather than a separate acknowledgement screen.
 
 Technique XP is:
 

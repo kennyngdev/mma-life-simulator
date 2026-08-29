@@ -1,6 +1,6 @@
 import { openDB } from 'idb'
 import { BACKGROUNDS, REGION_PROFILES } from './content'
-import { generateOffers, rankingAfterWin } from './engine'
+import { generateOffers, getCompetitionWeightClass, rankingAfterWin } from './engine'
 import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LoadGameResult, Position, SaveEnvelope } from './types'
 
 const DATABASE = 'cage-life'
@@ -18,7 +18,7 @@ async function database() {
 export async function saveGame(game: GameState): Promise<void> {
   const db = await database()
   const envelope: SaveEnvelope = {
-    saveVersion: 12,
+    saveVersion: 13,
     rulesVersion: game.rulesVersion,
     contentVersion: game.contentVersion,
     savedAt: Date.now(),
@@ -31,23 +31,26 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
+  if (envelope.saveVersion === 13 && envelope.rulesVersion === '0.11.0' && envelope.contentVersion === '1.4.0') {
+    return { game: migrateVersion13(envelope.game) }
+  }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.10.0' && envelope.contentVersion === '1.3.0') {
-    return { game: restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)) }
+    return { game: migrateVersion13(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.10.0' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateRemovedSideControl(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))) }
+    return { game: migrateVersion13(migrateRemovedSideControl(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.3' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateRemovedSideControl(migrateCareerEndings(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))) }
+    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.2' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))) }
+    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.1' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))) }
+    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.9.0' && envelope.contentVersion === '1.2.0') {
-    return { game: migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game))))))) }
+    return { game: migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring(envelope.game)))))))) }
   }
   if (envelope.saveVersion === 12 && envelope.rulesVersion === '0.8.0' && envelope.contentVersion === '1.1.0') return { game: migrateVersion12(envelope.game) }
   if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0') return { game: migrateVersion11(envelope.game) }
@@ -254,6 +257,44 @@ export function removeRetiredSparring(game: unknown): GameState {
   }
 }
 
+type WeightCutPhase = GameState['phase'] | 'weight'
+type WeightCutGame = Omit<GameState, 'phase' | 'growthDestination' | 'fighter' | 'activeCampDrill' | 'campDrillOutcome'> & {
+  phase: WeightCutPhase
+  growthDestination?: GameState['growthDestination'] | 'weight'
+  fighter: GameState['fighter'] & { weightLimit?: number; weightPlan?: 'safe' | 'standard' | 'aggressive' }
+  activeCampDrill?: CampDrillChallenge
+  campDrillOutcome?: CampDrillOutcome
+}
+
+/**
+ * Removes the former weight-cut decision without interrupting active careers.
+ * The division becomes a stable expression of natural body weight; a save on
+ * the retired weight screen continues straight to its pre-fight briefing.
+ */
+export function migrateVersion13(game: unknown): GameState {
+  const legacy = structuredClone(game) as WeightCutGame
+  if (!legacy.fighter || !legacy.campActions || !legacy.campDrillHistory) throw new Error('無法讀取舊生涯存檔')
+  const { weightLimit: _retiredWeightLimit, weightPlan: _retiredWeightPlan, ...fighter } = legacy.fighter
+  const oldDrillResult = legacy.phase === 'camp-drill' && legacy.campDrillOutcome
+  const phaseAfterResult = legacy.trainingMoveChoices?.length ? 'training-reward' : legacy.campActions.length >= 3 ? 'life' : 'camp'
+  const phase = oldDrillResult ? phaseAfterResult : legacy.phase === 'weight' ? 'prefight' : legacy.phase
+  const growthDestination = legacy.growthDestination === 'weight' ? 'prefight' : legacy.growthDestination
+  const activeCampDrill = phase === 'camp-drill' && legacy.activeCampDrill
+    ? { ...legacy.activeCampDrill, edge: true }
+    : undefined
+  return {
+    ...legacy,
+    saveVersion: 13,
+    rulesVersion: '0.11.0',
+    contentVersion: '1.4.0',
+    phase,
+    growthDestination,
+    fighter: { ...fighter, weightClass: getCompetitionWeightClass(fighter.naturalWeight).name },
+    activeCampDrill,
+    campDrillOutcome: undefined,
+  } as GameState
+}
+
 type LegacyGame = Omit<GameState, 'saveVersion' | 'rulesVersion' | 'contentVersion' | 'fighter' | 'opponents' | 'campActions' | 'campDrillHistory' | 'activeCampDrill' | 'campDrillOutcome' | 'fight'> & {
   fighter: GameState['fighter'] & { body?: Record<string, number>; bodyPotential?: Record<string, number> }
   opponents: Array<GameState['opponents'][number] & { cardio?: number }>
@@ -379,12 +420,12 @@ type Version12Game = Omit<GameState, 'rulesVersion' | 'contentVersion' | 'traini
 export function migrateVersion12(game: unknown): GameState {
   const legacy = structuredClone(game) as Version12Game
   if (!legacy.fighter || !legacy.offers) throw new Error('無法讀取舊生涯存檔')
-  return migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring({
+  return migrateVersion13(migrateRemovedSideControl(migrateCareerEndings(migrateMatchmakingCredibility(migrateRankingCredibility(repairTitleCredibility(restoreBackgroundStartingMoves(removeRetiredSparring({
     ...legacy,
     trainingMoveSelections: legacy.phase === 'training-reward' ? legacy.trainingMoveSelections ?? [] : undefined,
     rulesVersion: '0.10.0',
     contentVersion: '1.3.0',
-  } as GameState)))))))
+  } as GameState))))))))
 }
 
 /** Backwards-compatible name used by legacy callers and migration tests. */

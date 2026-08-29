@@ -1,5 +1,5 @@
 const zhHant = {
-  appName: '拳途人生',
+  appName: '拳途人生 Cage Life',
   continue: '繼續',
   back: '返回',
   confirm: '確認',

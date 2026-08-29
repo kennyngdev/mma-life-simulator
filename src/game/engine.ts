@@ -76,7 +76,6 @@ import type {
   StartingExperience,
   TacticalMatchup,
   TransitionResult,
-  WeightPlan,
 } from './types'
 
 const HEALTH_PARTS: HealthPart[] = ['head', 'hands', 'knees', 'torso']
@@ -162,10 +161,13 @@ function generatedHometown(region: Region, streams: RngStreams, stream: keyof Rn
   return pick(streams, stream, REGION_PROFILES[region].hometowns)
 }
 
-function getWeightChoice(naturalWeight: number, plan: WeightPlan): (typeof WEIGHT_CLASSES)[number] {
-  const ratio = plan === 'safe' ? 0.95 : plan === 'standard' ? 0.91 : 0.87
-  const target = naturalWeight * ratio
-  return [...WEIGHT_CLASSES].reverse().find((weight) => weight.limit <= target + 1.5) ?? WEIGHT_CLASSES[0]
+/**
+ * A division is a stable presentation of the fighter's natural build, not a
+ * recurring dehydration choice. It intentionally has no readiness or health
+ * modifier attached to it.
+ */
+export function getCompetitionWeightClass(naturalWeight: number): (typeof WEIGHT_CLASSES)[number] {
+  return WEIGHT_CLASSES.find((weight) => naturalWeight <= weight.limit) ?? WEIGHT_CLASSES.at(-1)!
 }
 
 function stableOffset(key: string, min: number, max: number): number {
@@ -183,10 +185,6 @@ export function getAnthropometrics(seed: string, naturalWeight: number, identity
   const density = naturalWeight / ((heightCm / 100) ** 2)
   const frame = density >= 27.2 ? '厚實骨架' : density <= 22.8 ? '修長骨架' : '均衡骨架'
   return { heightCm, reachCm, frame }
-}
-
-export function getWeightOptions(naturalWeight: number) {
-  return (['safe', 'standard', 'aggressive'] as WeightPlan[]).map((plan) => ({ plan, ...getWeightChoice(naturalWeight, plan) }))
 }
 
 function baseTechnique(primary: Branch, secondary: Branch, streams: RngStreams): [Record<Branch, number>, RngStreams] {
@@ -276,7 +274,7 @@ export function createNewRun(input: NewRunInput): GameState {
   for (const branch of BRANCHES) techniquePotential[branch] = 96
   let relationships: Relationship[]
   ;[relationships, rng] = makeRelationships(input.region, background.primary, rng, [fighterName])
-  const weight = getWeightChoice(naturalWeight, 'standard')
+  const weight = getCompetitionWeightClass(naturalWeight)
   const unlockedNodes: string[] = []
   const mastery = Object.fromEntries(unlockedNodes.map((id) => [id, { value: 18, gainedThisFight: 0 }]))
   const backgroundMoves = background.startingMoves ?? []
@@ -296,7 +294,7 @@ export function createNewRun(input: NewRunInput): GameState {
     name: fighterName, alias, region: input.region, hometown, motive: input.motive, age: 18, year: 2026,
     backgroundId: background.id, background: background.name, backgroundDescription: background.description, startingExperience, naturalWeight,
     heightCm: anthropometrics.heightCm, reachCm: anthropometrics.reachCm, weightClass: weight.name,
-    weightLimit: weight.limit, weightPlan: 'standard', frame: anthropometrics.frame, technique, techniquePotential, skills, learnedMoves: [...new Set(learnedMoves)], traits, traitProgress: [],
+    frame: anthropometrics.frame, technique, techniquePotential, skills, learnedMoves: [...new Set(learnedMoves)], traits, traitProgress: [],
     mind: { fightIQ: 36, composure: 40 }, health: { head: 100, hands: 100, knees: 100, torso: 100 },
     fatigue: 0, readiness: 82, insight: 0, money: startingExperience === 'normie' ? 2_000 : startingExperience === 'semi-pro' ? 14_000 : 8_000,
     ranking: startingExperience === 'semi-pro' ? 70 : 99, reputation: startingExperience === 'semi-pro' ? 15 : 5,
@@ -309,7 +307,7 @@ export function createNewRun(input: NewRunInput): GameState {
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 12, rulesVersion: '0.10.0', contentVersion: '1.3.0', seed: input.seed.trim().toUpperCase(),
+    saveVersion: 13, rulesVersion: '0.11.0', contentVersion: '1.4.0', seed: input.seed.trim().toUpperCase(),
     phase: 'reveal', stage: stageFor(0, startingExperience), fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
     offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
@@ -811,10 +809,12 @@ function createCampDrill(state: GameState, kind: CampDrillKind, branch?: Branch,
   }, state.rng]
 }
 
+const STANDARD_CAMP_SCORE = 0.7
+
 function startCampDrill(state: GameState, action: CampAction, branch?: Branch, relaxedTiming = false): GameState {
   if (state.phase !== 'camp' || state.campActions.length >= 3) return state
   const [activeCampDrill, rng] = createCampDrill(state, action, branch, relaxedTiming)
-  return { ...state, rng, phase: 'camp-drill', activeCampDrill, campDrillOutcome: undefined, lastMessage: undefined }
+  return { ...state, rng, phase: 'camp-drill', activeCampDrill: { ...activeCampDrill, edge: true }, campDrillOutcome: undefined, lastMessage: undefined }
 }
 
 function drillScore(challenge: CampDrillChallenge, result: CampDrillResult): number | undefined {
@@ -844,14 +844,19 @@ function drillScore(challenge: CampDrillChallenge, result: CampDrillResult): num
   return result.kind === 'technique' ? accuracy * 0.7 + pace * 0.3 : accuracy * 0.85 + pace * 0.15
 }
 
-function drillLabel(score: number): CampDrillOutcome['label'] {
-  return score >= 0.8 ? '完美節奏' : score >= 0.5 ? '銳利表現' : '穩定完成'
+function drillLabel(score: number, source: 'normal' | 'edge'): CampDrillOutcome['label'] {
+  if (source === 'normal') return '穩定完成'
+  return score >= 0.93 ? '完美節奏' : score >= 0.8 ? '銳利表現' : '穩定完成'
 }
 
-function applyCampDrill(state: GameState, score: number): GameState {
-  const challenge = state.activeCampDrill!
-  const action = challenge.kind
-  const focus = challenge.branch ?? 'boxing'
+function applyCampActivity(
+  state: GameState,
+  action: CampAction,
+  branch: Branch | undefined,
+  score: number,
+  source: 'normal' | 'edge',
+): GameState {
+  const focus = branch ?? 'boxing'
   const repeats = state.campActions.filter((item) => item === action).length
   const fighter = structuredClone(state.fighter)
   const coachTier = relationshipTier(fighter.relationships.find((item) => item.role === 'coach')?.trust ?? 50)
@@ -911,7 +916,7 @@ function applyCampDrill(state: GameState, score: number): GameState {
   }
   fighter.readiness = clamp(110 - fighter.fatigue * 0.55)
   const outcome: CampDrillOutcome = {
-    kind: action, branch: challenge.branch, score: Math.round(score * 100) / 100, label: drillLabel(score), effects,
+    kind: action, branch, score: Math.round(score * 100) / 100, label: drillLabel(score, source), source, effects,
     summary: action === 'film' ? '你現在能更準確預判這場比賽的節奏。' : action === 'recovery' ? '身體重新跟上了訓練的節奏。' : `${BRANCH_META[focus].name}的動作開始變得更自然。`,
   }
   const campActions = [...state.campActions, action]
@@ -919,26 +924,31 @@ function applyCampDrill(state: GameState, score: number): GameState {
   if (campActions.length === 3) [lifeEvent, rng] = createLifeEvent({ ...state, fighter, rng })
   return {
     ...state, fighter, rng, scouting, campActions, lifeEvent,
-    campDrillHistory: [...state.campDrillHistory, outcome], campDrillOutcome: outcome,
+    campDrillHistory: [...state.campDrillHistory, outcome], campDrillOutcome: undefined,
     trainingMoveChoices, trainingMoveSelections, trainingMoveBranch,
     lastMessage: `${outcome.label}：${outcome.summary}`,
   }
 }
 
-function resolveCampDrill(state: GameState, result: CampDrillResult): GameState {
-  if (state.phase !== 'camp-drill' || !state.activeCampDrill || state.campDrillOutcome) return state
-  const score = drillScore(state.activeCampDrill, result)
-  if (score === undefined) return { ...state, lastMessage: '這次訓練資料不完整，請重新開始。' }
-  return applyCampDrill(state, score)
+function settleCampActivity(state: GameState): GameState {
+  const settled = { ...state, activeCampDrill: undefined, campDrillOutcome: undefined }
+  if (settled.trainingMoveChoices?.length) return { ...settled, phase: 'training-reward' }
+  return settled.campActions.length >= 3
+    ? { ...settled, phase: 'life' }
+    : { ...settled, phase: 'camp' }
 }
 
-function acknowledgeCampDrill(state: GameState): GameState {
-  if (state.phase !== 'camp-drill' || !state.campDrillOutcome) return state
-  const afterDrill = { ...state, activeCampDrill: undefined, campDrillOutcome: undefined }
-  if (state.trainingMoveChoices?.length) return { ...afterDrill, phase: 'training-reward' }
-  return state.campActions.length >= 3
-    ? { ...afterDrill, phase: 'life' }
-    : { ...afterDrill, phase: 'camp' }
+function completeCampActivity(state: GameState, action: CampAction, branch?: Branch): GameState {
+  if (state.phase !== 'camp' || state.campActions.length >= 3) return state
+  return settleCampActivity(applyCampActivity(state, action, branch, STANDARD_CAMP_SCORE, 'normal'))
+}
+
+function resolveCampDrill(state: GameState, result: CampDrillResult): GameState {
+  if (state.phase !== 'camp-drill' || !state.activeCampDrill || state.campDrillOutcome) return state
+  const rawScore = drillScore(state.activeCampDrill, result)
+  if (rawScore === undefined) return { ...state, lastMessage: '這次訓練資料不完整，請重新開始。' }
+  const score = STANDARD_CAMP_SCORE + rawScore * (1 - STANDARD_CAMP_SCORE)
+  return settleCampActivity(applyCampActivity(state, state.activeCampDrill.kind, state.activeCampDrill.branch, score, 'edge'))
 }
 
 function toggleTrainingMove(state: GameState, moveId: string): GameState {
@@ -968,20 +978,6 @@ function confirmTrainingMoves(state: GameState): GameState {
 
 function healthLabel(part: HealthPart): string {
   return ({ head: '頭部', hands: '雙手', knees: '膝腿', torso: '軀幹' } as const)[part]
-}
-
-function setWeightPlan(state: GameState, plan: WeightPlan): GameState {
-  if (state.phase !== 'weight') return state
-  const fighter = structuredClone(state.fighter)
-  const weight = getWeightChoice(fighter.naturalWeight, plan)
-  fighter.weightPlan = plan
-  fighter.weightClass = weight.name
-  fighter.weightLimit = weight.limit
-  const penalty = plan === 'safe' ? 0 : plan === 'standard' ? 5 : 13
-  fighter.fatigue = clamp(fighter.fatigue + penalty)
-  fighter.readiness = clamp(fighter.readiness - penalty * 0.7)
-  if (plan === 'aggressive') fighter.health.head = clamp(fighter.health.head - 2)
-  return { ...state, fighter, phase: 'prefight', lastMessage: plan === 'aggressive' ? '你換來了體型優勢，但嚴重脫水也讓身體幾乎沒有恢復餘地。' : '減重策略已經確定。' }
 }
 
 function planBranch(plan: RoundPlan): Branch {
@@ -2172,9 +2168,9 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
   else if (command.type === 'SELECT_OFFER') next = selectOffer(state, command.offerId)
   else if (command.type === 'PURCHASE_OFFER_REFRESH') next = purchaseOfferRefresh(state)
   else if (command.type === 'DECLINE_OFFERS') next = declineOffers(state)
+  else if (command.type === 'COMPLETE_CAMP_ACTIVITY') next = completeCampActivity(state, command.action, command.branch)
   else if (command.type === 'START_CAMP_DRILL') next = startCampDrill(state, command.action, command.branch, command.relaxedTiming)
   else if (command.type === 'RESOLVE_CAMP_DRILL') next = resolveCampDrill(state, command.result)
-  else if (command.type === 'ACK_CAMP_DRILL_RESULT') next = acknowledgeCampDrill(state)
   else if (command.type === 'TOGGLE_TRAINING_MOVE') next = toggleTrainingMove(state, command.moveId)
   else if (command.type === 'CONFIRM_TRAINING_MOVES') next = confirmTrainingMoves(state)
   else if (command.type === 'CANCEL_CAMP_DRILL' && state.phase === 'camp-drill' && !state.campDrillOutcome) next = { ...state, phase: 'camp', activeCampDrill: undefined, lastMessage: '訓練尚未計入，你可以重新安排這個時段。' }
@@ -2203,7 +2199,7 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
           ...state,
           fighter,
           phase: 'growth',
-          growthDestination: 'weight',
+          growthDestination: 'prefight',
           insightGained: undefined,
           lifeEventResult: {
             eventTitle: event.title,
@@ -2225,10 +2221,9 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
       const reason = Math.min(...Object.values(state.fighter.health)) <= CAREER_HEALTH_RETIREMENT_THRESHOLD ? 'injury' : 'age-limit'
       next = retireGame({ ...state, growthDestination: undefined, insightGained: undefined }, reason)
     } else {
-      next = { ...state, phase: state.growthDestination === 'offer' ? 'offer' : 'weight', growthDestination: undefined, insightGained: undefined, traitAwards: undefined }
+      next = { ...state, phase: state.growthDestination === 'offer' ? 'offer' : 'prefight', growthDestination: undefined, insightGained: undefined, traitAwards: undefined }
     }
   }
-  else if (command.type === 'SET_WEIGHT_PLAN') next = setWeightPlan(state, command.plan)
   else if (command.type === 'START_FIGHT') next = startFight(state)
   else if (command.type === 'SET_ROUND_PLAN') next = setRoundPlan(state, command.plan)
   else if (command.type === 'ACK_POSITION_ENTRY' && state.phase === 'critical' && state.fight?.positionEntry) {

@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { advance, createNewRun, getWeightOptions } from '../src/game/engine'
+import { advance, createNewRun, getCompetitionWeightClass } from '../src/game/engine'
 import { FIGHT_INTENTS, OPENING_LABELS } from '../src/game/fight-content'
 import type { CampAction, CampDrillChallenge, CriticalOption, FinishKind, GameState } from '../src/game/types'
 
@@ -137,7 +137,7 @@ describe('生涯重置', () => {
     fireEvent.click(screen.getByRole('button', { name: '刪除進度並重新開始' }))
 
     await waitFor(() => expect(storage.clearActiveGame).toHaveBeenCalledOnce())
-    expect(await screen.findByRole('heading', { name: '拳途人生' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '拳途人生 Cage Life' })).toBeInTheDocument()
   })
 
   it('取消時保留目前進度', async () => {
@@ -151,19 +151,15 @@ describe('生涯重置', () => {
     expect(screen.getByRole('heading', { name: '命運揭曉' })).toBeInTheDocument()
   })
 
-  it('在命運揭曉顯示預期量級區間', async () => {
+  it('在命運揭曉顯示固定的比賽量級', async () => {
     const game = createNewRun(input)
     storage.loadGame.mockResolvedValue({ game })
-    const options = [...getWeightOptions(game.fighter.naturalWeight)].sort((a, b) => a.limit - b.limit)
-    const expectedRange = options[0].name === options.at(-1)!.name
-      ? options[0].name
-      : `${options[0].name}～${options.at(-1)!.name}`
 
     render(<App />)
 
-    const label = await screen.findByText('預期量級區間')
-    expect(label.closest('.metric')).toHaveTextContent(expectedRange)
-    expect(label.closest('.metric')).toHaveTextContent('依減重策略而定')
+    const label = await screen.findByText('比賽量級')
+    expect(label.closest('.metric')).toHaveTextContent(getCompetitionWeightClass(game.fighter.naturalWeight).name)
+    expect(label.closest('.metric')).toHaveTextContent('依體格與自然體重安排')
   })
 
   it('建立拳手時直接說明三個家鄉賽事生態', async () => {
@@ -374,16 +370,32 @@ describe('生涯重置', () => {
     expect(screen.queryByText('體能訓練')).not.toBeInTheDocument()
   })
 
+  it('正常訓練立即結算，只有主動挑戰才開啟小遊戲', async () => {
+    const game = createNewRun(input)
+    game.phase = 'camp'
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const filmCard = (await screen.findByText('影片研究')).closest('.camp-activity') as HTMLElement
+    fireEvent.click(within(filmCard).getByRole('button', { name: '正常完成' }))
+    expect(await screen.findByRole('heading', { name: '訓練營' })).toBeInTheDocument()
+    expect(screen.getByLabelText('最近一次訓練成果')).toHaveTextContent('情報 +31')
+
+    const updatedFilmCard = screen.getByText('影片研究').closest('.camp-activity') as HTMLElement
+    fireEvent.click(within(updatedFilmCard).getByRole('button', { name: '挑戰：爭取更多情報' }))
+    expect(await screen.findByRole('heading', { name: '挑戰額外收益' })).toBeInTheDocument()
+  })
+
   it.each([
-    ['technique', '技術小遊戲', '拳擊'],
-    ['film', '研究小遊戲', '拳擊'],
-  ] as const)('選擇式營隊訓練會接受觸控選擇並進入結果畫面：%s', async (kind, label, answer) => {
+    ['technique', '技術小遊戲', '拳擊', '把訓練變成你的招式'],
+    ['film', '研究小遊戲', '拳擊', '訓練營'],
+  ] as const)('挑戰營隊訓練會接受觸控選擇並直接前往下一個問題：%s', async (kind, label, answer, nextScreen) => {
     storage.loadGame.mockResolvedValue({ game: gameAtCampDrill(kind) })
     render(<App />)
 
     expect(await screen.findByLabelText(label)).toBeInTheDocument()
     for (let index = 0; index < 3; index += 1) fireEvent.click(screen.getByRole('button', { name: answer }))
-    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: nextScreen })).toBeInTheDocument()
   })
 
   it('靶訓組合會示範三拍並接受實際招式輸入', async () => {
@@ -401,7 +413,7 @@ describe('生涯重置', () => {
       const label = FIGHT_INTENTS.find((move) => move.id === step.moveId)!.label
       fireEvent.click(await screen.findByRole('button', { name: label }))
     }
-    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '把訓練變成你的招式' })).toBeInTheDocument()
   })
 
   it('影片研究先呈現對手三段攻防，再詢問具體招式與破綻', async () => {
@@ -419,7 +431,7 @@ describe('生涯重置', () => {
     expect(screen.getAllByText(FIGHT_INTENTS.find((move) => move.id === challenge.sequenceMoveIds[0])!.label)).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: '看完了，開始分析' }))
     for (const prompt of challenge.prompts) fireEvent.click(screen.getByRole('button', { name: drillTestLabel(prompt.answer) }))
-    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '訓練營' })).toBeInTheDocument()
     window.matchMedia = originalMatchMedia
   })
 
@@ -432,7 +444,7 @@ describe('生涯重置', () => {
       fireEvent.pointerDown(control, { pointerId: index + 1 })
       fireEvent.pointerUp(control, { pointerId: index + 1 })
     }
-    expect(await screen.findByRole('heading', { name: '訓練結果' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '訓練營' })).toBeInTheDocument()
   })
 
   it('標頭提供不降低最高獎勵的寬鬆訓練節奏', async () => {
@@ -461,8 +473,8 @@ describe('生涯重置', () => {
     expect(support).toHaveTextContent('關係會改變訓練與生涯')
     expect(support).toHaveTextContent('招式熟練度更容易達到上限')
     expect(support).toHaveTextContent('家庭壓力會讓這次休養打些折扣')
-    expect(screen.getByRole('button', { name: /技術訓練/ })).toHaveTextContent('深厚信任')
-    expect(screen.getByRole('button', { name: /休養治療/ })).toHaveTextContent('關係緊張')
+    expect(screen.getByText('技術訓練').closest('.camp-activity')).toHaveTextContent('深厚信任')
+    expect(screen.getByText('休養治療').closest('.camp-activity')).toHaveTextContent('關係緊張')
   })
 
   it('人生事件選擇後顯示故事與效果結果彈窗', async () => {
