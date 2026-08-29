@@ -20,7 +20,7 @@ Keep these rules while working in this repository:
 
 ## Publishing to GitHub Pages
 
-The production site is deployed by `.github/workflows/deploy-pages.yml` whenever `master` is updated. The workflow builds `dist/client` with `VITE_BASE_PATH=/`, configures the custom domain `playcagelife.com`, and deploys it through GitHub Pages.
+The production site is deployed by `.github/workflows/deploy-pages.yml` whenever `master` is updated. The workflow builds `dist/client` with `VITE_BASE_PATH=/` and deploys it through GitHub Pages. Configure the production custom domain `playcagelife.com` in the repository's GitHub Pages settings.
 
 Reference checklist:
 
