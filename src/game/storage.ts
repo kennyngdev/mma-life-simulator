@@ -31,8 +31,11 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
-  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.23.0' && envelope.contentVersion === '1.6.0') {
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.24.0' && envelope.contentVersion === '1.6.0') {
     return { game: envelope.game as GameState }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.23.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateInjuryRecoveryWindow(envelope.game) }
   }
   if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.22.0' && envelope.contentVersion === '1.6.0') {
     return { game: migrateBalancedMatchmaking(envelope.game) }
@@ -661,6 +664,20 @@ export function migrateBalancedMatchmaking(game: unknown): GameState {
   }
   migrated.saveVersion = 15
   migrated.rulesVersion = '0.23.0'
+  migrated.contentVersion = '1.6.0'
+  return migrateInjuryRecoveryWindow(migrated)
+}
+
+/** Reopens recoverable 0.23 injury retirements as a visible medical layoff. */
+export function migrateInjuryRecoveryWindow(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  const lowestHealth = Math.min(...Object.values(migrated.fighter.health))
+  if (migrated.phase === 'growth' && migrated.growthDestination === 'retirement' && lowestHealth > 10 && lowestHealth <= 25) {
+    migrated.growthDestination = 'injury-recovery'
+  }
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.24.0'
   migrated.contentVersion = '1.6.0'
   return migrated
 }

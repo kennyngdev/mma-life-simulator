@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- Made recorded knockdowns explicit during a fight and in its result summary, including the current career progress toward `擊倒嗅覺`.
+
+### Changed
+
+- Halved the TKO/KO strike timing window so the highlighted hit bar matches the intended finish difficulty.
+- Kept master-level skills training past 1,500 XP for further 175-XP move milestones, while capping combat rating at the existing 96. Same-branch camp sessions now retain 85% and 70% XP on the second and third session, and switching branches no longer incurs the repeat penalty.
+- Replaced the former 25-health instant injury retirement with an 11–25 health recovery decision: take a one-year medical layoff that heals the weakest part by 18, or retire immediately; only 10 or below now ends a career immediately.
+- Expanded retirement biographies to include every significant career event rather than stopping after the first four.
+
 ## [0.2.0] - 2026-08-29
 
 ### Added

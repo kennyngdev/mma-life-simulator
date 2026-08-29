@@ -20,8 +20,8 @@ import {
   FOUNDATION_MOVE_IDS,
   generateBirthTraits,
   minimumMoveLevel,
+  moveUnlockCount,
   movesForBranch,
-  nextSkillThreshold,
   NORMIE_DEFAULT_MOVE_IDS,
   skillLevel,
   skillRating,
@@ -84,10 +84,9 @@ import type {
 } from './types'
 
 const HEALTH_PARTS: HealthPart[] = ['head', 'hands', 'knees', 'torso']
-export const CAREER_HEALTH_RETIREMENT_THRESHOLD = 25
-const TECHNIQUE_CAMP_XP_FACTORS = [1, 0.6, 0.28] as const
-const FIRST_MOVE_XP = 100
-const POST_FOUNDATION_MOVE_XP = 175
+export const CAREER_HEALTH_RECOVERY_THRESHOLD = 25
+export const CAREER_HEALTH_RETIREMENT_THRESHOLD = 10
+const TECHNIQUE_CAMP_XP_FACTORS = [1, 0.85, 0.7] as const
 const INTERNATIONAL_HOMETOWNS: Record<string, string> = {
   巴西: '聖保羅', 日本: '東京', 南韓: '首爾', 俄羅斯: '莫斯科', 哈薩克: '阿拉木圖', 吉爾吉斯: '比什凱克',
   美國: '拉斯維加斯', 孟加拉: '達卡', 印度: '孟買', 巴基斯坦: '拉合爾', 葡萄牙: '里斯本', 匈牙利: '布達佩斯',
@@ -419,7 +418,7 @@ export function createNewRun(input: NewRunInput): GameState {
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 15, rulesVersion: '0.23.0', contentVersion: '1.6.0', seed: input.seed.trim().toUpperCase(),
+    saveVersion: 15, rulesVersion: '0.24.0', contentVersion: '1.6.0', seed: input.seed.trim().toUpperCase(),
     phase: 'reveal', stage: initialLeague ?? 'grassroots', fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
     offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
@@ -1207,11 +1206,6 @@ function drillLabel(score: number, source: 'normal' | 'edge'): CampDrillOutcome[
   return score >= 0.93 ? '完美節奏' : score >= 0.8 ? '銳利表現' : '穩定完成'
 }
 
-function moveUnlockCount(xp: number): number {
-  if (xp < FIRST_MOVE_XP) return 0
-  return 1 + Math.floor((Math.min(xp, 1_500) - FIRST_MOVE_XP) / POST_FOUNDATION_MOVE_XP)
-}
-
 function applyCampActivity(
   state: GameState,
   action: CampAction,
@@ -1220,7 +1214,12 @@ function applyCampActivity(
   source: 'normal' | 'edge',
 ): GameState {
   const focus = branch ?? 'boxing'
-  const repeats = state.campActions.filter((item) => item === action).length
+  const currentCampOutcomes = state.campActions.length
+    ? state.campDrillHistory.slice(-state.campActions.length)
+    : []
+  const repeats = action === 'technique'
+    ? currentCampOutcomes.filter((outcome) => outcome.kind === 'technique' && outcome.branch === focus).length
+    : state.campActions.filter((item) => item === action).length
   const fighter = structuredClone(state.fighter)
   const coachTier = relationshipTier(fighter.relationships.find((item) => item.role === 'coach')?.trust ?? 50)
   const familyTier = relationshipTier(fighter.relationships.find((item) => item.role === 'family')?.trust ?? 50)
@@ -1240,7 +1239,7 @@ function applyCampActivity(
     const campFactor = TECHNIQUE_CAMP_XP_FACTORS[Math.min(repeats, TECHNIQUE_CAMP_XP_FACTORS.length - 1)]
     const calculated = Math.round((50 + 20 * score) * progress.aptitude * coachFactor * learnerFactor * campFactor)
     const xpGain = calculated
-    progress.xp = Math.min(1_500, progress.xp + xpGain)
+    progress.xp += xpGain
     const levelAfter = skillLevel(progress.xp)
     const moveUnlocks = moveUnlockCount(progress.xp) - moveUnlockCount(xpBefore)
     fighter.technique[focus] = skillRating(progress)
@@ -1271,7 +1270,7 @@ function applyCampActivity(
     }
     fighter.fatigue = clamp(fighter.fatigue + 7 + repeats * 4)
     effects.push(`疲勞 +${7 + repeats * 4}`)
-    if (repeats > 0) effects.push(`同營技術加練：本次 XP ×${campFactor}`)
+    if (repeats > 0) effects.push(`${BRANCH_META[focus].name}同營加練：本次 XP ×${campFactor}`)
     if (coachTier !== 'steady') effects.push(coachTier === 'trusted' ? '教練默契：本次 XP ×1.1' : '教練關係緊張：本次 XP ×0.9')
   } else if (action === 'film') {
     const scoutGain = 20 + Math.round(score * 16)
@@ -1719,7 +1718,7 @@ function startFight(state: GameState): GameState {
   const opponent = state.opponents.find((item) => item.id === offer.opponentId)!
   const fight: FightState = {
     offer, opponentId: opponent.id, round: 1, totalRounds: titleRoleFor(offer) !== 'ordinary' ? 5 : 3, position: 'range',
-    playerStamina: 100, opponentStamina: 100, playerDamage: 0, opponentDamage: 0,
+    playerStamina: 100, opponentStamina: 100, playerDamage: 0, opponentDamage: 0, playerKnockdowns: 0,
     playerEffective: 0, opponentEffective: 0, criticalCount: 0, sequenceStep: 1,
     initiative: 'even', momentum: 0, opponentIntent: {
       intentId: 'probe-range', executionName: '觀察反應', branch: 'boxing', category: 'offense', target: 'head',
@@ -1958,13 +1957,19 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   const cornerNarrative = cornerDamagePrevented > 0 ? `場角的提醒奏效，${cornerTargetLabel}少挨了 ${cornerDamagePrevented} 點傷害。`
     : cornerDamageBonus > 0 ? `你照著場角指示猛攻${cornerTargetLabel}，再追加 ${cornerDamageBonus} 點傷害。`
       : cornerExposureDamage > 0 ? `你追得太深，防線被撕開，額外承受 ${cornerExposureDamage} 點傷害。` : ''
-  const impactTags = [hasPunchChain(fight, intent) ? '連拳節奏 +6' : '', cornerDamagePrevented ? `場角防護 -${cornerDamagePrevented}` : '', cornerDamageBonus ? `場角追打 +${cornerDamageBonus}` : '', cornerExposureDamage ? `追打暴露 +${cornerExposureDamage}` : '', scoreGain ? `有效得分 +${scoreGain}` : '', opponentScoreGain ? `對手得分 +${opponentScoreGain}` : '', head ? `對手頭部 +${head}` : '', body ? `對手軀幹 +${body}` : '', leg ? `對手腿部 +${leg}` : '', incomingHead ? `我方頭部 +${incomingHead}` : '', incomingBody ? `我方軀幹 +${incomingBody}` : '', incomingLeg ? `我方腿部 +${incomingLeg}` : '', opponentStaminaBefore > fight.opponentStamina ? `對手體力 -${opponentStaminaBefore - fight.opponentStamina}` : '', playerStaminaBefore > fight.playerStamina ? `我方體力 -${playerStaminaBefore - fight.playerStamina}` : '', positionBefore !== fight.position ? `${positionLabel(positionBefore)} → ${positionLabel(fight.position)}` : ''].filter(Boolean)
+  const fighter = structuredClone(state.fighter)
+  const knockdown = outcome === 'clean' && intent.effects.headDamage >= 10 && roll * 100 < liveOdds.clean * 0.28
+  if (knockdown) {
+    fighter.evidence.knockdowns += 1
+    fight.playerKnockdowns = (fight.playerKnockdowns ?? 0) + 1
+  }
+  const impactTags = [knockdown ? '擊倒 +1' : '', hasPunchChain(fight, intent) ? '連拳節奏 +6' : '', cornerDamagePrevented ? `場角防護 -${cornerDamagePrevented}` : '', cornerDamageBonus ? `場角追打 +${cornerDamageBonus}` : '', cornerExposureDamage ? `追打暴露 +${cornerExposureDamage}` : '', scoreGain ? `有效得分 +${scoreGain}` : '', opponentScoreGain ? `對手得分 +${opponentScoreGain}` : '', head ? `對手頭部 +${head}` : '', body ? `對手軀幹 +${body}` : '', leg ? `對手腿部 +${leg}` : '', incomingHead ? `我方頭部 +${incomingHead}` : '', incomingBody ? `我方軀幹 +${incomingBody}` : '', incomingLeg ? `我方腿部 +${incomingLeg}` : '', opponentStaminaBefore > fight.opponentStamina ? `對手體力 -${opponentStaminaBefore - fight.opponentStamina}` : '', playerStaminaBefore > fight.playerStamina ? `我方體力 -${playerStaminaBefore - fight.playerStamina}` : '', positionBefore !== fight.position ? `${positionLabel(positionBefore)} → ${positionLabel(fight.position)}` : ''].filter(Boolean)
   const colorCommentary = buildColorCommentary(opponent.name, execution.name, opponentMoveExecution.name, outcome, option.matchup, damageEvents, positionBefore, fight.position, fight.sequenceStep)
   const narrative = buildNarrativeBeat(opponent.name, execution.id, execution.name, opponentMoveExecution.name, outcome, positionBefore, fight.position, created, consumed, intent.category, option.matchup, impactTags, cornerNarrative, colorCommentary)
   fight.lastNarrative = narrative
   fight.commentary.push(narrative.paragraph)
   fight.commentary.push(`解說台｜${colorCommentary}`)
-  const fighter = structuredClone(state.fighter)
+  if (knockdown) fight.commentary.push(`擊倒成立！${opponent.name}倒地後勉強恢復；本場擊倒 ${fight.playerKnockdowns} 次。`)
   if (option.unlockNode) {
     const mastery = fighter.mastery[option.unlockNode]
     const gain = Math.min(outcome === 'clean' ? 8 : outcome === 'contested' ? 5 : 3, 12 - mastery.gainedThisFight)
@@ -1979,7 +1984,6 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   if (outcome === 'clean' && disadvantagedGroundPositions.includes(positionBefore) && groundEscapeMoves.includes(intent.id)) fighter.evidence.bottomEscapes += 1
   // A three-minute round has four tactical beats, so a successful control beat represents 45 seconds.
   if (outcome === 'clean' && ['cage', 'cage-control'].includes(positionBefore) && intent.effects.control >= 6) fighter.evidence.cageMinutes += 0.75
-  if (outcome === 'clean' && intent.effects.headDamage >= 10) fighter.evidence.knockdowns += roll * 100 < liveOdds.clean * 0.28 ? 1 : 0
   fight.initiative = outcome === 'clean' ? 'player' : outcome === 'countered' ? 'opponent' : 'even'
   fight.momentum = clamp(fight.momentum + (outcome === 'clean' ? 11 : outcome === 'contested' ? 1 : -13), -40, 40)
   if (outcome !== 'countered') {
@@ -2114,7 +2118,7 @@ export function finishDifficultyFor(opportunity: number, rngValues: { x: number;
   const normalized = Math.max(0, Math.min(1, opportunity / 100))
   return {
     aimTolerance: 0.07 + normalized * 0.07,
-    timingTolerance: 0.08 + normalized * 0.24,
+    timingTolerance: 0.04 + normalized * 0.12,
     cycleMs: Math.round(1100 + normalized * 700),
     targetTravel: 0.14 - normalized * 0.06,
     targetCycleMs: Math.round(3200 + normalized * 1800),
@@ -2459,7 +2463,7 @@ function processFightResult(state: GameState): GameState {
       ? `${fight.method === 'decision' ? '你按照自己的節奏贏下了更多回合' : `你在第 ${fight.finishRound} 回合終結了對手`}，成為${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍；冠軍不列入數字排名。`
       : titleRole === 'defense'
         ? `你守住了${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍，這是第 ${(fighter.leagueRecords[league!]?.defenses ?? 0)} 次成功衛冕。`
-        : previousRank === undefined ? `你擊敗對手，進入${league ? LEAGUE_LABELS[league] : '聯盟'}排名第 ${nextRank} 名。` : `你按照自己的節奏贏下了更多回合，排名從 #${previousRank} 升至 #${nextRank}。`
+      : previousRank === undefined ? league ? `你擊敗對手，進入${LEAGUE_LABELS[league]}排名第 ${nextRank} 名。` : '你在草根賽場拿下一勝，拳館開始記住你的名字。' : `你按照自己的節奏贏下了更多回合，排名從 #${previousRank} 升至 #${nextRank}。`
     : titleRole === 'challenge' ? `你未能撼動${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍，先前排名維持不變。` : titleRole === 'defense' && drawResult ? `平手讓你保住${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍，但下一場仍要面對挑戰。` : titleRole === 'defense' ? `${opponent.name}擊敗你，成為新的${league ? LEAGUE_LABELS[league] : '聯盟'}冠軍；你失去了這條腰帶。` : drawResult ? '裁判無法分出勝負。終場鐘聲才剛響起，重賽的話題就已經出現。' : `這場失利讓你看清：即使抓到對手在${BRANCH_META[opponent.weakness].name}方面的弱點，你的技術仍不夠全面。`
   fighter.history.push({ id: `fight-${fighter.evidence.fights}`, year: fighter.year, age: fighter.age, title, summary, people: [opponent.name], importance: titleRole !== 'ordinary' || closeFight ? 3 : 2, tags: ['比賽', won ? '勝利' : drawResult ? '平手' : '失敗', ...(titleRole !== 'ordinary' ? ['冠軍戰'] : []), ...(league ? [LEAGUE_LABELS[league]] : [])] })
   let updatedFighter = updateRelationship(fighter, 'coach', won ? 3 : closeFight ? 1 : -1, `${title}時站在你的場邊`)
@@ -2492,7 +2496,9 @@ function processFightResult(state: GameState): GameState {
     const trait = traitDefinition(id)!
     updatedFighter.history.push({ id: `trait-${id}`, year: updatedFighter.year, age: updatedFighter.age, title: `獲得特質：${trait.name}`, summary: `${trait.condition}；${trait.effect}`, people: [], importance: 2, tags: ['特質', trait.rarity] })
   }
-  const shouldRetire = updatedFighter.age >= 38 || Math.min(...Object.values(updatedFighter.health)) <= CAREER_HEALTH_RETIREMENT_THRESHOLD
+  const lowestHealth = Math.min(...Object.values(updatedFighter.health))
+  const shouldRetire = updatedFighter.age >= 38 || lowestHealth <= CAREER_HEALTH_RETIREMENT_THRESHOLD
+  const needsInjuryRecovery = !shouldRetire && lowestHealth <= CAREER_HEALTH_RECOVERY_THRESHOLD
   const wonTitle = won && (titleRole === 'challenge' || titleRole === 'defense')
   // A successful defense re-opens the same move-up decision. World has no
   // higher league, so a World defense simply returns to ordinary offers.
@@ -2507,7 +2513,7 @@ function processFightResult(state: GameState): GameState {
     offerRefreshUsed: false,
     stage: nextStage,
     phase: 'growth',
-    growthDestination: shouldRetire ? 'retirement' : promotionTo ? 'league-decision' : 'offer',
+    growthDestination: shouldRetire ? 'retirement' : needsInjuryRecovery ? 'injury-recovery' : promotionTo ? 'league-decision' : 'offer',
     promotionFrom: promotionTo ? league : undefined,
     promotionTo,
     insightGained: undefined,
@@ -2528,7 +2534,7 @@ function makeBiography(state: GameState): Biography {
   const fighter = state.fighter
   const hybrid = TECHNIQUE_NODES.find((node) => node.branch === 'hybrid' && fighter.unlockedNodes.includes(node.id))
   const weakestHealth = (Object.entries(fighter.health) as Array<[HealthPart, number]>).sort((a, b) => a[1] - b[1])[0]
-  const important = [...fighter.history].sort((a, b) => b.importance - a.importance || a.year - b.year).slice(0, 4)
+  const important = [...fighter.history].filter((entry) => entry.importance >= 2).sort((a, b) => a.year - b.year || a.id.localeCompare(b.id))
   const leagueTitles = (Object.keys(fighter.leagueRecords) as LeagueId[]).filter((league) => (fighter.leagueRecords[league]?.titles ?? 0) > 0)
   const title = leagueTitles.includes('world') || fighter.history.some((entry) => entry.title.includes('世界聯盟冠軍') || entry.title === '世界冠軍之夜') ? '在國際舞台登頂的冠軍' : fighter.wins > fighter.losses ? '打出自己風格的職業拳手' : '一次次敗退，卻從未停止上場的人'
   const definingPerson = fighter.relationships.sort((a, b) => b.trust - a.trust)[0]
@@ -2575,6 +2581,39 @@ export function retireGame(state: GameState, reason: 'voluntary' | 'age-limit' |
       ? `${healthLabel(weakestHealth[0])}健康降至 ${weakestHealth[1]}，已達強制退役線。`
       : '你決定結束職業生涯。'
   return { ...retired, biography: makeBiography(retired), lastMessage }
+}
+
+function takeMedicalLayoff(state: GameState): GameState {
+  if (state.phase !== 'growth' || state.growthDestination !== 'injury-recovery') return state
+  const fighter = structuredClone(state.fighter)
+  const [weakestPart, weakestValue] = (Object.entries(fighter.health) as Array<[HealthPart, number]>).sort((a, b) => a[1] - b[1])[0]
+  fighter.age += 1
+  fighter.year += 1
+  fighter.health[weakestPart] = clamp(fighter.health[weakestPart] + 18)
+  fighter.fatigue = clamp(fighter.fatigue - 30)
+  fighter.readiness = clamp(110 - fighter.fatigue * 0.55)
+  fighter.promoterTrust = clamp(fighter.promoterTrust - 3)
+  fighter.history.push({
+    id: `medical-layoff-${fighter.evidence.fights}-${fighter.year}`,
+    year: fighter.year,
+    age: fighter.age,
+    title: `為${healthLabel(weakestPart)}停賽療傷`,
+    summary: `上一場後${healthLabel(weakestPart)}只剩 ${weakestValue} 健康。你停賽一年、錯過一輪合約，讓它恢復到 ${fighter.health[weakestPart]}；現在能重新評估下一步。`,
+    people: fighter.relationships.filter((relationship) => relationship.role !== 'partner').map((relationship) => relationship.name),
+    importance: 2,
+    tags: ['傷勢', '療養'],
+  })
+  if (fighter.age >= 38) return retireGame({ ...state, fighter, growthDestination: undefined, insightGained: undefined }, 'age-limit')
+  const destination = state.promotionTo ? 'league-decision' : 'offer'
+  return {
+    ...state,
+    fighter,
+    phase: destination === 'league-decision' ? 'league-decision' : 'offer',
+    growthDestination: undefined,
+    insightGained: undefined,
+    traitAwards: undefined,
+    lastMessage: `停賽一年後，${healthLabel(weakestPart)}健康回到 ${fighter.health[weakestPart]}。你失去了一些時間，但還能繼續生涯。`,
+  }
 }
 
 function selectOffer(state: GameState, offerId: string): GameState {
@@ -2713,6 +2752,8 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
     if (state.growthDestination === 'retirement') {
       const reason = Math.min(...Object.values(state.fighter.health)) <= CAREER_HEALTH_RETIREMENT_THRESHOLD ? 'injury' : 'age-limit'
       next = retireGame({ ...state, growthDestination: undefined, insightGained: undefined }, reason)
+    } else if (state.growthDestination === 'injury-recovery') {
+      next = takeMedicalLayoff(state)
     } else {
       next = {
         ...state,

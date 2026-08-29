@@ -76,11 +76,11 @@ Fight count never forces retirement. The retired seed-generated career-length ta
 A career ends automatically only when:
 
 - the fighter reaches age 38; or
-- after a fight, any long-term health value—head, hands, knees, or torso—is 25 or below.
+- after a fight, any long-term health value—head, hands, knees, or torso—is 10 or below.
 
 The player may also choose retirement from the offer screen after five fights or from age 34. Winning or losing a particular fight, including a world-title fight, does not itself end the career unless the fight also crosses an age or health boundary.
 
-The interface must state the exact health threshold, show the fighter's current weakest long-term health value in ordinary career context, warn when a value approaches the line, and name injury as the cause when it ends the career. A retirement trigger must never arrive as an unexplained seeded timer.
+After a fight, a long-term health value from 11 through 25 blocks the next fight and presents an explicit choice: take a one-year medical layoff or retire immediately. Choosing the layoff restores 18 health to the weakest affected part, lowers fatigue, and costs the year and that offer cycle; if the layoff reaches age 38, age retirement still applies. The interface must state both the 25-point layoff line and 10-point retirement line, show the fighter's current weakest long-term health value in ordinary career context, warn when a value approaches either line, and name injury as the cause when it ends the career. A retirement trigger must never arrive as an unexplained seeded timer.
 
 ### 3.4 League rankings, matchmaking, and titles — Accepted
 
@@ -126,7 +126,7 @@ The five combat skills are boxing, kicking, clinch, wrestling, and ground. Each 
 | 4 | 進階 | 1,000 | 84 |
 | 5 | 大師 | 1,500 | 96 |
 
-Aptitude is visible, seeded independently per branch, and ranges from `0.8×` to `1.2×` XP gain. It affects learning speed but never creates a hard mastery cap.
+Aptitude is visible, seeded independently per branch, and ranges from `0.8×` to `1.2×` XP gain. It affects learning speed but never creates a hard mastery cap. `大師` remains the level-five, 96-rating ceiling, but XP continues afterward: every further 175 XP can unlock one still-unlearned move from that branch.
 
 Level is an access gate and concise summary. Learned moves and earned traits are the identity the player should actually feel.
 
@@ -152,7 +152,7 @@ Technique XP is:
 round((50 + 20 × drill score) × aptitude × coach modifier × learning-trait modifier × camp factor)
 ```
 
-The camp factor is `1.0×` for the first technique session, `0.60×` for the second, and `0.28×` for the third. Coach modifiers are `0.9×` when strained, `1.0×` when steady, and `1.1×` when trusted. There is no first-session XP override: aptitude, coaching, traits, score, and camp order all affect how quickly a level-0 fighter reaches the first 100-XP foundation milestone. Repeating technique sessions in one camp increases fatigue and delivers smaller XP gains, so a focused camp remains useful without making every later fight trivial.
+The camp factor is `1.0×` for the first technique session in a branch, `0.85×` for the second, and `0.70×` for the third. Changing branch starts at `1.0×`; the reduced multiplier and added fatigue apply only when repeating the same branch. Coach modifiers are `0.9×` when strained, `1.0×` when steady, and `1.1×` when trusted. There is no first-session XP override: aptitude, coaching, traits, score, and camp order all affect how quickly a level-0 fighter reaches the first 100-XP foundation milestone. Focused camps remain useful, while the 175-XP move spacing and the level-five combat-rating ceiling prevent late XP from turning into unlimited rating growth.
 
 The first 100-XP foundation is automatic rather than a choice: boxing receives `刺拳接直拳` / `迎擊勾拳切角` / `雙刺拳進場`; kicking receives `低掃` / `前踢` / `換架切外側`; clinch receives `貼身短膝` / `籠邊頭位控制` / `進入纏抱`; wrestling receives `領帶拍頭肩撞` / `下壓防摔繞側` / `抱摔切入`; and ground receives `防守架內短拳` / `打破上位姿勢` / `蝦形調髖`. These are respectively attack, defense, and transition actions. The move offer after that has no reroll. Each later move requires another 175 XP. Aptitude affects the timing of move growth without creating a hard cap.
 
@@ -208,6 +208,8 @@ Only the player earns new traits during a career. There is no hard count cap and
 | Deep-Water Survivor | Survive 6 finish windows | +10% defensive success while critically damaged |
 
 Punch and kick KO traits count only a recorded `KO`, not a TKO, and use the recorded finishing move's strike kind. Modifier families stack additively and are capped at `±50%`.
+
+A recorded knockdown is announced immediately in the fight, appears in that fight's result summary with its current-career total, and is distinct from a KO or TKO result. This keeps the `Knockdown Instinct` threshold causally legible.
 
 Trait activation must be causally legible in fight choices, narration, or results. A powerful bonus that the player cannot connect to the fighter's identity is a design failure.
 
@@ -306,9 +308,9 @@ Gameplay changes should preserve or explicitly revise these tests:
 - Offer, standings, promotion, accessible-label, and 320 px UI surfaces expose league standing without rendering a champion as a number.
 - Legacy active careers migrate to World, old global ranks map with `ceil(oldRank × 15 / 99)`, current records and title history are preserved where possible, and unsigned offers are rebuilt deterministically.
 - Seeded height, reach, natural weight, and frame persist for each opponent; range, pressure, takedown, and clinch outcomes receive only the documented small body-matchup edges, while displayed division remains non-mechanical.
-- Existing `0.12.0 / 1.5.0`, `0.12.1 / 1.5.1`, `0.13.0 / 1.6.0`, `0.14.0 / 1.6.0`, `0.15.0 / 1.6.0`, `0.16.0 / 1.6.0`, `0.17.0 / 1.6.0`, `0.18.0 / 1.6.0`, `0.19.0 / 1.6.0`, `0.20.0 / 1.6.0`, `0.21.0 / 1.6.0`, and `0.22.0 / 1.6.0` saves deterministically backfill league standings, opponent body records, breadth-sensitive ratings, revised training and move-learning pace, fast-track cards, and revised title eligibility, then load as `0.23.0 / 1.6.0` without losing an active fight or career. Unsigned offer sets can be refreshed; a signed fight is never rewritten.
-- Fight count never triggers retirement, while age 38 and post-fight health at 25 or below do.
-- Offer, status, and injury-retirement surfaces state the health ending rule and current relevant condition.
+- Existing `0.12.0 / 1.5.0`, `0.12.1 / 1.5.1`, `0.13.0 / 1.6.0`, `0.14.0 / 1.6.0`, `0.15.0 / 1.6.0`, `0.16.0 / 1.6.0`, `0.17.0 / 1.6.0`, `0.18.0 / 1.6.0`, `0.19.0 / 1.6.0`, `0.20.0 / 1.6.0`, `0.21.0 / 1.6.0`, `0.22.0 / 1.6.0`, and `0.23.0 / 1.6.0` saves deterministically backfill league standings, opponent body records, breadth-sensitive ratings, revised training and move-learning pace, fast-track cards, title eligibility, and the injury-recovery window, then load as `0.24.0 / 1.6.0` without losing an active fight or career. Unsigned offer sets can be refreshed; a signed fight is never rewritten.
+- Fight count never triggers retirement, while age 38 and post-fight health at 10 or below do; 11–25 requires choosing the documented medical layoff or immediate voluntary retirement before the career can continue.
+- Offer, status, injury-layoff, and injury-retirement surfaces state the health rule and current relevant condition.
 - Retired practical-sparring state migrates back to a playable camp without losing a slot.
 - The primary gameplay path remains usable at a 320 px viewport without horizontal scrolling or hidden essential actions.
 
@@ -328,7 +330,7 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-28 | Accepted | Make combat causality explicit through position-entry explanations, legal learned moves, transition routes, injury effects, and clear climax presentation. |
 | 2026-08-28 | Accepted | Treat money as career optionality: risk-priced purses, derived runway labels, one paid offer replacement per cycle, affordable/free medical and logistics alternatives, and late-career legacy spending. Money cannot gate the core loop or buy permanent combat power. |
 | 2026-08-28 | Accepted | Technique training supplies real tactical moves rather than a stat-only reward. Each branch guarantees an early functional foundation, while authored move levels make basic submissions, takedowns, and clinch entries available before mastery. |
-| 2026-08-29 | Accepted | Remove the hidden seeded fight-count retirement limit. Careers now end only by voluntary retirement, age 38, or a visible post-fight long-term health threshold of 25 or below; the UI must explain the threshold and the cause of injury retirement. |
+| 2026-08-29 | Accepted | Remove the hidden seeded fight-count retirement limit. Careers now end only by voluntary retirement, age 38, or a visible post-fight long-term health threshold of 10 or below. At health 11–25, the UI blocks the next fight and lets the player choose a one-year medical layoff that restores the weakest part by 18 or immediate retirement; it must explain both thresholds and the cost. |
 | 2026-08-29 | Accepted | Remove side control and its dedicated move family. Ground progression now goes directly from guard passing to mount, keeping fewer positions with clearer strategic roles. |
 | 2026-08-29 | Accepted | Use GitHub Pages at `playcagelife.com` as the sole production distribution site. Do not deploy or maintain a ChatGPT Sites version. |
 | 2026-08-29 | Accepted | At character creation, prompt browser-tab players in Traditional Chinese to install or add the PWA to their home screen; do not show the prompt in standalone PWA mode. |
@@ -338,3 +340,4 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-29 | Accepted | Tie move acquisition directly to skill growth: the first 100 XP automatically grants a three-move level-one attack/defense/transition foundation, while every later 175-XP milestone unlocks one selected move. Every session, including the first, follows aptitude-sensitive XP so low-talent fighters take longer to unlock moves. |
 | 2026-08-29 | Accepted | A Normie begins with exactly two weak learned actions per branch—attack plus defense in boxing/kicking, defense plus escape in clinch/wrestling/ground—rather than a hidden universal toolkit. Hobbyists begin with their two trained branches' foundations; Semi-pros begin with a foundation in all five branches. |
 | 2026-08-29 | Accepted | Expand performance-earned traits using recorded fight evidence, so more careers gain distinct milestones without random post-fight loot. Add the legendary growth-only birth trait `戰鬥天才`: +12% technical XP in every branch and +1 Fight IQ from film study, with no direct combat bonus. |
+| 2026-08-29 | Accepted | Keep XP and 175-XP move milestones active after a branch reaches `大師`, while holding the level-five combat rating at 96. Ease same-branch camp repetition to 100% / 85% / 70% and do not penalize changing branches; this lets late-career fighters complete their authored move pool without reopening runaway rating growth. |

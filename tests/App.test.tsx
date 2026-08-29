@@ -283,7 +283,8 @@ describe('生涯重置', () => {
     render(<App />)
 
     const rule = await screen.findByText(/生涯沒有比賽場數上限/)
-    expect(rule).toHaveTextContent('賽後降至 25 或以下就會因傷退役')
+    expect(rule).toHaveTextContent('健康降至 25 或以下必須停賽一年療傷')
+    expect(rule).toHaveTextContent('降至 10 或以下才會因傷退役')
     expect(rule).toHaveTextContent('目前最弱的是膝腿 39')
   })
 
@@ -367,6 +368,17 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: '繼續生涯' })).toBeInTheDocument()
   })
 
+  it('賽果會明確顯示本場擊倒與擊倒嗅覺進度', async () => {
+    const game = gameAtFightResult('tko', 'haymaker')
+    game.fight!.playerKnockdowns = 1
+    game.fighter.evidence.knockdowns = 1
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    expect(await screen.findByLabelText('本場擊倒 1 次，生涯擊倒 1 次')).toHaveTextContent('生涯 1／3 · 擊倒嗅覺')
+  })
+
   it('拳手狀態顯示技能、0–100 能力、招式與天生特質', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
@@ -385,7 +397,7 @@ describe('生涯重置', () => {
     expect(screen.getByText('特質')).toBeInTheDocument()
   })
 
-  it('拳手狀態顯示每個部位與明確的強制退役門檻', async () => {
+  it('拳手狀態顯示每個部位、療傷線與強制退役門檻', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
     game.fighter.health.head = 40
@@ -393,21 +405,22 @@ describe('生涯重置', () => {
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: '拳手狀態' }))
-    expect(screen.getByText('任何部位在賽後降至 25 或以下，職業生涯就會因傷結束。')).toBeInTheDocument()
-    expect(screen.getByText('接近強制退役線')).toBeInTheDocument()
+    expect(screen.getByText('賽後降至 25 或以下必須療傷停賽；10 或以下才會因傷退役。')).toBeInTheDocument()
+    expect(screen.getByText('接近療傷線')).toBeInTheDocument()
   })
 
-  it('因傷到達退役線時先解釋原因再進入生涯傳記', async () => {
+  it('因傷到達療傷線時可選擇停賽療傷或立刻退役', async () => {
     const game = createNewRun(input)
     game.phase = 'growth'
-    game.growthDestination = 'retirement'
+    game.growthDestination = 'injury-recovery'
     game.fighter.health.torso = 25
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
-    expect(await screen.findByRole('heading', { name: '傷勢終結了職業生涯' })).toBeInTheDocument()
-    expect(screen.getByText(/軀幹的長期健康已降至 25/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '查看退役生涯傳記' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '傷勢逼你停賽' })).toBeInTheDocument()
+    expect(screen.getByText(/軀幹的長期健康降至 25/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '停賽一年，專心療傷' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '不等了，現在退役' })).toBeInTheDocument()
   })
 
   it('狀態介面不再提供科技樹點數操作', async () => {

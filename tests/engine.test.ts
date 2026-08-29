@@ -381,7 +381,7 @@ describe('拳途人生模擬核心', () => {
     expect(migrated.opponents.every((opponent) => opponent.rating === competitiveRatingForOpponent(opponent))).toBe(true)
   })
 
-  it('八個全技術訓練營不會讓普通人直接成為大師', () => {
+  it('八個全技術訓練營仍不會讓普通人直接成為大師', () => {
     let state = createNewRun({ ...input, seed: 'TRAINING-PACE', startingExperience: 'normie' })
     state.fighter.skills.boxing.aptitude = 1
     state.fighter.traits = []
@@ -396,10 +396,26 @@ describe('拳途人生模擬核心', () => {
       state = { ...state, phase: 'camp', campActions: [] }
     }
 
-    expect(state.fighter.skills.boxing.xp).toBe(960)
-    expect(state.fighter.technique.boxing).toBe(68)
+    expect(state.fighter.skills.boxing.xp).toBe(1_304)
+    expect(state.fighter.technique.boxing).toBe(84)
     expect(state.fighter.skills.boxing.xp).toBeLessThan(1_500)
-    expect(state.fighter.learnedMoves).toHaveLength(17)
+    expect(state.fighter.learnedMoves).toHaveLength(19)
+  })
+
+  it('大師後仍可跨過招式里程碑，但能力值維持在上限', () => {
+    let state = enterCamp('MASTER-MOVE-MILESTONE')
+    state.fighter.skills.boxing.xp = 1_650
+    state.fighter.skills.boxing.aptitude = 1
+    state.fighter.traits = []
+    state.fighter.relationships.find((relationship) => relationship.role === 'coach')!.trust = 50
+
+    state = apply(state, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'boxing' })
+
+    expect(state.fighter.skills.boxing.xp).toBe(1_714)
+    expect(skillLevel(state.fighter.skills.boxing.xp)).toBe(5)
+    expect(state.fighter.technique.boxing).toBe(96)
+    expect(state.phase).toBe('training-reward')
+    expect(state.trainingMoveRequired).toBe(1)
   })
 
   it('目前生涯切換較慢的訓練與招式規則，不改寫已獲得的技能或招式', () => {
@@ -411,7 +427,7 @@ describe('拳途人生模擬核心', () => {
 
     const migrated = migratePostFoundationMoveMilestones(migrateFastTrackMatchmaking(migrateXpBasedMoveUnlocks(migrateMoveLearningPacing(migrateTechniqueTrainingPacing(legacy)))))
 
-    expect(migrated.rulesVersion).toBe('0.23.0')
+    expect(migrated.rulesVersion).toBe('0.24.0')
     expect(migrated.fighter.skills.boxing.xp).toBe(600)
     expect(migrated.fighter.learnedMoves).toEqual(['quick-combination'])
   })
@@ -490,7 +506,7 @@ describe('拳途人生模擬核心', () => {
     legacy.fighter.mind.fightIQ = 68
 
     const migrated = migrateFastTrackMatchmaking(legacy)
-    expect(migrated.rulesVersion).toBe('0.23.0')
+    expect(migrated.rulesVersion).toBe('0.24.0')
     expect(migrated.offers.some((offer) => offer.titleRole === 'challenge')).toBe(true)
   })
 
@@ -966,18 +982,32 @@ describe('拳途人生模擬核心', () => {
     expect(settled.growthDestination).toBe('offer')
   })
 
-  it('賽後任一長期健康降至二十五或以下會明確因傷退役', () => {
+  it('賽後健康落在療傷線時可選擇停賽或退役，硬性退役線才強制結束生涯', () => {
     let state = reachFirstFightResult(createNewRun({ ...input, seed: 'INJURY-RETIREMENT' }))
     state.fighter.health.head = 25
     state.fight!.playerDamage = 0
     const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
-    expect(settled.growthDestination).toBe('retirement')
+    expect(settled.growthDestination).toBe('injury-recovery')
 
-    const retired = apply(settled, { type: 'CONTINUE_GROWTH' })
+    const voluntaryRetirement = apply(settled, { type: 'RETIRE' })
+    expect(voluntaryRetirement.phase).toBe('retirement')
+
+    const recovered = apply(settled, { type: 'CONTINUE_GROWTH' })
+    expect(recovered.phase).toBe('offer')
+    expect(recovered.fighter.health.head).toBe(43)
+    expect(recovered.fighter.history.at(-1)?.tags).toContain('療養')
+
+    let critical = reachFirstFightResult(createNewRun({ ...input, seed: 'HARD-INJURY-RETIREMENT' }))
+    critical.fighter.health.head = 10
+    critical.fight!.playerDamage = 0
+    const criticalSettled = apply(critical, { type: 'ACK_FIGHT_RESULT' })
+    expect(criticalSettled.growthDestination).toBe('retirement')
+
+    const retired = apply(criticalSettled, { type: 'CONTINUE_GROWTH' })
     expect(retired.phase).toBe('retirement')
     expect(retired.lastMessage).toContain('強制退役線')
     expect(retired.fighter.history.at(-1)?.id).toBe('retirement-injury')
-    expect(retired.fighter.history.at(-1)?.summary).toContain('25 或以下')
+    expect(retired.fighter.history.at(-1)?.summary).toContain('10 或以下')
   })
 
   it('姓名留空時會依出身地產生一致的隨機姓名', () => {
@@ -1277,12 +1307,12 @@ describe('拳途人生模擬核心', () => {
     state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
     state = resolvePerfectDrill(state)
     expect(state.phase).toBe('camp')
-    expect(state.fighter.skills.boxing.xp).toBe(112)
+    expect(state.fighter.skills.boxing.xp).toBe(130)
     expect(state.fighter.learnedMoves).toEqual(expect.arrayContaining(['jab-cross', 'check-hook', 'double-jab-entry']))
     expect(state.trainingMoveChoices).toBeUndefined()
   })
 
-  it('未跨過後續 175 XP 里程碑時不會發放招式，跨過後只可選一招', () => {
+  it('較低的同分支加練懲罰仍以 175 XP 里程碑授予一招', () => {
     let state = apply(createNewRun({ ...input, seed: 'MOVE-PACING', startingExperience: 'normie' }), { type: 'ACK_REVEAL' })
     state = apply(state, { type: 'CONTINUE_GROWTH' })
     state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
@@ -1310,13 +1340,6 @@ describe('拳途人生模擬核心', () => {
     expect(state.phase).toBe('camp')
     state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
     state = resolvePerfectDrill(state)
-    expect(state.phase).toBe('camp')
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
-    state = resolvePerfectDrill(state)
-    expect(state.phase).toBe('life')
-    state = { ...state, phase: 'camp', campActions: [] }
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
-    state = resolvePerfectDrill(state)
     expect(state.phase).toBe('training-reward')
     expect(state.trainingMoveChoices).toHaveLength(4)
     expect(state.trainingMoveRequired).toBe(1)
@@ -1338,9 +1361,9 @@ describe('拳途人生模擬核心', () => {
 
     const lowTalent = prepare(.8)
     const highTalent = prepare(1.2)
-    expect(lowTalent.fighter.skills.boxing.xp).toBe(82)
+    expect(lowTalent.fighter.skills.boxing.xp).toBe(95)
     expect(lowTalent.phase).toBe('camp')
-    expect(highTalent.fighter.skills.boxing.xp).toBe(123)
+    expect(highTalent.fighter.skills.boxing.xp).toBe(142)
     expect(highTalent.phase).toBe('camp')
     expect(highTalent.fighter.learnedMoves).toEqual(expect.arrayContaining(['jab-cross', 'check-hook', 'double-jab-entry']))
   })
@@ -1353,6 +1376,18 @@ describe('拳途人生模擬核心', () => {
     expect(finished.biography?.summary).toContain(finished.fighter.name)
     const fightOpponents = finished.fighter.history.filter((entry) => entry.tags.includes('比賽')).flatMap((entry) => entry.people)
     expect(new Set(fightOpponents).size).toBeGreaterThanOrEqual(10)
+  })
+
+  it('生涯傳記保留所有重要轉捩點，不會在前四則停止', () => {
+    const state = createNewRun({ ...input, seed: 'FULL-TIMELINE' })
+    for (let index = 1; index <= 6; index += 1) {
+      state.fighter.history.push({ id: `turning-point-${index}`, year: 2026 + index, age: 18 + index, title: `轉捩點 ${index}`, summary: `第 ${index} 個重要事件。`, people: [], importance: 2, tags: ['測試'] })
+    }
+
+    const retired = apply(state, { type: 'RETIRE' })
+
+    expect(retired.biography?.turningPoints.map((entry) => entry.id)).toEqual(expect.arrayContaining(['turning-point-1', 'turning-point-6']))
+    expect(retired.biography?.turningPoints.length).toBeGreaterThan(4)
   })
 
   it('同一命令策略會重現相同完整人生', () => {
@@ -2032,6 +2067,7 @@ describe('拳途人生模擬核心', () => {
     expect(great.aimTolerance).toBeGreaterThan(poor.aimTolerance)
     expect(great.aimTolerance).toBeLessThan(0.14)
     expect(great.timingTolerance).toBeGreaterThan(poor.timingTolerance)
+    expect(finishDifficultyFor(100, { x: 0.5, y: 0.5 }).timingTolerance).toBeCloseTo(0.16)
     expect(great.cycleMs).toBeGreaterThan(poor.cycleMs)
     expect(great.targetTravel).toBeLessThan(poor.targetTravel!)
     expect(great.targetCycleMs).toBeGreaterThan(poor.targetCycleMs!)

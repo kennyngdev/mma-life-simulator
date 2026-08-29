@@ -342,7 +342,7 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .versus { color: var(--accent); font: 700 13px "IBM Plex Mono", monospace; }
 .briefing { margin: 15px 0; }
 
-.fight-arena { margin-bottom: 20px; padding: 11px; border: 1px solid var(--line); border-radius: var(--radius); color: #625a50; background: #12110f; }
+.fight-arena { position: relative; margin-bottom: 20px; padding: 11px; border: 1px solid var(--line); border-radius: var(--radius); color: #625a50; background: #12110f; }
 .fight-arena.compact { margin-bottom: 13px; }
 .fight-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .status-bar > div { display: flex; justify-content: space-between; gap: 6px; color: var(--ink); font-size: 10px; }
@@ -681,6 +681,11 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .fight-arena.player-hit-body, .fight-arena.opponent-hit-body { animation: body-impact .3s ease-out; }
 .fight-arena.player-hit-leg, .fight-arena.opponent-hit-leg { animation: leg-impact .3s ease-out; }
 .fight-arena.critical-vignette { box-shadow: inset 0 0 34px rgb(219 82 62 / .13), 0 0 18px rgb(219 82 62 / .07); }
+.knockdown-callout { position: absolute; z-index: 2; top: 62px; left: 50%; min-width: 126px; padding: 7px 10px; display: grid; justify-items: center; translate: -50% 0; border: 1px solid #f19a5d; border-radius: 9px; color: #fff2de; background: rgb(83 28 18 / .91); box-shadow: 0 5px 16px rgb(0 0 0 / .28); text-align: center; }
+.knockdown-callout > span { color: #ffb47f; font: 900 9px/1.15 "IBM Plex Mono", monospace; letter-spacing: .1em; }
+.knockdown-callout > strong { margin-top: 2px; font-size: 14px; }
+.knockdown-callout > small { margin-top: 2px; color: #efd5bd; font-size: 10px; }
+.knockdown-callout.result { position: static; min-width: 0; margin-top: 12px; translate: none; border-left: 4px solid #f19a5d; background: linear-gradient(100deg, rgb(83 28 18 / .84), var(--surface)); }
 @media (prefers-reduced-motion: reduce) { .fighter-glyph { transition: none; } .training-timing > i { left: 50%; animation: none; } }
 .verdict { display: flex; gap: 14px; align-items: center; padding: 17px; border: 1px solid var(--line); border-left: 4px solid var(--good); background: var(--surface-2); }
 .verdict.loss { border-left-color: var(--danger); }

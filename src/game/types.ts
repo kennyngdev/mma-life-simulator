@@ -581,6 +581,8 @@ export interface FightState {
   opponentStamina: number
   playerDamage: number
   opponentDamage: number
+  /** Per-fight count for the visible player knockdown callout. Older active saves omit it. */
+  playerKnockdowns?: number
   playerEffective: number
   opponentEffective: number
   plan?: RoundPlan
@@ -704,7 +706,7 @@ export interface GameState {
   trainingMoveBranch?: Branch
   lifeEvent?: LifeEvent
   lifeEventResult?: LifeEventResult
-  growthDestination?: 'prefight' | 'offer' | 'retirement' | 'league-decision'
+  growthDestination?: 'prefight' | 'offer' | 'retirement' | 'injury-recovery' | 'league-decision'
   promotionFrom?: LeagueId
   promotionTo?: LeagueId
   insightGained?: number

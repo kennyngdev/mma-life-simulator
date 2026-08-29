@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
-import { advance, bodyMatchupFor, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, fighterStandingLabel, getOpponent, getRelationshipBenefit, LEAGUE_LABELS, LEAGUE_TITLE_RATING_FLOORS, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
-import { aptitudeLabel, minimumMoveLevel, nextSkillThreshold, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
+import { advance, bodyMatchupFor, CAREER_HEALTH_RECOVERY_THRESHOLD, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, fighterStandingLabel, getOpponent, getRelationshipBenefit, LEAGUE_LABELS, LEAGUE_TITLE_RATING_FLOORS, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
+import { aptitudeLabel, minimumMoveLevel, nextMoveThreshold, nextSkillThreshold, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
@@ -391,7 +391,7 @@ function OfferView({ game, dispatch }: ViewProps) {
         <p>支付 {formatRegionalMoney(refreshCost, game.fighter.region)} 處理合約與營隊空窗，不讓年齡前進；聯盟信任會小幅下降。本輪只能使用一次。</p>
         <button type="button" className="choice-confirm" disabled={!canRefresh} onClick={() => dispatch({ type: 'PURCHASE_OFFER_REFRESH' })}>{game.offerRefreshUsed ? '本輪已經換過邀約' : game.fighter.money < refreshCost ? `資金不足，還差 ${formatRegionalMoney(refreshCost - game.fighter.money, game.fighter.region)}` : '支付費用，查看新邀約'}</button>
       </section>
-      <p className={`memory-callout${weakestHealth[1] <= 40 ? ' danger-callout' : ''}`}>生涯沒有比賽場數上限。任何部位在賽後降至 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下就會因傷退役；目前最弱的是{healthPartLabel(weakestHealth[0])} {weakestHealth[1]}。{game.fighter.age >= 34 ? '到了三十八歲也必須退役。' : ''}</p>
+      <p className={`memory-callout${weakestHealth[1] <= 40 ? ' danger-callout' : ''}`}>生涯沒有比賽場數上限。賽後健康降至 {CAREER_HEALTH_RECOVERY_THRESHOLD} 或以下必須停賽一年療傷；降至 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下才會因傷退役。目前最弱的是{healthPartLabel(weakestHealth[0])} {weakestHealth[1]}。{game.fighter.age >= 34 ? '到了三十八歲也必須退役。' : ''}</p>
       <button className="secondary-action" onClick={() => dispatch({ type: 'DECLINE_OFFERS' })}>{game.fighter.age >= 37 ? '拒絕邀約，結束職業生涯' : '拒絕邀約，讓時間前進一年'}</button>
       {(game.fighter.evidence.fights >= 5 || game.fighter.age >= 34) && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>現在退役</button>}
     </Screen>
@@ -798,13 +798,15 @@ function GrowthView({ game, dispatch }: ViewProps) {
   const awards = (game.traitAwards ?? []).map((id) => traitDefinition(id)).filter(Boolean)
   const weakestHealth = weakestHealthEntry(game.fighter)
   const injuryRetirement = game.growthDestination === 'retirement' && weakestHealth[1] <= CAREER_HEALTH_RETIREMENT_THRESHOLD
+  const injuryRecovery = game.growthDestination === 'injury-recovery'
   return (
-    <Screen title={injuryRetirement ? '傷勢終結了職業生涯' : awards.length ? '打法成為了特質' : '實戰留下的痕跡'} kicker={injuryRetirement ? `${healthPartLabel(weakestHealth[0])}健康 ${weakestHealth[1]}` : awards.length ? `${awards.length} 項新特質` : '生涯進度'}>
-      {injuryRetirement && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康已降至 {weakestHealth[1]}。任何部位在賽後達到 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下都必須退役；剛才那場比賽是你的職業生涯終點。</p>}
+    <Screen title={injuryRetirement ? '傷勢終結了職業生涯' : injuryRecovery ? '傷勢逼你停賽' : awards.length ? '打法成為了特質' : '實戰留下的痕跡'} kicker={injuryRetirement || injuryRecovery ? `${healthPartLabel(weakestHealth[0])}健康 ${weakestHealth[1]}` : awards.length ? `${awards.length} 項新特質` : '生涯進度'}>
+      {injuryRetirement && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康已降至 {weakestHealth[1]}。達到 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下的硬性退役線；剛才那場比賽是你的職業生涯終點。</p>}
+      {injuryRecovery && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康降至 {weakestHealth[1]}。你不能直接簽下一場比賽：可停賽一年，讓這個部位恢復 18 點健康後再回來；或選擇現在退役。療傷的代價是失去一年生涯時間與一輪合約。</p>}
       {awards.length ? <div className="trait-awards">{awards.map((trait) => trait && <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity)}</span><h2>{trait.name}</h2><p>{trait.description}</p><strong>{trait.effect}</strong><small>生效：{trait.condition}</small></article>)}</div>
         : <div className="growth-complete"><span>✓</span><div><strong>沒有憑空出現的新能力</strong><small>真正的招式來自訓練；重複的實戰行為則會逐步形成特質。</small></div></div>}
       {game.fighter.traitProgress.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="第一次做出符合條件的表現後，進度會保持可見。" /><TraitProgressList fighter={game.fighter} /></>}
-      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : game.growthDestination === 'prefight' ? '查看賽前簡報' : game.growthDestination === 'league-decision' ? '查看晉級選擇' : '繼續生涯'}</button></ActionDock>
+      <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : injuryRecovery ? '停賽一年，專心療傷' : game.growthDestination === 'prefight' ? '查看賽前簡報' : game.growthDestination === 'league-decision' ? '查看晉級選擇' : '繼續生涯'}</button>{injuryRecovery && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>不等了，現在退役</button>}</ActionDock>
     </Screen>
   )
 }
@@ -1351,6 +1353,7 @@ function FightResultView({ game, dispatch }: ViewProps) {
       </div>
     </> : <div className={`verdict ${won ? 'win' : fight.winner === 'draw' ? 'draw' : 'loss'}`}><span>{won ? 'W' : fight.winner === 'draw' ? 'D' : 'L'}</span><div><strong>{game.fighter.name}</strong><small>對 {opponent.name}</small></div></div>}
     {fight.scores.length > 0 && <div className="scorecards">{fight.scores.map((score) => <div key={score.round}><span>R{score.round}</span><b>{score.player}</b><i>–</i><b>{score.opponent}</b></div>)}</div>}
+    {(fight.playerKnockdowns ?? 0) > 0 && <KnockdownCallout fight={fight} careerKnockdowns={game.fighter.evidence.knockdowns} result />}
     <div className="result-explain"><strong>為什麼會有這個結果</strong><p>{fight.explanation}</p></div>
     <details className="fight-log"><summary><span>完整戰報</span><span className="fight-log-arrow" aria-hidden="true">→</span></summary>{fight.commentary.map((line, index) => <p key={index}>{line}</p>)}</details>
     <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_FIGHT_RESULT' })}>繼續生涯</button></ActionDock>
@@ -1423,9 +1426,17 @@ function FightArena({ game, compact = false, showLiveLog = true }: { game: GameS
       <div><StatusBar label={game.fighter.name} value={fight.playerStamina} tone="player" /><DamageRibbon damage={fight.playerDamageByPart} /></div>
       <div><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /><DamageRibbon damage={fight.opponentDamageByPart} opponent /></div>
     </div>
+    {(fight.playerKnockdowns ?? 0) > 0 && <KnockdownCallout fight={fight} careerKnockdowns={game.fighter.evidence.knockdowns} />}
     <PositionScene position={fight.position} league={leagueForGame(game) ?? 'grassroots'} />
     {showLiveLog && <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
   </section>
+}
+
+function KnockdownCallout({ fight, careerKnockdowns, result = false }: { fight: FightState; careerKnockdowns: number; result?: boolean }) {
+  const count = fight.playerKnockdowns ?? 0
+  return <aside className={`knockdown-callout${result ? ' result' : ''}`} aria-label={`本場擊倒 ${count} 次，生涯擊倒 ${careerKnockdowns} 次`} aria-live="polite">
+    <span>擊倒成立</span><strong>本場 {count} 次</strong><small>生涯 {careerKnockdowns}／3 · 擊倒嗅覺</small>
+  </aside>
 }
 
 type FighterPose = 'standing' | 'leaning' | 'crouched' | 'kneeling' | 'grounded' | 'seated'
@@ -1556,7 +1567,7 @@ function positionLabel(position: string) {
 function ContextStrip({ fighter }: { fighter: FighterState }) {
   const minHealth = Math.min(...Object.values(fighter.health))
   const best = Math.max(...BRANCHES.map((branch) => skillLevel(fighter.skills[branch].xp)))
-  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="最低健康" value={`${minHealth}`} note={`賽後 ${CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下退役`} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={`${careerRunwayLabel(fighter)} · ${REGION_PROFILES[fighter.region].economyLabel}`} /></div>
+  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="最低健康" value={`${minHealth}`} note={`賽後 ${CAREER_HEALTH_RECOVERY_THRESHOLD}↓療傷 · ${CAREER_HEALTH_RETIREMENT_THRESHOLD}↓退役`} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={`${careerRunwayLabel(fighter)} · ${REGION_PROFILES[fighter.region].economyLabel}`} /></div>
 }
 
 function StatusBar({ label, value, tone }: { label: string; value: number; tone: string }) {
@@ -1590,13 +1601,15 @@ function SkillProgressCard({ branch, fighter }: { branch: Branch; fighter: Fight
   const strength = skillStrengthLabel(level)
   const thresholds = [0, 100, 300, 600, 1_000, 1_500]
   const next = nextSkillThreshold(progress.xp)
-  const start = thresholds[level]
-  const percent = next ? Math.max(0, Math.min(100, (progress.xp - start) / (next - start) * 100)) : 100
+  const nextMove = nextMoveThreshold(progress.xp)
+  const start = next ? thresholds[level] : nextMove - 175
+  const target = next ?? nextMove
+  const percent = Math.max(0, Math.min(100, (progress.xp - start) / (target - start) * 100))
   const known = fighter.learnedMoves.filter((id) => FIGHT_INTENTS.find((move) => move.id === id)?.branch === branch).length
   return <article className="skill-progress-card" style={{ '--skill': BRANCH_META[branch].accent } as React.CSSProperties}>
     <div><span>{BRANCH_META[branch].name}</span><strong className="skill-ability" aria-label={`${BRANCH_META[branch].name}能力 ${ability} / 100`}><em>能力</em>{ability}<small>/100</small></strong><b className="skill-level" aria-label={`${BRANCH_META[branch].name}強度 ${strength}`}>{strength}</b><small className="skill-support">{aptitudeLabel(progress.aptitude)} · 已學 {known} 招</small></div>
     <i><b style={{ width: `${percent}%` }} /></i>
-    <p>{next ? `${progress.xp} / ${next} XP` : `${progress.xp} XP · 已達大師級`}</p>
+    <p>{next ? `${progress.xp} / ${next} XP` : `${progress.xp} XP · 下一招 ${nextMove} XP`}</p>
   </article>
 }
 
@@ -1701,8 +1714,8 @@ function StatusDetails({ game }: { game: GameState; dispatch: (command: GameComm
     <SectionTitle title="特質" subtitle="天生條件與實戰留下的身份會一起影響比賽。" />
     <TraitGrid traits={fighter.traits} />
     {fighter.traitProgress.length > 0 && <><SectionTitle title="特質進度" /><TraitProgressList fighter={fighter} /></>}
-    <SectionTitle title="身體狀況" subtitle={`任何部位在賽後降至 ${CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下，職業生涯就會因傷結束。`} />
-    <div className="health-grid">{(Object.keys(fighter.health) as HealthPart[]).map((part) => <Metric key={part} label={healthPartLabel(part)} value={`${fighter.health[part]}`} note={fighter.health[part] <= CAREER_HEALTH_RETIREMENT_THRESHOLD ? '已達強制退役線' : fighter.health[part] <= 40 ? '接近強制退役線' : fighter.health[part] < 60 ? '需要留意' : '狀況良好'} />)}</div>
+    <SectionTitle title="身體狀況" subtitle={`賽後降至 ${CAREER_HEALTH_RECOVERY_THRESHOLD} 或以下必須療傷停賽；${CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下才會因傷退役。`} />
+    <div className="health-grid">{(Object.keys(fighter.health) as HealthPart[]).map((part) => <Metric key={part} label={healthPartLabel(part)} value={`${fighter.health[part]}`} note={fighter.health[part] <= CAREER_HEALTH_RETIREMENT_THRESHOLD ? '已達強制退役線' : fighter.health[part] <= CAREER_HEALTH_RECOVERY_THRESHOLD ? '必須停賽療傷' : fighter.health[part] <= 40 ? '接近療傷線' : fighter.health[part] < 60 ? '需要留意' : '狀況良好'} />)}</div>
     <SectionTitle title="重要關係" />
     <div className="relationship-list">{fighter.relationships.map((relationship) => {
       const benefit = getRelationshipBenefit(relationship)
