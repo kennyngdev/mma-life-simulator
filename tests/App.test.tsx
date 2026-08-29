@@ -118,7 +118,10 @@ function gameAtGeneratedCampDrill(kind: CampAction, branch: 'boxing' = 'boxing')
 }
 
 describe('生涯重置', () => {
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -169,6 +172,24 @@ describe('生涯重置', () => {
     expect(await screen.findByRole('button', { name: /香港.*國際門戶/ })).toHaveTextContent('高收入／高成本')
     expect(screen.getByRole('button', { name: /台灣.*拳館網絡/ })).toHaveTextContent('65% 台灣')
     expect(screen.getByRole('button', { name: /中國大陸.*深度賽事/ })).toHaveTextContent('低收入／低成本')
+  })
+
+  it('在非 PWA 瀏覽器的拳手建立畫面提示加入主畫面', async () => {
+    storage.loadGame.mockResolvedValue({})
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '拳途人生 Cage Life' })).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent('以 App 模式踏進鐵籠')
+    expect(screen.getByRole('note')).toHaveTextContent('加入主畫面')
+  })
+
+  it('以 PWA 獨立模式開啟時不顯示安裝提示', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    storage.loadGame.mockResolvedValue({})
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '拳途人生 Cage Life' })).toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 
   it('香港生成拳手會在揭曉顯示粵語姓名、家鄉與地方生態', async () => {

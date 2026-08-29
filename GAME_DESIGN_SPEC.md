@@ -15,6 +15,14 @@ Use these status meanings throughout the document:
 
 When a new explicit product decision conflicts with this document, the new decision wins and this document must be updated in the same change.
 
+### 1.1 Production publishing — Accepted
+
+`playcagelife.com` is the sole production distribution site. The game is built and published through GitHub Pages from this repository's `master` branch; the GitHub Pages workflow is the only production deployment path. Do not create, deploy, or maintain a separate ChatGPT Sites-hosted version of the game.
+
+### 1.2 PWA entry prompt — Accepted
+
+Character creation must display a compact Traditional-Chinese prompt whenever the game is opened in an ordinary browser tab rather than PWA standalone mode. The prompt explains that adding the game to the device home screen provides an app-like launch experience and that progress remains on the device. When the browser exposes an install prompt, provide a direct install action; otherwise give browser-agnostic “install app / add to home screen” guidance. Do not show this prompt in standalone mode.
+
 ## 2. Design thesis
 
 `拳途人生 Cage Life` is a seeded, mobile-first MMA career life simulation. A run should answer:
@@ -292,3 +300,5 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-28 | Accepted | Technique training now teaches two of up to four offered moves. Each branch guarantees an early functional foundation, while authored move levels make basic submissions, takedowns, and clinch entries available before mastery. This prevents a Normie from repeatedly investing in a style without gaining its defining combat route. |
 | 2026-08-29 | Accepted | Remove the hidden seeded fight-count retirement limit. Careers now end only by voluntary retirement, age 38, or a visible post-fight long-term health threshold of 25 or below; the UI must explain the threshold and the cause of injury retirement. |
 | 2026-08-29 | Accepted | Remove side control and its dedicated move family. Ground progression now goes directly from guard passing to mount, keeping fewer positions with clearer strategic roles. |
+| 2026-08-29 | Accepted | Use GitHub Pages at `playcagelife.com` as the sole production distribution site. Do not deploy or maintain a ChatGPT Sites version. |
+| 2026-08-29 | Accepted | At character creation, prompt browser-tab players in Traditional Chinese to install or add the PWA to their home screen; do not show the prompt in standalone PWA mode. |

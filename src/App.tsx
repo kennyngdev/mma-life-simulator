@@ -36,6 +36,16 @@ import { t } from './i18n'
 const BRANCHES: Branch[] = ['boxing', 'kicking', 'clinch', 'wrestling', 'ground']
 const minigameTutorialKey = (kind: 'strike' | 'submission') => `cage-life:minigame-tutorial-seen-v2:${kind}`
 
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
+function isStandalonePwa() {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia?.('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true
+}
+
 export default function App() {
   const [game, setGame] = useState<GameState>()
   const [biographies, setBiographies] = useState<Biography[]>([])
@@ -149,6 +159,33 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
   const [startingExperience, setStartingExperience] = useState<StartingExperience>('hobbyist')
   const [seed, setSeed] = useState(randomSeed())
   const [showHall, setShowHall] = useState(false)
+  const [standalonePwa, setStandalonePwa] = useState(isStandalonePwa)
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent>()
+
+  useEffect(() => {
+    const media = window.matchMedia?.('(display-mode: standalone)')
+    const updateStandalone = () => setStandalonePwa(isStandalonePwa())
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as InstallPromptEvent)
+    }
+
+    media?.addEventListener('change', updateStandalone)
+    window.addEventListener('beforeinstallprompt', captureInstallPrompt)
+    window.addEventListener('appinstalled', updateStandalone)
+    return () => {
+      media?.removeEventListener('change', updateStandalone)
+      window.removeEventListener('beforeinstallprompt', captureInstallPrompt)
+      window.removeEventListener('appinstalled', updateStandalone)
+    }
+  }, [])
+
+  const requestInstall = async () => {
+    if (!installPrompt) return
+    await installPrompt.prompt()
+    await installPrompt.userChoice
+    setInstallPrompt(undefined)
+  }
 
   return (
     <main className="start-shell">
@@ -158,6 +195,19 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
         <h1>拳途人生 Cage Life</h1>
         <p className="hero-copy">沒有人能學會所有招式再走進鐵籠。<br />一次次取捨，會決定你成為什麼樣的拳手。</p>
       </section>
+
+      {!standalonePwa && <aside className="pwa-install-prompt" role="note" aria-labelledby="pwa-install-title">
+        <div>
+          <span className="pwa-install-mark" aria-hidden="true">▣</span>
+          <div>
+            <strong id="pwa-install-title">以 App 模式踏進鐵籠</strong>
+            <p>加入主畫面後，可全螢幕開啟《拳途人生》，進度仍會保留在這台裝置。</p>
+          </div>
+        </div>
+        {installPrompt
+          ? <button type="button" className="pwa-install-button" onClick={() => void requestInstall()}>安裝 App</button>
+          : <small>請在瀏覽器選單選擇「安裝 App」或「加入主畫面」。</small>}
+      </aside>}
 
       <section className="setup-panel">
         <label className="field-label" htmlFor="fighter-name">拳手姓名（選填）</label>

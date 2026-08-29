@@ -20,7 +20,7 @@ Keep these rules while working in this repository:
 
 ## Publishing to GitHub Pages
 
-The production site is deployed by `.github/workflows/deploy-pages.yml` whenever `master` is updated. The workflow builds `dist/client` with `VITE_BASE_PATH=/` and deploys it through GitHub Pages. Configure the production custom domain `playcagelife.com` in the repository's GitHub Pages settings.
+The production site is deployed by `.github/workflows/deploy-pages.yml` whenever `master` is updated. The workflow builds `dist/client` with `VITE_BASE_PATH=/` and deploys it through GitHub Pages. Configure the production custom domain `playcagelife.com` in the repository's GitHub Pages settings. GitHub Pages is the sole production hosting path: do not create, deploy, or maintain a ChatGPT Sites version.
 
 Reference checklist:
 
@@ -34,3 +34,8 @@ Reference checklist:
 8. Verify the live site at `https://playcagelife.com/`.
 
 Do not commit `dist/` or create a separate `gh-pages` branch; GitHub Actions owns the Pages artifact and deployment.
+
+## PWA entry experience
+
+- Character creation must show the PWA install/add-to-home-screen prompt only when the game is not running in standalone PWA mode.
+- Keep the prompt concise, in Traditional Chinese, and usable on a 320 px-wide viewport. Test both browser-tab and standalone-mode behavior when changing it.

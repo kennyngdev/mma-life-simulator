@@ -11,6 +11,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Established the official product name as **拳途人生 Cage Life** across the game shell, PWA metadata, sharing text, and design specification.
 - Adopted Semantic Versioning and a required changelog workflow for future repository changes.
 - Prepared GitHub Pages to serve the production site from `playcagelife.com` at the root path.
+- Declared GitHub Pages at `playcagelife.com` the sole production hosting path; ChatGPT Sites is not used for this game.
+- Added a Traditional-Chinese PWA install/add-to-home-screen prompt to character creation for browser-tab players.
+- Removed the legacy ChatGPT Sites build integration so GitHub Pages is the only deployment target.
 
 ## [0.1.0]
 

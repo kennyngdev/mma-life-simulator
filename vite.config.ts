@@ -1,14 +1,12 @@
 import { defineConfig } from 'vitest/config'
 import { loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
-import { sites } from '@openai/sites-vite-plugin'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig(({ mode }) => ({
   base: loadEnv(mode, '.', '').VITE_BASE_PATH || '/',
   plugins: [
     react(),
-    sites(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['cage-mark.svg'],
