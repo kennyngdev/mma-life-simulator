@@ -128,6 +128,7 @@ export const TRAITS: TraitDefinition[] = [
   { id: 'submission-sense', name: '關節直覺', rarity: 'rare', description: '頸部或手臂一露出，你會比別人早半拍看見。', condition: '利用破綻嘗試降服', effect: '降服壓力 +25%', tradeoff: '失敗時額外消耗體力', modifier: 'submissionPressure', amount: 25 },
   { id: 'one-shot-power', name: '一擊天賦', rarity: 'legendary', description: '每個回合的第一記全力重擊都足以改變比賽。', condition: '每回合第一次高承諾打擊', effect: '終結壓力 +35%', tradeoff: '揮空時體力消耗 +20%', modifier: 'finishPressure', amount: 35 },
   { id: 'born-survivor', name: '絕境生還', rarity: 'legendary', description: '真正危險時，你的動作反而變得最清楚。', condition: '身體進入危急狀態', effect: '防守成功率 +35%', modifier: 'criticalDefense', amount: 35 },
+  { id: 'fighting-genius', name: '戰鬥天才', rarity: 'legendary', description: '你不只學得快，還能把不同領域的資訊連成自己的理解。', condition: '所有技術訓練與影片研究', effect: '五項技術 XP +12%；影片研究時戰術智商額外 +1', modifier: 'fightingGenius', amount: 12 },
 
   { id: 'power-puncher', name: '重拳終結者', rarity: 'rare', description: '你已證明拳頭不只得分，也能直接結束比賽。', condition: '以拳擊完成 KO 勝利', effect: '拳擊傷害與終結壓力 +20%', modifier: 'punchDamage', amount: 20, earned: { key: 'punchKos', threshold: 2 } },
   { id: 'high-kick-artist', name: '高踢獵手', rarity: 'rare', description: '你把踢擊藏到對手忘記防守的瞬間。', condition: '以踢擊完成 KO 勝利', effect: '踢擊傷害與終結壓力 +20%', modifier: 'kickDamage', amount: 20, earned: { key: 'kickKos', threshold: 2 } },
@@ -136,6 +137,12 @@ export const TRAITS: TraitDefinition[] = [
   { id: 'comeback-fighter', name: '逆轉鬥士', rarity: 'rare', description: '比分落後時，你不再把壓力誤認成結局。', condition: '首回合落後後繼續比賽', effect: '落後時成功率 +20%', modifier: 'comeback', amount: 20, earned: { key: 'comebackWins', threshold: 2 } },
   { id: 'iron-will', name: '鋼鐵意志', rarity: 'rare', description: '你曾多次看見比賽即將結束，卻仍走了回來。', condition: '身體進入危急狀態', effect: '危急狀態防守 +20%', modifier: 'criticalDefense', amount: 20, earned: { key: 'survivedFinishWindows', threshold: 3 } },
   { id: 'cage-general', name: '籠邊統治者', rarity: 'uncommon', description: '鐵網對你不是邊界，而是一件控制對手的工具。', condition: '累積 6 分鐘籠邊控制', effect: '籠邊控制效果 +15%', modifier: 'cageControl', amount: 15, earned: { key: 'cageMinutes', threshold: 6 } },
+  { id: 'chain-wrestler', name: '連鎖摔手', rarity: 'uncommon', description: '第一次進腿被擋住時，你總能立刻接上下一層攻勢。', condition: '完成 6 次有效摔倒', effect: '轉位成功率 +15%', modifier: 'transitionSkill', amount: 15, earned: { key: 'takedowns', threshold: 6 } },
+  { id: 'knockdown-instinct', name: '擊倒嗅覺', rarity: 'rare', description: '你知道對手雙腳發軟的那一拍不能放過。', condition: '累積 3 次擊倒', effect: '高承諾動作終結壓力 +12%', modifier: 'finishPressure', amount: 12, earned: { key: 'knockdowns', threshold: 3 } },
+  { id: 'finishing-rhythm', name: '終結節奏', rarity: 'rare', description: '一旦對手開始崩解，你能把壓力維持到裁判介入。', condition: '完成 4 場終結勝利', effect: '高承諾動作終結壓力 +10%', modifier: 'finishPressure', amount: 10, earned: { key: 'finishes', threshold: 4 } },
+  { id: 'decision-craft', name: '判定工匠', rarity: 'uncommon', description: '你知道何時該取分、何時該把自己帶回下一回合。', condition: '打滿 5 場判定', effect: '回合恢復 +10%', modifier: 'roundRecovery', amount: 10, earned: { key: 'decisions', threshold: 5 } },
+  { id: 'winning-routine', name: '勝者日常', rarity: 'uncommon', description: '你把備戰和節奏變成不需要意志力的習慣。', condition: '取得 8 場勝利', effect: '動作體力消耗 -8%', modifier: 'staminaEfficiency', amount: 8, earned: { key: 'wins', threshold: 8 } },
+  { id: 'deep-water-survivor', name: '深水生還者', rarity: 'rare', description: '你不只撐過危機，還能把它變成後段比賽的冷靜。', condition: '生還 6 次終結窗口', effect: '危急狀態防守 +10%', modifier: 'criticalDefense', amount: 10, earned: { key: 'survivedFinishWindows', threshold: 6 } },
 ]
 
 export const BIRTH_TRAITS = TRAITS.filter((trait) => !trait.earned)

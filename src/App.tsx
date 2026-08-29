@@ -195,6 +195,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
         <p className="eyebrow">MMA LIFE SIMULATOR</p>
         <h1>拳途人生 Cage Life</h1>
         <p className="hero-copy">沒有人能學會所有招式再走進鐵籠。<br />一次次取捨，會決定你成為什麼樣的拳手。</p>
+        <small className="build-version" aria-label="遊戲版本 0.2.0">v0.2.0</small>
       </section>
 
       {!standalonePwa && <aside className="pwa-install-prompt" role="note" aria-labelledby="pwa-install-title">

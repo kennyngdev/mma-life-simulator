@@ -146,7 +146,7 @@ describe('拳途人生模擬核心', () => {
     expect(skillLevel(0)).toBe(0)
     expect(skillLevel(1_500)).toBe(5)
     expect([0, 1, 2, 3, 4, 5].map((level) => skillStrengthLabel(level as ReturnType<typeof skillLevel>))).toEqual(['未受訓', '初學', '中階', '熟練', '進階', '大師'])
-    expect(EARNED_TRAITS.map((trait) => trait.id)).toEqual(expect.arrayContaining(['power-puncher', 'escape-artist', 'iron-will']))
+    expect(EARNED_TRAITS.map((trait) => trait.id)).toEqual(expect.arrayContaining(['power-puncher', 'escape-artist', 'iron-will', 'chain-wrestler', 'finishing-rhythm', 'decision-craft']))
   })
 
   it('普通人、業餘愛好者與半職業選手從不同技能與舞台起步', () => {

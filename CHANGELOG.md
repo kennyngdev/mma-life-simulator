@@ -12,6 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Added an accepted Threads promotion specification covering Traditional-Chinese audience positioning, content cadence, community engagement, player-feedback intake, moderation, and success measurement.
 - Added clearly labeled fast-track fight cards, letting players voluntarily face a substantially higher-ranked opponent for faster, causally earned ladder movement; existing unsigned offer sets migrate to include them without altering signed fights.
+- Added the legendary birth trait `戰鬥天才`, increasing every technical training XP gain by 12% and granting an extra Fight IQ from film study without direct combat bonuses.
+- Added six performance-earned traits for takedowns, knockdowns, finishes, decision experience, wins, and surviving finish windows.
 
 ### Changed
 

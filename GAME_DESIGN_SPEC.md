@@ -185,6 +185,8 @@ Every fighter and generated opponent begins with 1–3 seeded traits:
 
 A trait must describe a recognizable fighter. It needs a condition, a gameplay effect, and normally a trade-off or limited activation window. Exact opponent traits and effects are visible on fight offers so the player can prepare rather than discover arbitrary hidden bonuses.
 
+`戰鬥天才` is legendary and growth-only: all five technique branches gain 12% more XP from training and each film-study session gains one additional Fight IQ. It grants no direct exchange, damage, stamina, or rating bonus, preserving the slower career curve.
+
 ### 5.2 Performance-earned traits — Accepted
 
 Only the player earns new traits during a career. There is no hard count cap and no duplicate trait IDs. Progress becomes visible after the first qualifying action, with the exact threshold shown. Awards occur after fight processing, enter history, and appear before the career continues.
@@ -198,6 +200,12 @@ Only the player earns new traits during a career. There is no hard count cap and
 | Comeback Fighter | Win 2 fights after losing round one | +20% success while behind after round one |
 | Iron Will | Survive 3 finish windows | +20% defensive success while critically damaged |
 | Cage General | Accumulate 6 minutes of cage control | +15% cage-control effects |
+| Chain Wrestler | 6 clean takedowns | +15% transition success |
+| Knockdown Instinct | 3 knockdowns | +12% committed-move finish pressure |
+| Finishing Rhythm | 4 finish wins | +10% committed-move finish pressure |
+| Decision Craft | 5 decisions | +10% round recovery |
+| Winning Routine | 8 wins | -8% action stamina cost |
+| Deep-Water Survivor | Survive 6 finish windows | +10% defensive success while critically damaged |
 
 Punch and kick KO traits count only a recorded `KO`, not a TKO, and use the recorded finishing move's strike kind. Modifier families stack additively and are capped at `±50%`.
 
@@ -329,3 +337,4 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-29 | Accepted | Slow technique training to a 50–70 XP pre-modifier range with 100% / 60% / 28% first-to-third technique-session efficiency in each camp. The first session still makes a Normie functional, while concentrated training no longer trivializes later fights. |
 | 2026-08-29 | Accepted | Tie move acquisition directly to skill growth: the first 100 XP automatically grants a three-move level-one attack/defense/transition foundation, while every later 175-XP milestone unlocks one selected move. Every session, including the first, follows aptitude-sensitive XP so low-talent fighters take longer to unlock moves. |
 | 2026-08-29 | Accepted | A Normie begins with exactly two weak learned actions per branch—attack plus defense in boxing/kicking, defense plus escape in clinch/wrestling/ground—rather than a hidden universal toolkit. Hobbyists begin with their two trained branches' foundations; Semi-pros begin with a foundation in all five branches. |
+| 2026-08-29 | Accepted | Expand performance-earned traits using recorded fight evidence, so more careers gain distinct milestones without random post-fight loot. Add the legendary growth-only birth trait `戰鬥天才`: +12% technical XP in every branch and +1 Fight IQ from film study, with no direct combat bonus. |

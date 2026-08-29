@@ -106,6 +106,7 @@ export type TraitModifier =
   | 'bottomEscape' | 'cageControl' | 'comeback' | 'criticalDefense'
   | 'rangeSkill' | 'pocketSkill' | 'staminaEfficiency' | 'roundRecovery'
   | 'trainingXp' | 'headDefense' | 'transitionSkill'
+  | 'fightingGenius'
 
 export interface TraitDefinition {
   id: string

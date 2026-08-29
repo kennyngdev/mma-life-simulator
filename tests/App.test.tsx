@@ -201,6 +201,12 @@ describe('生涯重置', () => {
     expect(screen.getByRole('note')).toHaveTextContent('加入主畫面')
   })
 
+  it('拳手建立頁顯示目前遊戲版本', async () => {
+    storage.loadGame.mockResolvedValue({})
+    render(<App />)
+    expect(await screen.findByLabelText('遊戲版本 0.2.0')).toHaveTextContent('v0.2.0')
+  })
+
   it('以 PWA 獨立模式開啟時不顯示安裝提示', async () => {
     vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     storage.loadGame.mockResolvedValue({})

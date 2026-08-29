@@ -1236,7 +1236,7 @@ function applyCampActivity(
     const xpBefore = progress.xp
     const levelBefore = skillLevel(progress.xp)
     const coachFactor = coachTier === 'trusted' ? 1.1 : coachTier === 'strained' ? 0.9 : 1
-    const learnerFactor = 1 + traitModifier(fighter.traits, 'trainingXp') / 100
+    const learnerFactor = 1 + (traitModifier(fighter.traits, 'trainingXp') + traitModifier(fighter.traits, 'fightingGenius')) / 100
     const campFactor = TECHNIQUE_CAMP_XP_FACTORS[Math.min(repeats, TECHNIQUE_CAMP_XP_FACTORS.length - 1)]
     const calculated = Math.round((50 + 20 * score) * progress.aptitude * coachFactor * learnerFactor * campFactor)
     const xpGain = calculated
@@ -1275,10 +1275,11 @@ function applyCampActivity(
     if (coachTier !== 'steady') effects.push(coachTier === 'trusted' ? '教練默契：本次 XP ×1.1' : '教練關係緊張：本次 XP ×0.9')
   } else if (action === 'film') {
     const scoutGain = 20 + Math.round(score * 16)
-    fighter.mind.fightIQ = clamp(fighter.mind.fightIQ + 1)
+    const iqGain = 1 + (traitModifier(fighter.traits, 'fightingGenius') > 0 ? 1 : 0)
+    fighter.mind.fightIQ = clamp(fighter.mind.fightIQ + iqGain)
     fighter.fatigue = clamp(fighter.fatigue + 3)
     scouting = clamp(scouting + scoutGain)
-    effects.push(`戰術智商 +1 · 情報 +${scoutGain}`)
+    effects.push(`戰術智商 +${iqGain} · 情報 +${scoutGain}`)
     effects.push('疲勞 +3')
   } else {
     const familyRecoveryModifier = familyTier === 'trusted' ? 2 : familyTier === 'strained' ? -2 : 0
