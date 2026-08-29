@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { advance, createNewRun, getCompetitionWeightClass } from '../src/game/engine'
 import { FIGHT_INTENTS, OPENING_LABELS } from '../src/game/fight-content'
-import type { CampAction, CampDrillChallenge, CriticalOption, FinishKind, GameState } from '../src/game/types'
+import type { CampAction, CampDrillChallenge, CriticalOption, FinishKind, GameState, LeagueId } from '../src/game/types'
 
 const storage = vi.hoisted(() => ({
   archiveBiography: vi.fn(),
@@ -81,6 +81,22 @@ function gameAtBackControl(): GameState {
   return game
 }
 
+function gameAtCagePosition(position: 'cage-control' | 'cage-defense', league: LeagueId | 'grassroots' = 'grassroots'): GameState {
+  const game = gameAtBackControl()
+  Object.assign(game.fight!, {
+    position,
+    prompt: { ...game.fight!.prompt!, title: `轉折｜${position === 'cage-control' ? '籠邊壓制' : '背靠籠網'}`, position },
+  })
+  if (league === 'grassroots') {
+    game.stage = 'grassroots'
+    game.fighter.leagueStanding = undefined
+  } else {
+    game.stage = league
+    game.fighter.leagueStanding = { league, status: 'unranked' }
+  }
+  return game
+}
+
 function gameAtCounteredTakedownEntry(): GameState {
   const game = gameAtBackControl()
   const opponent = game.opponents.find((item) => item.id === game.fight!.opponentId)!
@@ -95,6 +111,7 @@ function gameAtCounteredTakedownEntry(): GameState {
 
 function gameAtCampDrill(kind: CampAction): GameState {
   const game = createNewRun(input)
+  if (kind === 'technique') game.fighter.skills.boxing.xp = 250
   const branch = kind === 'technique' ? 'boxing' as const : undefined
   const answer = 'boxing'
   const challenge: CampDrillChallenge = {
@@ -112,6 +129,7 @@ function gameAtCampDrill(kind: CampAction): GameState {
 
 function gameAtGeneratedCampDrill(kind: CampAction, branch: 'boxing' = 'boxing'): GameState {
   const game = createNewRun(input)
+  if (kind === 'technique') game.fighter.skills[branch].xp = 250
   game.phase = 'camp'
   game.selectedOfferId = game.offers[0].id
   return advance(game, { type: 'START_CAMP_DRILL', action: kind, branch: kind === 'technique' ? branch : undefined }).state
@@ -208,8 +226,8 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
-    expect(await screen.findAllByText(/出場費 HK\$/)).toHaveLength(3)
-    expect(screen.getAllByText(/同鄉對決|客場挑戰者/)).toHaveLength(3)
+    expect(await screen.findAllByText(/出場費 HK\$/)).toHaveLength(4)
+    expect(screen.getAllByText(/同鄉對決|客場挑戰者/)).toHaveLength(4)
     const offeredOpponents = game.offers.map((offer) => game.opponents.find((opponent) => opponent.id === offer.opponentId)!)
     for (const opponent of offeredOpponents) if (opponent.hometown) expect(screen.getAllByText(new RegExp(opponent.hometown)).length).toBeGreaterThan(0)
   })
@@ -220,7 +238,7 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
-    expect(await screen.findAllByLabelText('出場費計算')).toHaveLength(3)
+    expect(await screen.findAllByLabelText('出場費計算')).toHaveLength(4)
     expect(screen.getAllByLabelText('出場費計算')[0]).toHaveTextContent('基礎')
     expect(screen.getByText(/資金吃緊|有緩衝|可自主選擇/)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '用積蓄等待另一組邀約' })).toBeInTheDocument()
@@ -301,12 +319,14 @@ describe('生涯重置', () => {
     })
   })
 
-  it('學習招式時清楚選定四選二，並顯示位置與最適攻防階段', async () => {
+  it('學習招式時清楚選定四選一，並顯示位置與最適攻防階段', async () => {
     const game = createNewRun(input)
     game.phase = 'training-reward'
     game.trainingMoveBranch = 'wrestling'
     game.trainingMoveChoices = ['shot-entry', 'level-change', 'body-lock-whizzer', 'collar-tie-club']
     game.trainingMoveSelections = []
+    game.trainingMoveRequired = 1
+    game.fighter.learnedMoves = game.fighter.learnedMoves.filter((moveId) => !game.trainingMoveChoices!.includes(moveId))
     storage.loadGame.mockResolvedValue({ game })
 
     render(<App />)
@@ -315,16 +335,15 @@ describe('生涯重置', () => {
     const shotEntry = screen.getByRole('button', { name: /抱摔切入/ })
     expect(shotEntry).toHaveTextContent(/可用位置：遠距站立、近身交換/)
     expect(shotEntry).toHaveTextContent(/最適階段：交鋒/)
-    const confirm = screen.getByRole('button', { name: /學會這 2 招/ })
+    const confirm = screen.getByRole('button', { name: /學會這 1 招/ })
     expect(confirm).toBeDisabled()
     fireEvent.click(shotEntry)
-    fireEvent.click(screen.getByRole('button', { name: /變換高度/ }))
-    expect(screen.getByText('已選 2／2 招')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('已選 1／1 招')
     expect(confirm).toBeEnabled()
     fireEvent.click(confirm)
     await waitFor(() => {
       const saved = storage.saveGame.mock.calls.at(-1)?.[0] as GameState
-      expect(saved.fighter.learnedMoves).toEqual(expect.arrayContaining(['shot-entry', 'level-change']))
+      expect(saved.fighter.learnedMoves).toEqual(expect.arrayContaining(['shot-entry']))
     })
   })
 
@@ -551,9 +570,9 @@ describe('生涯重置', () => {
     render(<App />)
 
     expect(await screen.findByText(/教練的話$/)).toBeInTheDocument()
-    expect(screen.getAllByText('他最擅長')).toHaveLength(3)
-    expect(screen.getAllByText('可以針對')).toHaveLength(3)
-    expect(screen.getAllByLabelText(/的賽前情報$/)).toHaveLength(3)
+    expect(screen.getAllByText('他最擅長')).toHaveLength(4)
+    expect(screen.getAllByText('可以針對')).toHaveLength(4)
+    expect(screen.getAllByLabelText(/的賽前情報$/)).toHaveLength(4)
   })
 
   it('在擊倒窗口顯示單指拖曳瞄準與時機操作', async () => {
@@ -689,6 +708,38 @@ describe('生涯重置', () => {
     render(<App />)
 
     expect(await screen.findAllByText('這段攻防不應在場景下方重複。')).toHaveLength(1)
+  })
+
+  it('籠邊壓制把你標在壓制者角色上，對手貼近鐵網', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtCagePosition('cage-control') })
+    render(<App />)
+
+    const scene = await screen.findByRole('img', { name: '目前位置：籠邊壓制' })
+    expect(scene.querySelector('image')).toHaveAttribute('href', '/assets/combat-arena-pixel.png')
+    expect(within(scene).getByText('你')).toHaveClass('player-name')
+    expect(within(scene).getByText('對手')).toHaveClass('opponent-name')
+    expect(scene.querySelector('.position-sprite')).toHaveAttribute('href', '/assets/fighters-cage-control-pixel.png')
+  })
+
+  it('背靠籠網時你朝向對手，對手朝向鐵網', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtCagePosition('cage-defense') })
+    render(<App />)
+
+    const scene = await screen.findByRole('img', { name: '目前位置：背靠籠網' })
+    expect(scene.querySelector('.position-sprite')).toHaveAttribute('href', '/assets/fighters-cage-defense-pixel.png')
+  })
+
+  it.each([
+    ['amateur', '/assets/combat-arena-amateur-pixel.png'],
+    ['regional', '/assets/combat-arena-regional-pixel.png'],
+    ['asia', '/assets/combat-arena-asia-pixel.png'],
+    ['world', '/assets/combat-arena-world-pixel.png'],
+  ] as const)('%s 聯盟使用專屬且固定鏡位的戰鬥場館', async (league, backdrop) => {
+    storage.loadGame.mockResolvedValue({ game: gameAtCagePosition('cage-control', league) })
+    render(<App />)
+
+    const scene = await screen.findByRole('img', { name: '目前位置：籠邊壓制' })
+    expect(scene.querySelector('image')).toHaveAttribute('href', backdrop)
   })
 
   it('選擇戰術後用彈窗說明如何落到目前位置', async () => {

@@ -1,6 +1,6 @@
 import { openDB } from 'idb'
 import { BACKGROUNDS, REGION_PROFILES } from './content'
-import { ensureLeagueRosters, generateOffers, getCompetitionWeightClass, opponentBodyFor, rankingAfterWin } from './engine'
+import { competitiveRatingForFighter, competitiveRatingForOpponent, ensureLeagueRosters, generateOffers, getCompetitionWeightClass, opponentBodyFor, rankingAfterWin, riskLabelForGap } from './engine'
 import type { Biography, Branch, CampAction, CampDrillChallenge, CampDrillOutcome, FightOffer, GameState, LeagueId, LeagueRecord, LoadGameResult, Position, SaveEnvelope } from './types'
 
 const DATABASE = 'cage-life'
@@ -31,6 +31,36 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.23.0' && envelope.contentVersion === '1.6.0') {
+    return { game: envelope.game as GameState }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.22.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateBalancedMatchmaking(envelope.game) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.21.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateLeadSkillRating(envelope.game) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.20.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateBeginnerMoveToolkits(envelope.game) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.19.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateFormulaDrivenFoundationTraining(envelope.game) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.18.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migratePostFoundationMoveMilestones(envelope.game) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.17.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateFastTrackMatchmaking(envelope.game) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.16.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateFastTrackMatchmaking(migrateXpBasedMoveUnlocks(envelope.game)) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.15.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateFastTrackMatchmaking(migrateXpBasedMoveUnlocks(migrateMoveLearningPacing(envelope.game))) }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.14.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateFastTrackMatchmaking(migrateXpBasedMoveUnlocks(migrateMoveLearningPacing(migrateTechniqueTrainingPacing(envelope.game)))) }
+  }
   if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.13.0' && envelope.contentVersion === '1.6.0') {
     return { game: migrateLeagueRankings(envelope.game) }
   }
@@ -108,6 +138,7 @@ export function migrateRemovedSideControl(game: unknown): GameState {
     legacy.phase = legacy.campActions.length >= 3 ? 'life' : 'camp'
     legacy.trainingMoveChoices = undefined
     legacy.trainingMoveSelections = undefined
+    legacy.trainingMoveRequired = undefined
     legacy.trainingMoveBranch = undefined
   }
 
@@ -489,6 +520,148 @@ function finalizeLeagueMigration(game: GameState): GameState {
   migrated.saveVersion = 15
   migrated.rulesVersion = '0.13.0'
   migrated.contentVersion = '1.6.0'
+  return migrateFastTrackMatchmaking(migrateXpBasedMoveUnlocks(migrateMoveLearningPacing(migrateTechniqueTrainingPacing(migrateCompetitiveRatingBreadth(migrated)))))
+}
+
+/** Makes competitive rating reflect supporting MMA skills without discarding a signed fight. */
+export function migrateCompetitiveRatingBreadth(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.opponents = migrated.opponents.map((opponent) => ({
+    ...opponent,
+    rating: competitiveRatingForOpponent(opponent),
+  }))
+  const fighterRating = competitiveRatingForFighter(migrated.fighter)
+  const updateOfferRisk = (offer: FightOffer): FightOffer => {
+    const opponent = migrated.opponents.find((item) => item.id === offer.opponentId)
+    return opponent ? { ...offer, riskLabel: riskLabelForGap(opponent.rating - fighterRating) } : offer
+  }
+  const canRebuildOffers = !migrated.selectedOfferId
+    && (migrated.phase === 'reveal' || migrated.phase === 'offer' || migrated.phase === 'growth')
+  if (canRebuildOffers) {
+    const generated = generateOffers(migrated.fighter, migrated.opponents, migrated.rng)
+    migrated.rng = generated.rng
+    migrated.offers = generated.offers
+  } else {
+    migrated.offers = migrated.offers.map(updateOfferRisk)
+    if (migrated.fight) migrated.fight.offer = updateOfferRisk(migrated.fight.offer)
+  }
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.14.0'
+  migrated.contentVersion = '1.6.0'
+  return migrated
+}
+
+/** Slows future training without rewriting a fighter's earned skills or moves. */
+export function migrateTechniqueTrainingPacing(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.15.0'
+  migrated.contentVersion = '1.6.0'
+  return migrated
+}
+
+/** Limits future move acquisition without rewriting a pending or earned move reward. */
+export function migrateMoveLearningPacing(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.16.0'
+  migrated.contentVersion = '1.6.0'
+  return migrated
+}
+
+/** Makes future move rewards depend on crossing actual 100-XP skill milestones. */
+export function migrateXpBasedMoveUnlocks(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.17.0'
+  migrated.contentVersion = '1.6.0'
+  return migrated
+}
+
+/** Refreshes unsigned offers so active careers gain the fast-track card and revised title eligibility. */
+export function migrateFastTrackMatchmaking(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  const canRebuildOffers = !migrated.selectedOfferId
+    && (migrated.phase === 'reveal' || migrated.phase === 'offer' || migrated.phase === 'growth')
+  if (canRebuildOffers) {
+    const generated = generateOffers(migrated.fighter, migrated.opponents, migrated.rng)
+    migrated.rng = generated.rng
+    migrated.offers = generated.offers
+  }
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.18.0'
+  migrated.contentVersion = '1.6.0'
+  return migratePostFoundationMoveMilestones(migrated)
+}
+
+/** Spaces post-foundation move rewards while preserving every move already earned. */
+export function migratePostFoundationMoveMilestones(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.19.0'
+  migrated.contentVersion = '1.6.0'
+  return migrateFormulaDrivenFoundationTraining(migrated)
+}
+
+/** Existing earned XP and moves stay intact; only future first sessions use aptitude again. */
+export function migrateFormulaDrivenFoundationTraining(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.20.0'
+  migrated.contentVersion = '1.6.0'
+  return migrateBeginnerMoveToolkits(migrated)
+}
+
+/** Existing careers retain earned moves; new runs and future foundation unlocks use the beginner toolkit. */
+export function migrateBeginnerMoveToolkits(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.21.0'
+  migrated.contentVersion = '1.6.0'
+  return migrateLeadSkillRating(migrated)
+}
+
+/** Refresh unsigned cards and roster rating labels after the first specialist-rating revision. */
+export function migrateLeadSkillRating(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.opponents = migrated.opponents.map((opponent) => ({ ...opponent, rating: competitiveRatingForOpponent(opponent) }))
+  const canRebuildOffers = !migrated.selectedOfferId
+    && (migrated.phase === 'reveal' || migrated.phase === 'offer' || migrated.phase === 'growth')
+  if (canRebuildOffers) {
+    const generated = generateOffers(migrated.fighter, migrated.opponents, migrated.rng)
+    migrated.rng = generated.rng
+    migrated.offers = generated.offers
+  }
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.22.0'
+  migrated.contentVersion = '1.6.0'
+  return migrateBalancedMatchmaking(migrated)
+}
+
+/** Recalibrates aggregate ratings and unsigned cards after simulation showed 50% lead weighting overstates one-dimensional fighters. */
+export function migrateBalancedMatchmaking(game: unknown): GameState {
+  const migrated = structuredClone(game) as GameState
+  if (!migrated.fighter || !migrated.opponents) throw new Error('無法讀取舊生涯存檔')
+  migrated.opponents = migrated.opponents.map((opponent) => ({ ...opponent, rating: competitiveRatingForOpponent(opponent) }))
+  const canRebuildOffers = !migrated.selectedOfferId
+    && (migrated.phase === 'reveal' || migrated.phase === 'offer' || migrated.phase === 'growth')
+  if (canRebuildOffers) {
+    const generated = generateOffers(migrated.fighter, migrated.opponents, migrated.rng)
+    migrated.rng = generated.rng
+    migrated.offers = generated.offers
+  }
+  migrated.saveVersion = 15
+  migrated.rulesVersion = '0.23.0'
+  migrated.contentVersion = '1.6.0'
   return migrated
 }
 
@@ -627,7 +800,7 @@ type Version12Game = Omit<GameState, 'rulesVersion' | 'contentVersion' | 'traini
   trainingMoveSelections?: string[]
 }
 
-/** Preserves active careers while adopting authored move access and two-pick training rewards. */
+/** Preserves active careers while adopting authored move access and selectable training rewards. */
 export function migrateVersion12(game: unknown): GameState {
   const legacy = structuredClone(game) as Version12Game
   if (!legacy.fighter || !legacy.offers) throw new Error('無法讀取舊生涯存檔')

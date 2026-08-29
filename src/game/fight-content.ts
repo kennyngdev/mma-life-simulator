@@ -9,6 +9,12 @@ const COMMITTED_KICKS = new Set(['body-kick', 'switch-kick', 'question-mark-kick
 
 /** Identity-defining techniques unlock by authored complexity, not raw damage/control thresholds alone. */
 const AUTHORED_MOVE_LEVELS: Partial<Record<string, SkillLevel>> = {
+  // Complete beginner toolkits are deliberately level one: one attack, one
+  // defense, and one transition per branch.
+  'check-hook': 1,
+  'head-control': 1,
+  'ground-strikes': 1,
+  'sprawl-circle': 1,
   // A developing clinch fighter needs a route into the position before advanced Thai-clinch chains.
   'enter-clinch': 1,
   'inside-position': 1,
@@ -57,6 +63,7 @@ export const FIGHT_INTENTS: FightMoveDefinition[] = [
   move('jab-cross', '刺拳接直拳', '用刺拳固定視線，再以後手直拳穿過中線。', ['range', 'pocket'], 'boxing', 'offense', stages(9, 9, 6, 6), effects(8, 6, 1, 0, 0, 5, 4), { creates: ['high-guard'] }),
   move('attack-body', '身體拳', '以直拳或肝臟勾拳攻擊肋部與腹部。', ['range', 'pocket'], 'boxing', 'offense', stages(5, 10, 8, 7), effects(8, 0, 9, 0, 0, 6, 4), { exploits: ['high-guard'], creates: ['tight-elbows'] }),
   move('damage-base', '低掃', '用外側低掃削弱前腳、移動與平衡。', ['range', 'pocket'], 'kicking', 'offense', stages(7, 9, 8, 5), effects(7, 0, 1, 9, 0, 7, 4), { exploits: ['lead-leg-heavy'], creates: ['off-balance'] }),
+  move('touch-low-kick', '試探低踢', '用不承諾的低踢碰觸前腿，只為量距與讀取重心。', ['range'], 'kicking', 'offense', stages(9, 5, 4, 2), effects(3, 0, 0, 2, 0, 3, 0), { creates: ['lead-leg-heavy'] }),
   move('calf-kick', '小腿低掃', '用脛骨踢向腓總神經附近，快速削弱站姿與移動。', ['range', 'pocket'], 'kicking', 'offense', stages(7, 10, 8, 6), effects(7, 0, 0, 11, 0, 7, 5), { exploits: ['lead-leg-heavy'], creates: ['off-balance'] }),
   move('inside-low-kick', '內側低掃', '踢向大腿內側，讓雙腳交叉並破壞下一拍重心。', ['range'], 'kicking', 'offense', stages(8, 8, 10, 6), effects(6, 0, 0, 8, 2, 6, 3), { creates: ['off-balance', 'weight-forward'] }),
   move('front-kick', '前踢', '用腳掌頂開軀幹，打斷前壓並重建距離。', ['range'], 'kicking', 'defense', stages(9, 6, 8, 9), effects(5, 1, 7, 0, 2, 5, 3), { cleanPosition: 'range', defensive: true, exploits: ['weight-forward'], creates: ['off-balance'] }),

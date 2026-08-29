@@ -177,6 +177,7 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .scout-grid > div:first-child strong { color: #e3aa9f; }
 .scout-grid > div:last-child strong { color: #a8d0b5; }
 .offer-card > .coach-verdict { margin-top: 10px; padding: 9px 10px; color: #cfc2af; background: rgb(215 189 131 / .055); font-size: 12px; line-height: 1.6; }
+.offer-card > .fast-track-callout { margin-top: 10px; padding: 9px 10px; border: 1px solid rgb(226 166 79 / .45); color: #efd19c; background: rgb(226 166 79 / .08); font-size: 12px; line-height: 1.6; }
 .offer-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 13px 0; }
 .offer-meta span { padding: 5px 7px; border-radius: 6px; color: var(--gold); background: rgb(215 189 131 / .09); font-size: 11px; }
 .purse-breakdown { margin: -6px 0 13px !important; color: #bcae99 !important; font-size: 11px !important; line-height: 1.55; }
@@ -202,7 +203,7 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .league-status-card p { margin: 8px 0 0; color: #d1c3b2; font-size: 12px; line-height: 1.6; }
 .league-status-card.league-champion { border-color: rgb(215 189 131 / .58); border-left-color: var(--gold); background: linear-gradient(145deg, rgb(215 189 131 / .15), var(--surface)); }
 .league-status-card.league-champion span, .league-status-card.league-champion strong { color: var(--gold); }
-.league-requirements { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 11px; }
+.league-requirements { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 11px; }
 .league-requirements span { padding: 7px 5px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: rgb(0 0 0 / .15); font-size: 10px; font-weight: 700; text-align: center; letter-spacing: 0; }
 .league-requirements span.met { border-color: rgb(98 169 123 / .6); color: #9fd3ad; background: rgb(98 169 123 / .1); }
 .league-standings { margin: 22px 0 26px; }
@@ -366,21 +367,13 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .player-dot { fill: var(--accent); }
 .opponent-dot { fill: #7186a5; }
 .position-scene { margin-top: 7px; overflow: hidden; border: 1px solid rgb(98 90 80 / .45); border-radius: 11px; background: #0d0c0a; }
-.position-scene svg { display: block; }
-.scene-name { font-size: 3.2px !important; font-weight: 800 !important; letter-spacing: .02em; }
+.position-scene svg { display: block; image-rendering: pixelated; }
+.position-sprite { image-rendering: pixelated; }
+.scene-frame { fill: none; stroke: rgb(10 8 8 / .9); stroke-width: 1.5; }
+.scene-name { font-size: 3.2px !important; font-weight: 800 !important; letter-spacing: .02em; paint-order: stroke; stroke: #11100e; stroke-width: 1px; }
 .scene-name.player-name { fill: #f08a70 !important; }
 .scene-name.opponent-name { fill: #a9c2e5 !important; }
-.fighter-glyph { transition: transform .24s ease-out; }
-.fighter-glyph .fighter-head { stroke: #0b0a09; stroke-width: 1.1; }
-.fighter-glyph .fighter-body { fill: none; stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
-.fighter-glyph.player .fighter-head { fill: var(--accent); }
-.fighter-glyph.player .fighter-body { stroke: var(--accent); }
-.fighter-glyph.opponent .fighter-head { fill: #7186a5; }
-.fighter-glyph.opponent .fighter-body { stroke: #7186a5; }
 .fighter-shadow { fill: rgb(0 0 0 / .42); }
-.position-connection path { fill: none; stroke: #d7bd83; stroke-width: 1.2; stroke-dasharray: 2 1; opacity: .82; }
-.position-connection ellipse { fill: none; stroke: #d7bd83; stroke-width: 1; opacity: .75; }
-.connection-ground path { stroke-width: 1.7; stroke-dasharray: none; opacity: .45; }
 .cage-pressure-zone path { fill: none; stroke: var(--danger); stroke-width: .65; opacity: .8; }
 .cage-pressure-zone text { fill: #d98270 !important; font-size: 3px !important; font-weight: 800 !important; }
 .position-readout { padding: 11px 12px 12px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 10px; border-top: 1px solid var(--line); background: linear-gradient(90deg, rgb(226 83 53 / .07), rgb(113 134 165 / .05)); }

@@ -364,7 +364,7 @@ function OfferView({ game, dispatch }: ViewProps) {
           const strength = strongestBranch(opponent)
           const titleRole = offer.titleRole ?? (offer.titleFight ? 'challenge' : 'ordinary')
           return <article className={`offer-card risk-${riskTone(offer.riskLabel)}`} key={offer.id}>
-            <div className="offer-top"><span>{offer.promotion}</span><b>{titleRole === 'challenge' ? '挑戰冠軍' : titleRole === 'defense' ? '衛冕戰' : offer.riskLabel}</b></div>
+            <div className="offer-top"><span>{offer.fastTrack ? '快速晉級卡' : offer.promotion}</span><b>{titleRole === 'challenge' ? '挑戰冠軍' : titleRole === 'defense' ? '衛冕戰' : offer.fastTrack ? '跨級挑戰' : offer.riskLabel}</b></div>
             <h2>{opponent.name}</h2>
             {opponent.alias && <span className="opponent-alias">{opponent.alias}</span>}
             <p>{opponent.hometown ? `${opponent.hometown} · ` : ''}{opponent.nationality ?? opponent.region} · {opponent.style} · 戰績 {opponent.record.wins}-{opponent.record.losses} · {opponent.standing === 'champion' ? `${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍` : opponent.rank !== undefined ? `排名 #${opponent.rank}` : '未排名'} · 競技評級 {competitiveRatingForOpponent(opponent)}</p>
@@ -377,6 +377,7 @@ function OfferView({ game, dispatch }: ViewProps) {
               return trait ? <small className={`rarity-${trait.rarity}`} key={owned.id}><b>{trait.name}</b> · {trait.condition}：{trait.effect}</small> : null
             })}</div>
             <p className="coach-verdict">「{coachVerdict(opponent, offer.riskLabel)}」</p>
+            {offer.fastTrack && <p className="fast-track-callout">擊敗比常規邀約更高排名的對手，會依該對手的席位直接大幅上升排名；代價是面對更高的排名門檻。</p>}
             <div className="offer-meta"><span>出場費 {formatRegionalMoney(offer.purse, game.fighter.region)}</span><span>{offer.shortNotice ? '短期代打' : '完整備戰'}</span>{offer.venueRegion && <span>{offer.opponentIsLocal ? '同鄉對決' : '客場挑戰者'}</span>}</div>
             <PurseBreakdown offer={offer} region={game.fighter.region} />
             {opponent.meetings > 0 && <p className="memory-callout">你們已經交手 {opponent.meetings} 次，彼此都很清楚上次發生了什麼。</p>}
@@ -408,15 +409,13 @@ function LeagueStatusCard({ game }: { game: GameState }) {
   const league = leagueForGame(game)
   const rating = competitiveRatingForFighter(game.fighter)
   if (!league || !standing) return <aside className="league-status-card"><div><span>目前階段</span><strong>草根試煉 · 未納入聯盟排名</strong></div><p>完成這段草根試煉後，你會以未排名拳手加入業餘聯盟。</p></aside>
-  const record = game.fighter.leagueRecords?.[league]
-  const streak = Math.max(record?.winStreak ?? 0, record?.consecutiveWins ?? 0)
   const floor = LEAGUE_TITLE_RATING_FLOORS[league]
   const champion = standing.status === 'champion'
   return <aside className={`league-status-card${champion ? ' league-champion' : ''}`} aria-label="目前聯盟排名">
     <div><span>{LEAGUE_LABELS[league]}</span><strong>{standing.status === 'champion' ? '聯盟冠軍' : standing.status === 'ranked' ? `排名 #${standing.rank}` : '未排名'}</strong></div>
     {champion
       ? <p>{standing.defenses ? `已成功衛冕 ${standing.defenses} 次。` : '你剛剛拿下這條腰帶。下一步可以選擇升上更大的舞台，或留下來衛冕。'}</p>
-      : <><p>{standing.status === 'unranked' ? '先擊敗 #13–#15 的對手，取得這個聯盟的第一個排名。' : '排名前 3、目前聯盟兩連勝，並達到競技評級門檻，才會收到冠軍戰邀請。'}</p><div className="league-requirements"><span className={standing.status === 'ranked' && standing.rank <= 3 ? 'met' : ''}>前 3 {standing.status === 'ranked' ? (standing.rank <= 3 ? '✓' : `#${standing.rank}`) : '—'}</span><span className={streak >= 2 ? 'met' : ''}>連勝 {Math.min(2, streak)}／2</span><span className={rating >= floor ? 'met' : ''}>評級 {rating}／{floor}</span></div></>}
+      : <><p>{standing.status === 'unranked' ? '先擊敗排名對手，取得這個聯盟的第一個席位；快速晉級卡能直接挑戰 #10。' : '排名前 3 並達到競技評級門檻，就會收到冠軍戰邀請。競技評級會綜合最強兩項、其餘三項與戰術智商。'}</p><div className="league-requirements"><span className={standing.status === 'ranked' && standing.rank <= 3 ? 'met' : ''}>前 3 {standing.status === 'ranked' ? (standing.rank <= 3 ? '✓' : `#${standing.rank}`) : '—'}</span><span className={rating >= floor ? 'met' : ''}>評級 {rating}／{floor}</span></div></>}
   </aside>
 }
 
@@ -474,7 +473,7 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
     return relationship ? getRelationshipBenefit(relationship) : undefined
   }
   const techniqueActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
-    { id: 'technique', name: '技術訓練', detail: `穩定累積${BRANCH_META[branch].name} XP；有新招式時可從最多 4 招中選 2 招學會`, risk: '增加疲勞', edge: '爭取額外 XP' },
+    { id: 'technique', name: '技術訓練', detail: `穩定累積${BRANCH_META[branch].name} XP；首個 100 XP 自動學會三項基本功，之後里程碑可從最多 4 招中選 1 招`, risk: '增加疲勞', edge: '爭取額外 XP' },
   ]
   const generalActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
     { id: 'film', name: '影片研究', detail: '研究對手習慣，穩定增加情報與戰術智商', risk: '疲勞 +3', edge: '爭取更多情報' },
@@ -540,10 +539,10 @@ function TrainingRewardView({ game, dispatch }: ViewProps) {
     .map((id) => FIGHT_INTENTS.find((move) => move.id === id))
     .filter((move): move is FightMoveDefinition => Boolean(move))
   const selected = game.trainingMoveSelections ?? []
-  const required = Math.min(2, moves.length)
+  const required = game.trainingMoveRequired ?? Math.min(2, moves.length)
   return <Screen title="把訓練變成你的招式" kicker={`${BRANCH_META[branch].name} · Lv.${skillLevel(game.fighter.skills[branch].xp)}`}>
     <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
-    <p className="lead">{moves.length >= 4 ? '從四條路線選擇兩招，建立下一場就能使用的技術組合。' : `這個分支還有 ${moves.length} 招可學；選擇 ${required} 招帶進下一場比賽。`}沒有重抽；確認前可以重新選擇。</p>
+    <p className="lead">{moves.length >= 4 ? `從四條路線選擇 ${required} 招，建立下一場就能使用的技術組合。` : `這個分支還有 ${moves.length} 招可學；選擇 ${required} 招帶進下一場比賽。`}沒有重抽；確認前可以重新選擇。</p>
     <p className="training-selection-status" role="status">已選 {selected.length}／{required} 招</p>
     <div className="move-learning-list">{moves.map((move) => {
       const isSelected = selected.includes(move.id)
@@ -1423,7 +1422,7 @@ function FightArena({ game, compact = false, showLiveLog = true }: { game: GameS
       <div><StatusBar label={game.fighter.name} value={fight.playerStamina} tone="player" /><DamageRibbon damage={fight.playerDamageByPart} /></div>
       <div><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /><DamageRibbon damage={fight.opponentDamageByPart} opponent /></div>
     </div>
-    <PositionScene position={fight.position} playerName={game.fighter.name} opponentName={opponent.name} />
+    <PositionScene position={fight.position} league={leagueForGame(game) ?? 'grassroots'} />
     {showLiveLog && <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
   </section>
 }
@@ -1437,87 +1436,97 @@ interface PositionVisual {
   opponent: { x: number; y: number; pose: FighterPose; flip?: boolean; rotate?: number }
   owner: 'player' | 'opponent' | 'neutral'
   detail: string
-  connection?: 'hands' | 'head' | 'waist' | 'ground'
   cageSide?: 'left' | 'right'
 }
 
 const POSITION_VISUALS: Record<Position, PositionVisual> = {
   range: { family: 'standing', player: { x: 27, y: 34, pose: 'standing' }, opponent: { x: 73, y: 34, pose: 'standing', flip: true }, owner: 'neutral', detail: '雙方仍在拳腳距離外圍，移動、刺拳與踢擊最容易展開。' },
   pocket: { family: 'standing', player: { x: 42, y: 34, pose: 'standing' }, opponent: { x: 58, y: 34, pose: 'standing', flip: true }, owner: 'neutral', detail: '雙方已進入短拳交換距離，傷害提高，也更容易接入纏抱。' },
-  clinch: { family: 'clinch', player: { x: 46, y: 34, pose: 'leaning' }, opponent: { x: 54, y: 34, pose: 'leaning', flip: true }, owner: 'neutral', connection: 'hands', detail: '雙方正在爭奪頭位與內勾，尚未有人建立完整控制。' },
-  cage: { family: 'cage', player: { x: 19, y: 34, pose: 'leaning', flip: true }, opponent: { x: 11, y: 34, pose: 'standing' }, owner: 'neutral', connection: 'hands', cageSide: 'left', detail: '戰局貼近鐵網，但控制方向仍在轉換。' },
-  'cage-control': { family: 'cage', player: { x: 20, y: 34, pose: 'leaning', flip: true }, opponent: { x: 11, y: 34, pose: 'standing' }, owner: 'player', connection: 'hands', cageSide: 'left', detail: '你把對手固定在鐵網，能連接短打、膝擊與籠邊摔法。' },
-  'cage-defense': { family: 'cage', player: { x: 11, y: 34, pose: 'standing', flip: true }, opponent: { x: 20, y: 34, pose: 'leaning' }, owner: 'opponent', connection: 'hands', cageSide: 'left', detail: '你的背部受到鐵網限制，首要問題是轉身脫離或重新搶內勾。' },
-  'thai-clinch': { family: 'clinch', player: { x: 46, y: 31, pose: 'standing' }, opponent: { x: 54, y: 36, pose: 'crouched', flip: true }, owner: 'player', connection: 'head', detail: '你控制了對手頭頸，可直接製造膝擊與失衡。' },
-  'thai-clinch-defense': { family: 'clinch', player: { x: 54, y: 36, pose: 'crouched' }, opponent: { x: 46, y: 31, pose: 'standing', flip: true }, owner: 'opponent', connection: 'head', detail: '對手正拉低你的頭位，必須先恢復姿勢才能安全反擊。' },
-  'body-lock': { family: 'clinch', player: { x: 46, y: 34, pose: 'standing' }, opponent: { x: 54, y: 34, pose: 'standing', flip: true }, owner: 'player', connection: 'waist', detail: '你鎖住對手腰部與髖線，摔投、回摔與推向鐵網都已開放。' },
-  'body-lock-defense': { family: 'clinch', player: { x: 54, y: 34, pose: 'standing' }, opponent: { x: 46, y: 34, pose: 'standing', flip: true }, owner: 'opponent', connection: 'waist', detail: '對手已鎖住你的腰部，重心與轉身空間受到限制。' },
-  'front-headlock-control': { family: 'clinch', player: { x: 44, y: 31, pose: 'leaning' }, opponent: { x: 55, y: 37, pose: 'crouched', flip: true }, owner: 'player', connection: 'head', detail: '你壓住頭頸與一側手臂，可以轉背、膝擊或尋找前頸降服。' },
-  'front-headlock-defense': { family: 'clinch', player: { x: 55, y: 37, pose: 'crouched' }, opponent: { x: 44, y: 31, pose: 'leaning', flip: true }, owner: 'opponent', connection: 'head', detail: '你的頭頸被控制，起身前必須先處理抓握與角度。' },
-  top: { family: 'ground', player: { x: 48, y: 28, pose: 'kneeling' }, opponent: { x: 52, y: 38, pose: 'grounded', rotate: -8 }, owner: 'player', connection: 'ground', detail: '你在對手防守架上方；可以穩固上位、過腿或進行地面打擊。' },
-  bottom: { family: 'ground', player: { x: 52, y: 38, pose: 'grounded', rotate: 8 }, opponent: { x: 48, y: 28, pose: 'kneeling', flip: true }, owner: 'opponent', connection: 'ground', detail: '你在防守架下位；能掃摔或降服反攻，但裁判得分通常偏向上方控制者。' },
-  mount: { family: 'ground', player: { x: 50, y: 27, pose: 'kneeling' }, opponent: { x: 50, y: 39, pose: 'grounded' }, owner: 'player', connection: 'ground', detail: '你跨坐在對手軀幹上，是地面打擊與降服威脅都很高的位置。' },
-  'mount-defense': { family: 'ground', player: { x: 50, y: 39, pose: 'grounded' }, opponent: { x: 50, y: 27, pose: 'kneeling', flip: true }, owner: 'opponent', connection: 'ground', detail: '對手取得騎乘位，你必須先保護頭部並創造橋式或髖逃空間。' },
-  'back-control': { family: 'ground', player: { x: 47, y: 34, pose: 'seated' }, opponent: { x: 54, y: 35, pose: 'seated', flip: true }, owner: 'player', connection: 'waist', detail: '你控制對手背部並建立鉤腿，裸絞與背後打擊威脅最高。' },
-  'back-defense': { family: 'ground', player: { x: 54, y: 35, pose: 'seated' }, opponent: { x: 47, y: 34, pose: 'seated', flip: true }, owner: 'opponent', connection: 'waist', detail: '對手已取得背後控制，首要任務是保護頸部並解除鉤腿。' },
+  clinch: { family: 'clinch', player: { x: 46, y: 34, pose: 'leaning' }, opponent: { x: 54, y: 34, pose: 'leaning', flip: true }, owner: 'neutral', detail: '雙方正在爭奪頭位與內勾，尚未有人建立完整控制。' },
+  cage: { family: 'cage', player: { x: 20, y: 34, pose: 'leaning' }, opponent: { x: 29, y: 34, pose: 'standing', flip: true }, owner: 'neutral', cageSide: 'left', detail: '戰局貼近鐵網，但控制方向仍在轉換。' },
+  'cage-control': { family: 'cage', player: { x: 29, y: 34, pose: 'leaning', flip: true }, opponent: { x: 20, y: 34, pose: 'standing' }, owner: 'player', cageSide: 'left', detail: '你把對手固定在鐵網，能連接短打、膝擊與籠邊摔法。' },
+  'cage-defense': { family: 'cage', player: { x: 20, y: 34, pose: 'standing' }, opponent: { x: 29, y: 34, pose: 'leaning', flip: true }, owner: 'opponent', cageSide: 'left', detail: '你的背部受到鐵網限制，首要問題是轉身脫離或重新搶內勾。' },
+  'thai-clinch': { family: 'clinch', player: { x: 46, y: 31, pose: 'standing' }, opponent: { x: 54, y: 36, pose: 'crouched', flip: true }, owner: 'player', detail: '你控制了對手頭頸，可直接製造膝擊與失衡。' },
+  'thai-clinch-defense': { family: 'clinch', player: { x: 54, y: 36, pose: 'crouched' }, opponent: { x: 46, y: 31, pose: 'standing', flip: true }, owner: 'opponent', detail: '對手正拉低你的頭位，必須先恢復姿勢才能安全反擊。' },
+  'body-lock': { family: 'clinch', player: { x: 46, y: 34, pose: 'standing' }, opponent: { x: 54, y: 34, pose: 'standing', flip: true }, owner: 'player', detail: '你鎖住對手腰部與髖線，摔投、回摔與推向鐵網都已開放。' },
+  'body-lock-defense': { family: 'clinch', player: { x: 54, y: 34, pose: 'standing' }, opponent: { x: 46, y: 34, pose: 'standing', flip: true }, owner: 'opponent', detail: '對手已鎖住你的腰部，重心與轉身空間受到限制。' },
+  'front-headlock-control': { family: 'clinch', player: { x: 44, y: 31, pose: 'leaning' }, opponent: { x: 55, y: 37, pose: 'crouched', flip: true }, owner: 'player', detail: '你壓住頭頸與一側手臂，可以轉背、膝擊或尋找前頸降服。' },
+  'front-headlock-defense': { family: 'clinch', player: { x: 55, y: 37, pose: 'crouched' }, opponent: { x: 44, y: 31, pose: 'leaning', flip: true }, owner: 'opponent', detail: '你的頭頸被控制，起身前必須先處理抓握與角度。' },
+  top: { family: 'ground', player: { x: 48, y: 28, pose: 'kneeling' }, opponent: { x: 52, y: 38, pose: 'grounded', rotate: -8 }, owner: 'player', detail: '你在對手防守架上方；可以穩固上位、過腿或進行地面打擊。' },
+  bottom: { family: 'ground', player: { x: 52, y: 38, pose: 'grounded', rotate: 8 }, opponent: { x: 48, y: 28, pose: 'kneeling', flip: true }, owner: 'opponent', detail: '你在防守架下位；能掃摔或降服反攻，但裁判得分通常偏向上方控制者。' },
+  mount: { family: 'ground', player: { x: 50, y: 27, pose: 'kneeling' }, opponent: { x: 50, y: 39, pose: 'grounded' }, owner: 'player', detail: '你跨坐在對手軀幹上，是地面打擊與降服威脅最高。' },
+  'mount-defense': { family: 'ground', player: { x: 50, y: 39, pose: 'grounded' }, opponent: { x: 50, y: 27, pose: 'kneeling', flip: true }, owner: 'opponent', detail: '對手取得騎乘位，你必須先保護頭部並創造橋式或髖逃空間。' },
+  'back-control': { family: 'ground', player: { x: 47, y: 34, pose: 'seated' }, opponent: { x: 54, y: 35, pose: 'seated', flip: true }, owner: 'player', detail: '你控制對手背部並建立鉤腿，裸絞與背後打擊威脅最高。' },
+  'back-defense': { family: 'ground', player: { x: 54, y: 35, pose: 'seated' }, opponent: { x: 47, y: 34, pose: 'seated', flip: true }, owner: 'opponent', detail: '對手已取得背後控制，首要任務是保護頸部並解除鉤腿。' },
   scramble: { family: 'scramble', player: { x: 43, y: 35, pose: 'crouched' }, opponent: { x: 57, y: 33, pose: 'crouched', flip: true }, owner: 'neutral', detail: '雙方都還沒有穩定位置，下一個動作可能直接決定上下位。' },
 }
 
-function PositionScene({ position, playerName, opponentName }: { position: Position; playerName: string; opponentName: string }) {
+const LEAGUE_ARENA_BACKDROPS: Record<LeagueId | 'grassroots', string> = {
+  grassroots: '/assets/combat-arena-pixel.png',
+  amateur: '/assets/combat-arena-amateur-pixel.png',
+  regional: '/assets/combat-arena-regional-pixel.png',
+  asia: '/assets/combat-arena-asia-pixel.png',
+  world: '/assets/combat-arena-world-pixel.png',
+}
+
+interface PositionSprite {
+  src: string
+  x: number
+  y: number
+  width: number
+  height: number
+  flip?: boolean
+}
+
+const STANDING_SPRITE: PositionSprite = { src: '/assets/fighters-standing-pixel.png', x: 10, y: 14, width: 80, height: 34 }
+const CLINCH_SPRITE: PositionSprite = { src: '/assets/fighters-clinch-pixel.png', x: 13, y: 14, width: 74, height: 34 }
+const CAGE_NEUTRAL_SPRITE: PositionSprite = { ...CLINCH_SPRITE, x: -3, width: 58 }
+const GROUND_PLAYER_SPRITE: PositionSprite = { src: '/assets/fighters-top-player-pixel.png', x: 18, y: 17, width: 64, height: 34 }
+const GROUND_OPPONENT_SPRITE: PositionSprite = { src: '/assets/fighters-top-opponent-pixel.png', x: 18, y: 17, width: 64, height: 34 }
+
+const POSITION_SPRITES: Record<Position, PositionSprite> = {
+  range: STANDING_SPRITE,
+  pocket: STANDING_SPRITE,
+  clinch: CLINCH_SPRITE,
+  cage: CAGE_NEUTRAL_SPRITE,
+  'cage-control': { src: '/assets/fighters-cage-control-pixel.png', x: -3, y: 14, width: 58, height: 34 },
+  'cage-defense': { src: '/assets/fighters-cage-defense-pixel.png', x: -3, y: 14, width: 58, height: 34 },
+  'thai-clinch': CLINCH_SPRITE,
+  'thai-clinch-defense': { ...CLINCH_SPRITE, flip: true },
+  'body-lock': CLINCH_SPRITE,
+  'body-lock-defense': { ...CLINCH_SPRITE, flip: true },
+  'front-headlock-control': CLINCH_SPRITE,
+  'front-headlock-defense': { ...CLINCH_SPRITE, flip: true },
+  top: GROUND_PLAYER_SPRITE,
+  bottom: GROUND_OPPONENT_SPRITE,
+  mount: GROUND_PLAYER_SPRITE,
+  'mount-defense': GROUND_OPPONENT_SPRITE,
+  'back-control': { src: '/assets/fighters-back-player-pixel.png', x: 18, y: 17, width: 64, height: 34 },
+  'back-defense': { src: '/assets/fighters-back-opponent-pixel.png', x: 18, y: 17, width: 64, height: 34 },
+  scramble: { src: '/assets/fighters-scramble-pixel.png', x: 15, y: 15, width: 70, height: 34 },
+}
+
+function PositionScene({ position, league }: { position: Position; league: LeagueId | 'grassroots' }) {
   const visual = POSITION_VISUALS[position]
+  const sprite = POSITION_SPRITES[position]
   const ownerLabel = visual.owner === 'player' ? '你掌握位置' : visual.owner === 'opponent' ? '對手掌握位置' : '位置仍在爭奪'
-  const drawOpponentFirst = visual.owner === 'player'
   return <div className={`position-scene family-${visual.family} owner-${visual.owner}`}>
     <svg viewBox="0 0 100 58" role="img" aria-label={`目前位置：${positionLabel(position)}`}>
-      <defs>
-        <pattern id={`mesh-${position}`} width="7" height="7" patternUnits="userSpaceOnUse"><path d="M0 0 7 7M7 0 0 7" stroke="currentColor" strokeWidth=".25" opacity=".28" /></pattern>
-        <linearGradient id={`mat-${position}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#24211d" /><stop offset="1" stopColor="#11100e" /></linearGradient>
-      </defs>
-      <path d="M7 7h86v40H7z" fill={`url(#mat-${position})`} stroke="currentColor" strokeWidth="1" />
-      <path d="M7 7h86v18H7z" fill={`url(#mesh-${position})`} opacity=".62" />
-      <path d="M9 45 Q50 50 91 45" fill="none" stroke="currentColor" strokeWidth=".45" opacity=".7" />
-      {visual.cageSide && <g className="cage-pressure-zone"><path d="M8 8v38" /><path d="M11 8v38" /><text x="13" y="13">鐵網</text></g>}
-      <text className="scene-name player-name" x="10" y="12">你 · {playerName.slice(0, 4)}</text>
-      <text className="scene-name opponent-name" x="90" y="12" textAnchor="end">{opponentName.slice(0, 8)}</text>
-      {visual.connection && <PositionConnection type={visual.connection} player={visual.player} opponent={visual.opponent} />}
-      {drawOpponentFirst ? <>
-        <FighterGlyph {...visual.opponent} side="opponent" />
-        <FighterGlyph {...visual.player} side="player" />
-      </> : <>
-        <FighterGlyph {...visual.player} side="player" />
-        <FighterGlyph {...visual.opponent} side="opponent" />
-      </>}
+      <image href={LEAGUE_ARENA_BACKDROPS[league]} x="0" y="0" width="100" height="58" preserveAspectRatio="xMidYMid slice" />
+      <rect className="scene-frame" x="1" y="1" width="98" height="56" rx="1" />
+      {visual.cageSide && <CagePressureZone side={visual.cageSide} />}
+      <text className="scene-name player-name" x={visual.player.x} y="17" textAnchor="middle">你</text>
+      <text className="scene-name opponent-name" x={visual.opponent.x} y="17" textAnchor="middle">對手</text>
+      <image className="position-sprite" href={sprite.src} x={sprite.x} y={sprite.y} width={sprite.width} height={sprite.height} preserveAspectRatio="xMidYMid meet" transform={sprite.flip ? 'translate(100 0) scale(-1 1)' : undefined} />
     </svg>
     <div className="position-readout"><div><strong>{positionLabel(position)}</strong></div><em>{ownerLabel}</em><p>{visual.detail}</p></div>
   </div>
 }
 
-function FighterGlyph({ x, y, pose, side, flip = false, rotate = 0 }: PositionVisual['player'] & { side: 'player' | 'opponent' }) {
-  const transform = `translate(${x} ${y}) rotate(${rotate}) scale(${flip ? -1 : 1} 1)`
-  return <g className={`fighter-glyph ${side} pose-${pose}`} transform={transform} aria-hidden="true">
-    <ellipse className="fighter-shadow" cx="0" cy="8.2" rx={pose === 'grounded' ? 11 : 5.5} ry="1.7" />
-    {pose === 'grounded' ? <>
-      <circle className="fighter-head" cx="-8" cy="0" r="3" />
-      <path className="fighter-body" d="M-5 1L5 2L10 0M1 2L5-3M4 2L10 5" />
-    </> : pose === 'kneeling' ? <>
-      <circle className="fighter-head" cx="0" cy="-8" r="2.7" />
-      <path className="fighter-body" d="M0-5L1 2M0-2L6 1M1 2L6 7M1 2L-3 7" />
-    </> : pose === 'seated' ? <>
-      <circle className="fighter-head" cx="0" cy="-7" r="2.7" />
-      <path className="fighter-body" d="M0-4L1 3M0-1L6 1M1 3L7 6M1 3L-3 7" />
-    </> : pose === 'crouched' ? <>
-      <circle className="fighter-head" cx="2" cy="-7" r="2.7" />
-      <path className="fighter-body" d="M1-4L-2 2M0-2L7 0M-2 2L4 7M-2 2L-6 7" />
-    </> : <>
-      <circle className="fighter-head" cx={pose === 'leaning' ? 2 : 0} cy="-9" r="2.8" />
-      <path className="fighter-body" d={pose === 'leaning' ? 'M1-6L-2 2M0-3L7-1M-2 2L3 8M-2 2L-6 8' : 'M0-6L0 2M0-3L6-1M0-3L-4 0M0 2L5 8M0 2L-5 8'} />
-    </>}
-  </g>
-}
-
-function PositionConnection({ type, player, opponent }: { type: NonNullable<PositionVisual['connection']>; player: PositionVisual['player']; opponent: PositionVisual['opponent'] }) {
-  const y = type === 'head' ? Math.min(player.y, opponent.y) - 6 : type === 'waist' ? (player.y + opponent.y) / 2 : type === 'ground' ? Math.max(player.y, opponent.y) - 3 : (player.y + opponent.y) / 2 - 3
-  return <g className={`position-connection connection-${type}`} aria-hidden="true"><path d={`M${player.x} ${y} Q${(player.x + opponent.x) / 2} ${y - 2} ${opponent.x} ${y}`} />{type === 'waist' && <ellipse cx={(player.x + opponent.x) / 2} cy={y} rx="6" ry="3" />}</g>
+function CagePressureZone({ side }: { side: NonNullable<PositionVisual['cageSide']> }) {
+  const x = side === 'left' ? 4 : 96
+  const direction = side === 'left' ? 1 : -1
+  return <g className="cage-pressure-zone" transform={`translate(${x} 0) scale(${direction} 1)`}><path d="M0 7v41M3 7v41" /><text x="5" y="13">鐵網</text></g>
 }
 
 function DamageRibbon({ damage, opponent = false }: { damage: { head: number; body: number; leg: number }; opponent?: boolean }) {

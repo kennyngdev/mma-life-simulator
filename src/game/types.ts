@@ -280,6 +280,8 @@ export interface FightOffer {
   titleRole?: 'ordinary' | 'challenge' | 'defense'
   /** @deprecated Use titleRole. */
   titleFight: boolean
+  /** A voluntary higher-ranked matchup that can accelerate ladder movement. */
+  fastTrack?: boolean
   shortNotice: boolean
   venueRegion?: Region
   opponentIsLocal?: boolean
@@ -697,6 +699,7 @@ export interface GameState {
   campDrillOutcome?: CampDrillOutcome
   trainingMoveChoices?: string[]
   trainingMoveSelections?: string[]
+  trainingMoveRequired?: number
   trainingMoveBranch?: Branch
   lifeEvent?: LifeEvent
   lifeEventResult?: LifeEventResult

@@ -51,9 +51,9 @@ The primary progression fantasy is not “numbers go up.” It is “this fighte
 
 | Experience | Starting competence | Career entry |
 |---|---|---|
-| Normie | All five skills at level 0; emergency moves only | Grassroots |
-| Hobbyist | Seeded background; primary and secondary skills at level 1; 3 and 2 learned moves respectively | Amateur |
-| Semi-pro | Primary level 3 with 8 moves; secondary level 2 with 5; every other branch level 1 with 2 moves | Regional |
+| Normie | All five skills at level 0; weak branch-specific survival actions only | Grassroots |
+| Hobbyist | Seeded background; primary and secondary skills at level 1; each trained branch includes its three-move foundation | Amateur |
+| Semi-pro | Primary level 3 with 8+ moves; secondary level 2 with 5+; every other branch level 1 with its three-move foundation | Regional |
 
 All three experiences receive the same seeded body, aptitude, relationship, and 1–3 birth-trait systems. The Normie route begins earlier and provides more development runway before the same age and injury pressures; the Semi-pro route begins with greater competence at a later career stage. Starting experience never assigns a seeded fight-count limit.
 
@@ -86,7 +86,16 @@ The interface must state the exact health threshold, show the fighter's current 
 
 Within a top-15 ladder, an unranked winner takes the defeated ranked opponent's slot. Beating a higher-ranked opponent places the player at or immediately behind that opponent; a gap of 10 or more places leaves the player one slot behind. Beating a peer or lower-ranked opponent climbs two places. Ordinary losses drop three places and draws drop one; falling below #15 makes the player unranked. Affected opponents shift so the champion and every numbered slot remain unique.
 
-Unranked offers target roughly #13–#15. Ranked offers target roughly three places below, a peer, and three places above. A championship offer requires all three current-league conditions: player ranked #1–#3, at least two consecutive wins in that league (a loss or draw resets form), and competitive rating of at least 35 / 50 / 70 / 80 for Amateur / Regional / Asia / World. A challenge always names the league champion, who never displays a numeric rank. Other offers remain ordinary ranked fights.
+Unranked offers target roughly #13–#15, plus an optional **快速晉級卡** challenge around #10. Ranked offers target roughly three places below, a peer, and three places above, plus an optional fast-track opponent roughly six places above when that opponent is not already a normal offer. When a player's competitive rating materially differs from their standing, ordinary cards recenter on the closest opponent with comparable overall rating and lead capability (each fighter's strongest branch); component compatibility has equal selection weight to rank distance, while standings still determine ladder movement and the card's below/peer/above shape. A prior meeting carries a strong ordinary-card penalty, so a close matchup does not crowd out career variety. The fast-track card clearly explains that it is a harder ranking leap; a win uses the ordinary higher-ranked-opponent placement rule rather than a hidden bonus. A championship offer requires both current-league conditions: player ranked #1–#3 and competitive rating of at least 35 / 50 / 70 / 80 for Amateur / Regional / Asia / World. A challenge always names the league champion, who never displays a numeric rank. Other offers remain ordinary ranked fights.
+
+Competitive rating is a rounded 0–100 summary of MMA readiness, calculated as:
+
+```text
+40% strongest skill + 20% second-strongest skill
++ 20% average of the other three skills + 20% fight IQ
+```
+
+The strongest two disciplines define a fighter's specialty and the lead discipline carries enough weight to surface a focused fighter's real exchange threat. The other three still contribute alongside fight IQ, so a young one- or two-discipline specialist must not display an elite overall rating while remaining untrained across most of MMA.
 
 A failed title challenge leaves the player's rank unchanged and resets form; a draw leaves both champion and ranking unchanged. Winning a title removes the player from the numbered table and inserts the former champion at #1. A defense win records a defense; a defense draw retains the belt without reopening the promotion choice; a defense loss makes the challenger champion and places the former champion at #1. Championship results explicitly describe becoming, retaining, or losing the belt and never report a move to #0.
 
@@ -125,7 +134,7 @@ Level is an access gate and concise summary. Learned moves and earned traits are
 
 Each fight camp has three slots. The available activities are:
 
-- **Technique training**: the player chooses a branch, receives a solid standard result immediately, and then chooses two actual moves to learn from up to four seeded, level-eligible unlearned moves. If fewer than two moves remain, the player learns every remaining offered move.
+- **Technique training**: the player chooses a branch and receives a solid standard result immediately. Reaching the first 100-XP milestone grants that branch's complete level-one toolkit—one attack, one defense, and one transition. Each later 175-XP milestone offers one move from up to four eligible choices. A session that does not cross a move milestone refines the fighter's existing technique without granting a move.
 - **Film study**: immediately improves scouting accuracy and fight IQ at a small fatigue cost.
 - **Recovery**: immediately reduces fatigue and restores health; it does not create skill growth.
 
@@ -140,19 +149,19 @@ The challenge can add XP, scouting, or recovery above the normal result, but can
 Technique XP is:
 
 ```text
-round((70 + 30 × drill score) × aptitude × coach modifier × learning-trait modifier)
+round((50 + 20 × drill score) × aptitude × coach modifier × learning-trait modifier × camp factor)
 ```
 
-Coach modifiers are `0.9×` when strained, `1.0×` when steady, and `1.1×` when trusted. A fighter's first successful level-0 session receives enough additional XP to reach level 1. Repeating technique sessions in one camp increases fatigue.
+The camp factor is `1.0×` for the first technique session, `0.60×` for the second, and `0.28×` for the third. Coach modifiers are `0.9×` when strained, `1.0×` when steady, and `1.1×` when trusted. There is no first-session XP override: aptitude, coaching, traits, score, and camp order all affect how quickly a level-0 fighter reaches the first 100-XP foundation milestone. Repeating technique sessions in one camp increases fatigue and delivers smaller XP gains, so a focused camp remains useful without making every later fight trivial.
 
-The move offer has no reroll. Until learned, every branch's offer prioritizes a functional foundation: boxing receives complementary basic attacks, kicking receives distance management and a meaningful kick, clinch receives an entry and an attack, wrestling receives an actual takedown and setup, and ground receives both a foundational escape and a foundational submission. Level-ups are milestones; they do not limit the fighter to one learned move per level.
+The first 100-XP foundation is automatic rather than a choice: boxing receives `刺拳接直拳` / `迎擊勾拳切角` / `雙刺拳進場`; kicking receives `低掃` / `前踢` / `換架切外側`; clinch receives `貼身短膝` / `籠邊頭位控制` / `進入纏抱`; wrestling receives `領帶拍頭肩撞` / `下壓防摔繞側` / `抱摔切入`; and ground receives `防守架內短拳` / `打破上位姿勢` / `蝦形調髖`. These are respectively attack, defense, and transition actions. The move offer after that has no reroll. Each later move requires another 175 XP. Aptitude affects the timing of move growth without creating a hard cap.
 
 ### 4.3 Move access — Accepted
 
 - Every position must always provide weak universal emergency actions so an incomplete moveset cannot soft-lock a fight.
 - All non-emergency combat moves must be learned through the fighter's background or technique training.
 - A move has a branch, minimum level, legal positions, and combat properties.
-- Identity-defining access levels are authored according to learning complexity and style function rather than inferred only from damage, control, or finish pressure. A Normie's first successful session in a branch must make that style usable in combat; later levels add stronger, more specialized, or more position-dependent techniques.
+- Identity-defining access levels are authored according to learning complexity and style function rather than inferred only from damage, control, or finish pressure. A Normie's first 100 XP in a branch grants exactly one level-one attack, defense, and transition, making that style usable in combat; later levels add stronger, more specialized, or more position-dependent techniques. Before that foundation, a Normie has only weak branch-specific survival actions: boxing has `試探距離` / `切角脫離`; kicking has `試探低踢` / `長架防守`; clinch has `撐開空間` / `雙內勾撐開脫籠`; wrestling has `穩住重心` / `防守過勾反摔`; ground has `封閉防守架護身` / `貼籠起身`. These are learned opening actions, not a hidden universal moveset; position-specific emergency fallbacks exist solely to prevent a combat soft-lock.
 - Basic submissions, a real takedown, and a deliberate clinch entry are early foundations. Mastery levels may improve chains and finish pressure, but cannot be the fighter's first access to the branch's defining action.
 - Combat presents only legal emergency moves and learned moves, with a defensive/transition fallback if required for safety.
 - Training should broaden a branch with new tactical options or deepen it with stronger, more specialized options. A flat stat increase alone is not an adequate technique-training reward.
@@ -276,20 +285,20 @@ Gameplay changes should preserve or explicitly revise these tests:
 - Each starting experience receives the correct entry stage, skill levels, moves, and career thresholds.
 - A level-0 fighter always has a legal action in every reachable position.
 - The reachable ground chain is guard, mount, and back control; side control and its dedicated moves are absent.
-- The first ground technique session can teach an escape and reaches level 1.
-- A Normie's first technique session in every branch offers its functional foundation; the first ground session offers both an escape and a submission, and the first wrestling session offers a real takedown.
-- A technique reward offers up to four moves, requires two selections when available, and learns both only after confirmation.
+- A Normie's first 100 XP in every branch automatically grants its functional three-move foundation; the first ground foundation includes an escape route and the first wrestling foundation includes a real takedown.
+- The first 100-XP milestone grants its fixed toolkit without a selection. Each later 175-XP milestone offers up to four moves and requires one selection before the move is learned. Sessions that do not cross a milestone grant no move.
 - XP thresholds, aptitude, relationship, and trait modifiers are correct and visible.
 - Unlearned non-emergency moves never appear in combat.
 - Trait evidence uses the correct finish method and move attribution, awards once, and persists to history and biography.
 - All three starting experiences remain viable; the longest route is not automatically optimal.
 - Every league has one champion with no numeric rank and a unique #1–#15 table; identical seeds produce identical league rosters and preserve the intended rating curves.
 - Normie Grassroots entry, unranked placement, rank shifts, displacement below #15, losses, draws, rematches, and per-league title-form resets remain causal and player-driven.
-- Championship requirements are enforced at their exact boundaries (top three, two current-league wins, and rating floors 35 / 50 / 70 / 80); challenge, defense, belt turnover, promotion, and World-to-Legacy behavior are distinct.
+- Championship requirements are enforced at their exact boundaries (top three and rating floors 35 / 50 / 70 / 80); optional fast-track cards target a materially higher-ranked opponent and use ordinary causal rank placement; challenge, defense, belt turnover, promotion, and World-to-Legacy behavior are distinct.
+- Competitive rating preserves specialization while counting all five skills; two advanced branches with three untrained branches cannot produce an elite overall rating.
 - Offer, standings, promotion, accessible-label, and 320 px UI surfaces expose league standing without rendering a champion as a number.
 - Legacy active careers migrate to World, old global ranks map with `ceil(oldRank × 15 / 99)`, current records and title history are preserved where possible, and unsigned offers are rebuilt deterministically.
 - Seeded height, reach, natural weight, and frame persist for each opponent; range, pressure, takedown, and clinch outcomes receive only the documented small body-matchup edges, while displayed division remains non-mechanical.
-- Existing `0.12.0 / 1.5.0` and `0.12.1 / 1.5.1` saves deterministically backfill league standings and opponent body records, then load as `0.13.0 / 1.6.0` without losing an active fight or career.
+- Existing `0.12.0 / 1.5.0`, `0.12.1 / 1.5.1`, `0.13.0 / 1.6.0`, `0.14.0 / 1.6.0`, `0.15.0 / 1.6.0`, `0.16.0 / 1.6.0`, `0.17.0 / 1.6.0`, `0.18.0 / 1.6.0`, `0.19.0 / 1.6.0`, `0.20.0 / 1.6.0`, `0.21.0 / 1.6.0`, and `0.22.0 / 1.6.0` saves deterministically backfill league standings, opponent body records, breadth-sensitive ratings, revised training and move-learning pace, fast-track cards, and revised title eligibility, then load as `0.23.0 / 1.6.0` without losing an active fight or career. Unsigned offer sets can be refreshed; a signed fight is never rewritten.
 - Fight count never triggers retirement, while age 38 and post-fight health at 25 or below do.
 - Offer, status, and injury-retirement surfaces state the health ending rule and current relevant condition.
 - Retired practical-sparring state migrates back to a playable camp without losing a slot.
@@ -310,9 +319,13 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-28 | Deprecated | Remove `實戰對練`; playtesting showed scripted follow-up exchanges, conflicting reading/timing demands, and an insufficiently consequential reward. |
 | 2026-08-28 | Accepted | Make combat causality explicit through position-entry explanations, legal learned moves, transition routes, injury effects, and clear climax presentation. |
 | 2026-08-28 | Accepted | Treat money as career optionality: risk-priced purses, derived runway labels, one paid offer replacement per cycle, affordable/free medical and logistics alternatives, and late-career legacy spending. Money cannot gate the core loop or buy permanent combat power. |
-| 2026-08-28 | Accepted | Technique training now teaches two of up to four offered moves. Each branch guarantees an early functional foundation, while authored move levels make basic submissions, takedowns, and clinch entries available before mastery. This prevents a Normie from repeatedly investing in a style without gaining its defining combat route. |
+| 2026-08-28 | Accepted | Technique training supplies real tactical moves rather than a stat-only reward. Each branch guarantees an early functional foundation, while authored move levels make basic submissions, takedowns, and clinch entries available before mastery. |
 | 2026-08-29 | Accepted | Remove the hidden seeded fight-count retirement limit. Careers now end only by voluntary retirement, age 38, or a visible post-fight long-term health threshold of 25 or below; the UI must explain the threshold and the cause of injury retirement. |
 | 2026-08-29 | Accepted | Remove side control and its dedicated move family. Ground progression now goes directly from guard passing to mount, keeping fewer positions with clearer strategic roles. |
 | 2026-08-29 | Accepted | Use GitHub Pages at `playcagelife.com` as the sole production distribution site. Do not deploy or maintain a ChatGPT Sites version. |
 | 2026-08-29 | Accepted | At character creation, prompt browser-tab players in Traditional Chinese to install or add the PWA to their home screen; do not show the prompt in standalone PWA mode. |
-| 2026-08-29 | Accepted | Replace the global #1–#99 ladder and fight-count progression with independent Amateur, Regional, Asia, and World top-15 leagues. Each league has one unranked champion; title challenges require top-three standing, two current-league wins, and rating floors 35 / 50 / 70 / 80. After a non-World title, the player chooses irreversible promotion or continued defenses; World gold enters Legacy. |
+| 2026-08-29 | Accepted | Replace the global #1–#99 ladder and fight-count progression with independent Amateur, Regional, Asia, and World top-15 leagues. Each league has one unranked champion; title challenges require top-three standing and rating floors 35 / 50 / 70 / 80. The two-consecutive-wins gate is removed. Every league also offers a clearly labeled, harder fast-track fight card against a substantially higher-ranked opponent when available; winning it uses ordinary causal rank placement. After a non-World title, the player chooses irreversible promotion or continued defenses; World gold enters Legacy. |
+| 2026-08-29 | Accepted | Rebalance competitive rating to weight the strongest skill at 40%, second skill at 20%, the other three skills' average at 20%, and fight IQ at 20%. This keeps a focused specialty visible while stopping one high branch from overstating full-MMA readiness and skipping the intended league challenge. |
+| 2026-08-29 | Accepted | Slow technique training to a 50–70 XP pre-modifier range with 100% / 60% / 28% first-to-third technique-session efficiency in each camp. The first session still makes a Normie functional, while concentrated training no longer trivializes later fights. |
+| 2026-08-29 | Accepted | Tie move acquisition directly to skill growth: the first 100 XP automatically grants a three-move level-one attack/defense/transition foundation, while every later 175-XP milestone unlocks one selected move. Every session, including the first, follows aptitude-sensitive XP so low-talent fighters take longer to unlock moves. |
+| 2026-08-29 | Accepted | A Normie begins with exactly two weak learned actions per branch—attack plus defense in boxing/kicking, defense plus escape in clinch/wrestling/ground—rather than a hidden universal toolkit. Hobbyists begin with their two trained branches' foundations; Semi-pros begin with a foundation in all five branches. |

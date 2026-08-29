@@ -17,10 +17,12 @@ import {
   awardEarnedTraits,
   availableMoves,
   BRANCHES,
+  FOUNDATION_MOVE_IDS,
   generateBirthTraits,
   minimumMoveLevel,
   movesForBranch,
   nextSkillThreshold,
+  NORMIE_DEFAULT_MOVE_IDS,
   skillLevel,
   skillRating,
   startingMoves,
@@ -83,6 +85,9 @@ import type {
 
 const HEALTH_PARTS: HealthPart[] = ['head', 'hands', 'knees', 'torso']
 export const CAREER_HEALTH_RETIREMENT_THRESHOLD = 25
+const TECHNIQUE_CAMP_XP_FACTORS = [1, 0.6, 0.28] as const
+const FIRST_MOVE_XP = 100
+const POST_FOUNDATION_MOVE_XP = 175
 const INTERNATIONAL_HOMETOWNS: Record<string, string> = {
   巴西: '聖保羅', 日本: '東京', 南韓: '首爾', 俄羅斯: '莫斯科', 哈薩克: '阿拉木圖', 吉爾吉斯: '比什凱克',
   美國: '拉斯維加斯', 孟加拉: '達卡', 印度: '孟買', 巴基斯坦: '拉合爾', 葡萄牙: '里斯本', 匈牙利: '布達佩斯',
@@ -380,9 +385,11 @@ export function createNewRun(input: NewRunInput): GameState {
   const unlockedNodes: string[] = []
   const mastery = Object.fromEntries(unlockedNodes.map((id) => [id, { value: 18, gainedThisFight: 0 }]))
   const backgroundMoves = background.startingMoves ?? []
-  const learnedMoves = startingExperience === 'normie' ? [] : startingExperience === 'hobbyist'
-    ? [...backgroundMoves, ...startingMoves(background.primary, 1, 3), ...startingMoves(background.secondary, 1, 2)]
-    : [...backgroundMoves, ...startingMoves(background.primary, 3, 8), ...startingMoves(background.secondary, 2, 5), ...BRANCHES.flatMap((branch) => branch === background.primary || branch === background.secondary ? [] : startingMoves(branch, 1, 2))]
+  const normieDefaults = BRANCHES.flatMap((branch) => NORMIE_DEFAULT_MOVE_IDS[branch])
+  const foundationMoves = (branch: Branch) => FOUNDATION_MOVE_IDS[branch]
+  const learnedMoves = startingExperience === 'normie' ? normieDefaults : startingExperience === 'hobbyist'
+    ? [...backgroundMoves, ...foundationMoves(background.primary), ...foundationMoves(background.secondary)]
+    : [...backgroundMoves, ...foundationMoves(background.primary), ...startingMoves(background.primary, 3, 8), ...foundationMoves(background.secondary), ...startingMoves(background.secondary, 2, 5), ...BRANCHES.flatMap((branch) => branch === background.primary || branch === background.secondary ? [] : foundationMoves(branch))]
   let traits: FighterState['traits']
   ;[traits, rng] = generateBirthTraits(rng)
   const history: HistoryEntry[] = [{
@@ -412,7 +419,7 @@ export function createNewRun(input: NewRunInput): GameState {
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 15, rulesVersion: '0.13.0', contentVersion: '1.6.0', seed: input.seed.trim().toUpperCase(),
+    saveVersion: 15, rulesVersion: '0.23.0', contentVersion: '1.6.0', seed: input.seed.trim().toUpperCase(),
     phase: 'reveal', stage: initialLeague ?? 'grassroots', fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
     offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
@@ -479,10 +486,14 @@ function generateOpponents(fighter: FighterState, streams: RngStreams, seed: str
       const previous = [...opponents].reverse().find((item) => item.league === slot.league)
       if (previous) targetRating = Math.min(targetRating, previous.rating - 1)
     }
-    const baseline = targetRating - 4.4
+    // League opponents need a real specialty that can answer a player who has
+    // focused one branch. This wider spread preserves the authored overall
+    // rating curve while producing sharper, matchup-relevant strengths and
+    // weaknesses instead of five near-identical skills.
+    const baseline = targetRating - 5.9
     const technique = {} as Record<Branch, number>
-    for (const branch of BRANCHES) technique[branch] = clamp(baseline + (branch === styleBranch ? 8 : branch === weakness ? -8 : 0), slot.league === 'grassroots' ? 10 : 25, 94)
-    let composure = clamp(baseline, 25, 94)
+    for (const branch of BRANCHES) technique[branch] = clamp(baseline + (branch === styleBranch ? 16 : branch === weakness ? -10 : 0), slot.league === 'grassroots' ? 10 : 25, 94)
+    let composure = clamp(baseline, slot.league === 'grassroots' ? 10 : 25, 94)
     if (slot.league !== 'grassroots') {
       const previous = [...opponents].reverse().find((item) => item.league === slot.league)
       const minimum = 25
@@ -619,19 +630,23 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
   const alternatives = eligible.filter((opponent) => !excludedOpponentIds.includes(opponent.id))
   const replacementPool = alternatives.length >= 3 ? alternatives : eligible
   const selected: Opponent[] = []
+  const fastTrackOpponentIds = new Set<string>()
   const fighterRank = standingRank(fighter.leagueStanding) ?? fighter.ranking
   const fighterIsChampion = isChampion(fighter)
   const titleShotEligible = Boolean(league && !fighterIsChampion && fighter.leagueStanding?.status === 'ranked'
     && fighter.leagueStanding.rank <= 3
-    && Math.max(fighter.leagueRecords?.[league]?.winStreak ?? 0, fighter.leagueRecords?.[league]?.consecutiveWins ?? 0) >= 2
     && rating >= LEAGUE_TITLE_RATING_FLOORS[league])
   // The belt holder is always a valid title target.  Meeting/rivalry cooldowns
   // apply to ordinary matchmaking, never to a championship opportunity.
   const championOpponent = currentOpponents.find((opponent) => opponent.league === league && opponent.standing === 'champion')
   const ranked = (pool: Opponent[]) => pool.filter((opponent) => opponent.standing === 'ranked' && opponent.rank !== undefined)
+  const standingPeer = fighterRank === undefined ? undefined : ranked(currentOpponents).find((opponent) => opponent.rank === fighterRank)
+  const ratingOutgrowsStanding = standingPeer !== undefined
+    && Math.abs(competitiveRatingForOpponent(standingPeer) - rating) >= 5
+  const componentMatchWeight = ratingOutgrowsStanding ? 1 : .35
   const targetOpponent = (pool: Opponent[], targetRank: number) => ranked(pool)
-    .sort((a, b) => Math.abs((a.rank ?? 15) - targetRank) + a.meetings * 6
-      - (Math.abs((b.rank ?? 15) - targetRank) + b.meetings * 6)
+    .sort((a, b) => (Math.abs((a.rank ?? 15) - targetRank) * 8 + a.meetings * 18 + opponentMatchmakingDistance(fighter, a) * componentMatchWeight)
+      - (Math.abs((b.rank ?? 15) - targetRank) * 8 + b.meetings * 18 + opponentMatchmakingDistance(fighter, b) * componentMatchWeight)
       || Math.abs((competitiveRatingForOpponent(a) - rating)) - Math.abs((competitiveRatingForOpponent(b) - rating)))
     .slice(0, 2)
   if (fighterIsChampion && league) {
@@ -647,7 +662,14 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
     }
   } else {
     const unrankedTarget = [14, 15, 13]
-    const baseRank = fighterRank ?? 15
+    // The ladder remains the source of career position, but a player can
+    // legitimately outgrow (or fall behind) a stale rank. Blend the normal
+    // card's center toward the closest comparable-rated opponent so the three
+    // ordinary choices remain a real test without erasing rank progression.
+    const comparableRank = !ratingOutgrowsStanding ? undefined : ranked(replacementPool)
+      .sort((a, b) => opponentMatchmakingDistance(fighter, a) - opponentMatchmakingDistance(fighter, b)
+        || (a.rank ?? 15) - (b.rank ?? 15))[0]?.rank
+    const baseRank = fighterRank === undefined ? 15 : comparableRank ?? fighterRank
     const targets = fighterRank === undefined ? unrankedTarget : [baseRank + 3, baseRank, baseRank - 3]
     for (const target of targets) {
       const pool = targetOpponent(replacementPool.filter((opponent) => !selected.includes(opponent)), clamp(target, 1, 15))
@@ -656,6 +678,18 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
         ;[chosen, rng] = pick(rng, 'offers', pool)
         selected.push(chosen)
       }
+    }
+    // This is an opt-in leap up the card rather than a replacement for the
+    // usual below/peer/above matchmaking.  A win uses the normal ranking rule,
+    // so the player earns the higher slot by beating a genuinely higher-ranked
+    // opponent instead of receiving a hidden placement bonus.
+    const fastTrackTarget = fighterRank === undefined ? 10 : clamp(baseRank - 6, 1, 15)
+    const fastTrackPool = ranked(replacementPool.filter((opponent) => !selected.includes(opponent) && opponent.rank === fastTrackTarget))
+    if (fastTrackPool.length && !targets.includes(fastTrackTarget)) {
+      let chosen: Opponent
+      ;[chosen, rng] = pick(rng, 'offers', fastTrackPool)
+      selected.push(chosen)
+      fastTrackOpponentIds.add(chosen.id)
     }
   }
   if (titleShotEligible && championOpponent && !selected.includes(championOpponent)) {
@@ -682,7 +716,7 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
       purse: Math.max(500, base + riskAdjustment + shortNoticePremium + titleBonus),
       purseBreakdown: { base, riskAdjustment, shortNoticePremium, titleBonus },
       titleRole,
-      titleFight, shortNotice, riskLabel,
+      titleFight, fastTrack: fastTrackOpponentIds.has(opponent.id), shortNotice, riskLabel,
       venueRegion: localStage ? fighter.region : undefined,
       opponentIsLocal: localStage && opponent.originRegion === fighter.region,
     }
@@ -691,8 +725,9 @@ export function generateOffers(fighter: FighterState, opponents: Opponent[], str
 }
 
 export function competitiveRatingForTechnique(technique: Record<Branch, number>, mind: number): number {
-  const [strongest, second] = [...Object.values(technique)].sort((a, b) => b - a)
-  return clamp(strongest * 0.55 + second * 0.25 + mind * 0.2)
+  const [strongest, second, ...remaining] = [...Object.values(technique)].sort((a, b) => b - a)
+  const supportingAverage = remaining.reduce((sum, value) => sum + value, 0) / remaining.length
+  return clamp(strongest * 0.4 + second * 0.2 + supportingAverage * 0.2 + mind * 0.2)
 }
 
 export function competitiveRatingForFighter(fighter: FighterState): number {
@@ -701,6 +736,23 @@ export function competitiveRatingForFighter(fighter: FighterState): number {
 
 export function competitiveRatingForOpponent(opponent: Opponent): number {
   return competitiveRatingForTechnique(opponent.technique, opponent.composure)
+}
+
+/**
+ * Overall rating is the league-wide readiness summary, but a card should not
+ * repeatedly feed a focused striker (or grappler) opponents who match only on
+ * that aggregate while being far behind in their own best weapon. Comparing
+ * each fighter's lead capability preserves meaningful style differences while
+ * preventing an aggregate-only mismatch.
+ */
+function opponentMatchmakingDistance(fighter: FighterState, opponent: Opponent): number {
+  const lead = strongestBranchFor(fighter.technique)
+  const overallGap = Math.abs(competitiveRatingForFighter(fighter) - competitiveRatingForOpponent(opponent))
+  const leadGap = Math.abs(fighter.technique[lead] - Math.max(...Object.values(opponent.technique)))
+  const supportGap = BRANCHES
+    .filter((branch) => branch !== lead)
+    .reduce((sum, branch) => sum + Math.abs(fighter.technique[branch] - opponent.technique[branch]), 0) / 4
+  return overallGap + leadGap * 1.15 + supportGap * 0.15
 }
 
 export function expectedRatingForRank(rank: number): number {
@@ -1026,14 +1078,6 @@ function uniqueMoves(moves: FightMoveDefinition[]): FightMoveDefinition[] {
   return [...new Map(moves.map((move) => [move.id, move])).values()]
 }
 
-const TRAINING_FOUNDATION_IDS: Record<Branch, string[]> = {
-  boxing: ['jab-cross', 'attack-body'],
-  kicking: ['damage-base', 'front-kick'],
-  clinch: ['enter-clinch', 'clinch-short-knee'],
-  wrestling: ['shot-entry', 'level-change'],
-  ground: ['rebuild-guard', 'guard-kimura'],
-}
-
 function padMovePool(state: GameState, branch: Branch): FightMoveDefinition[] {
   const known = new Set(state.fighter.learnedMoves)
   const learned = FIGHT_INTENTS.filter((move) => move.branch === branch && (known.has(move.id) || UNIVERSAL_MOVE_IDS.has(move.id)))
@@ -1163,6 +1207,11 @@ function drillLabel(score: number, source: 'normal' | 'edge'): CampDrillOutcome[
   return score >= 0.93 ? '完美節奏' : score >= 0.8 ? '銳利表現' : '穩定完成'
 }
 
+function moveUnlockCount(xp: number): number {
+  if (xp < FIRST_MOVE_XP) return 0
+  return 1 + Math.floor((Math.min(xp, 1_500) - FIRST_MOVE_XP) / POST_FOUNDATION_MOVE_XP)
+}
+
 function applyCampActivity(
   state: GameState,
   action: CampAction,
@@ -1180,37 +1229,49 @@ function applyCampActivity(
   let scouting = state.scouting
   let trainingMoveChoices: string[] | undefined
   let trainingMoveSelections: string[] | undefined
+  let trainingMoveRequired: number | undefined
   let trainingMoveBranch: Branch | undefined
   if (action === 'technique') {
     const progress = fighter.skills[focus]
+    const xpBefore = progress.xp
     const levelBefore = skillLevel(progress.xp)
     const coachFactor = coachTier === 'trusted' ? 1.1 : coachTier === 'strained' ? 0.9 : 1
     const learnerFactor = 1 + traitModifier(fighter.traits, 'trainingXp') / 100
-    const calculated = Math.round((70 + 30 * score) * progress.aptitude * coachFactor * learnerFactor)
-    const xpGain = levelBefore === 0 ? Math.max(calculated, 100 - progress.xp) : calculated
+    const campFactor = TECHNIQUE_CAMP_XP_FACTORS[Math.min(repeats, TECHNIQUE_CAMP_XP_FACTORS.length - 1)]
+    const calculated = Math.round((50 + 20 * score) * progress.aptitude * coachFactor * learnerFactor * campFactor)
+    const xpGain = calculated
     progress.xp = Math.min(1_500, progress.xp + xpGain)
     const levelAfter = skillLevel(progress.xp)
+    const moveUnlocks = moveUnlockCount(progress.xp) - moveUnlockCount(xpBefore)
     fighter.technique[focus] = skillRating(progress)
     effects.push(`${BRANCH_META[focus].name} XP +${xpGain}`)
     if (levelAfter > levelBefore) effects.push(`技能升級：Lv.${levelBefore} → Lv.${levelAfter}`)
-    const learned = new Set(fighter.learnedMoves)
-    let candidates = movesForBranch(focus, levelAfter).filter((move) => !learned.has(move.id))
-    const foundations = TRAINING_FOUNDATION_IDS[focus]
-      .map((id) => candidates.find((move) => move.id === id))
-      .filter((move): move is FightMoveDefinition => Boolean(move))
-    const priority = candidates.filter((move) => minimumMoveLevel(move) === levelAfter)
-    const rest = candidates.filter((move) => minimumMoveLevel(move) !== levelAfter)
-    let shuffledPriority: typeof priority
-    let shuffledRest: typeof rest
-    ;[shuffledPriority, rng] = shuffle(priority, rng)
-    ;[shuffledRest, rng] = shuffle(rest, rng)
-    trainingMoveChoices = [...foundations, ...shuffledPriority, ...shuffledRest]
-      .filter((move, index, items): move is FightMoveDefinition => Boolean(move) && items.findIndex((item) => item?.id === move?.id) === index)
-      .slice(0, 4).map((move) => move.id)
-    trainingMoveSelections = trainingMoveChoices.length ? [] : undefined
-    trainingMoveBranch = focus
+    const reachedFoundation = levelBefore === 0 && levelAfter >= 1
+    if (reachedFoundation) {
+      const granted = FOUNDATION_MOVE_IDS[focus].filter((id) => !fighter.learnedMoves.includes(id))
+      fighter.learnedMoves = [...fighter.learnedMoves, ...granted]
+      effects.push(`完成${BRANCH_META[focus].name}初階基本功：${granted.map((id) => `「${moveForTraining(id).label}」`).join('、')}`)
+    } else if (moveUnlocks > 0) {
+      const learned = new Set(fighter.learnedMoves)
+      const candidates = movesForBranch(focus, levelAfter).filter((move) => !learned.has(move.id))
+      const priority = candidates.filter((move) => minimumMoveLevel(move) === levelAfter)
+      const rest = candidates.filter((move) => minimumMoveLevel(move) !== levelAfter)
+      let shuffledPriority: typeof priority
+      let shuffledRest: typeof rest
+      ;[shuffledPriority, rng] = shuffle(priority, rng)
+      ;[shuffledRest, rng] = shuffle(rest, rng)
+      trainingMoveChoices = [...shuffledPriority, ...shuffledRest]
+        .filter((move, index, items): move is FightMoveDefinition => Boolean(move) && items.findIndex((item) => item?.id === move?.id) === index)
+        .slice(0, 4).map((move) => move.id)
+      trainingMoveSelections = trainingMoveChoices.length ? [] : undefined
+      trainingMoveRequired = trainingMoveChoices.length ? Math.min(moveUnlocks, trainingMoveChoices.length) : undefined
+      trainingMoveBranch = trainingMoveChoices.length ? focus : undefined
+    } else {
+      effects.push('尚未跨過下一個招式里程碑，這次加練只打磨既有招式。')
+    }
     fighter.fatigue = clamp(fighter.fatigue + 7 + repeats * 4)
     effects.push(`疲勞 +${7 + repeats * 4}`)
+    if (repeats > 0) effects.push(`同營技術加練：本次 XP ×${campFactor}`)
     if (coachTier !== 'steady') effects.push(coachTier === 'trusted' ? '教練默契：本次 XP ×1.1' : '教練關係緊張：本次 XP ×0.9')
   } else if (action === 'film') {
     const scoutGain = 20 + Math.round(score * 16)
@@ -1239,7 +1300,7 @@ function applyCampActivity(
   return {
     ...state, fighter, rng, scouting, campActions, lifeEvent,
     campDrillHistory: [...state.campDrillHistory, outcome], campDrillOutcome: undefined,
-    trainingMoveChoices, trainingMoveSelections, trainingMoveBranch,
+    trainingMoveChoices, trainingMoveSelections, trainingMoveRequired, trainingMoveBranch,
     lastMessage: `${outcome.label}：${outcome.summary}`,
   }
 }
@@ -1271,7 +1332,7 @@ function toggleTrainingMove(state: GameState, moveId: string): GameState {
   if (!move || move.branch !== state.trainingMoveBranch || state.fighter.learnedMoves.includes(moveId)) return state
   const selected = state.trainingMoveSelections ?? []
   if (selected.includes(moveId)) return { ...state, trainingMoveSelections: selected.filter((id) => id !== moveId) }
-  const required = Math.min(2, state.trainingMoveChoices.length)
+  const required = state.trainingMoveRequired ?? Math.min(2, state.trainingMoveChoices.length)
   if (selected.length >= required) return state
   return { ...state, trainingMoveSelections: [...selected, moveId] }
 }
@@ -1279,14 +1340,14 @@ function toggleTrainingMove(state: GameState, moveId: string): GameState {
 function confirmTrainingMoves(state: GameState): GameState {
   if (state.phase !== 'training-reward' || !state.trainingMoveChoices?.length) return state
   const selected = state.trainingMoveSelections ?? []
-  const required = Math.min(2, state.trainingMoveChoices.length)
+  const required = state.trainingMoveRequired ?? Math.min(2, state.trainingMoveChoices.length)
   if (selected.length !== required || selected.some((id) => !state.trainingMoveChoices?.includes(id))) return state
   const moves = selected.map((id) => FIGHT_INTENTS.find((move) => move.id === id))
   if (moves.some((move) => !move || move.branch !== state.trainingMoveBranch || state.fighter.learnedMoves.includes(move.id))) return state
   const learnedMoves = moves as FightMoveDefinition[]
   const fighter = { ...state.fighter, learnedMoves: [...state.fighter.learnedMoves, ...learnedMoves.map((move) => move.id)] }
   const learnedLabels = learnedMoves.map((move) => `「${move.label}」`).join('、')
-  const cleared = { ...state, fighter, trainingMoveChoices: undefined, trainingMoveSelections: undefined, trainingMoveBranch: undefined, lastMessage: `你學會了${learnedLabels}。下一場比賽就能使用。` }
+  const cleared = { ...state, fighter, trainingMoveChoices: undefined, trainingMoveSelections: undefined, trainingMoveRequired: undefined, trainingMoveBranch: undefined, lastMessage: `你學會了${learnedLabels}。下一場比賽就能使用。` }
   return state.campActions.length >= 3 ? { ...cleared, phase: 'life' } : { ...cleared, phase: 'camp' }
 }
 

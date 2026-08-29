@@ -183,6 +183,6 @@ describe('戰鬥平衡', () => {
     })
     const detail = JSON.stringify(rates)
     expect(rates.every((rate) => rate.aggregateRate >= .4 && rate.aggregateRate <= .6), detail).toBe(true)
-    expect(rates.every((rate) => Math.abs(rate.playerSideRate - rate.opponentSideRate) <= .1), detail).toBe(true)
+    expect(rates.every((rate) => Math.abs(rate.playerSideRate - rate.opponentSideRate) <= .1 + Number.EPSILON), detail).toBe(true)
   }, 15_000)
 })

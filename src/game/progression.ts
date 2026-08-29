@@ -48,12 +48,28 @@ export function aptitudeLabel(aptitude: number): string {
   return '正常成長'
 }
 
-export const UNIVERSAL_MOVE_IDS = new Set([
-  'probe-range', 'double-jab-entry', 'outside-angle-step', 'angle-away', 'shell-counter', 'frame-space', 'sprawl-circle',
-  'pummel-center', 'wall-turn', 'top-control', 'safe-bottom', 'wall-walk',
-  'scramble-stand', 'base-balance', 'mount-shell', 'hand-fight-rnc',
-  'plum-frame-escape', 'body-lock-frame', 'front-headlock-hand-fight',
-])
+// Safety comes from `availableMoves`' position-specific fallback, not from a
+// hidden universal moveset.  Otherwise a Normie could use real techniques
+// they had never learned and their small opening toolkit would be cosmetic.
+export const UNIVERSAL_MOVE_IDS = new Set<string>()
+
+/** The complete level-one toolkit awarded when a beginner first reaches 100 XP in a branch. */
+export const FOUNDATION_MOVE_IDS: Record<Branch, readonly [string, string, string]> = {
+  boxing: ['jab-cross', 'check-hook', 'double-jab-entry'],
+  kicking: ['damage-base', 'front-kick', 'outside-angle-step'],
+  clinch: ['clinch-short-knee', 'head-control', 'enter-clinch'],
+  wrestling: ['collar-tie-club', 'sprawl-circle', 'shot-entry'],
+  ground: ['ground-strikes', 'rebuild-guard', 'hip-escape'],
+}
+
+/** Weak survival actions a Normie has before formal training unlocks a branch toolkit. */
+export const NORMIE_DEFAULT_MOVE_IDS: Record<Branch, readonly [string, string]> = {
+  boxing: ['probe-range', 'angle-away'],
+  kicking: ['touch-low-kick', 'long-guard'],
+  clinch: ['frame-space', 'cage-underhook-escape'],
+  wrestling: ['base-balance', 'cage-whizzer'],
+  ground: ['safe-bottom', 'wall-walk'],
+}
 
 export function minimumMoveLevel(move: FightMoveDefinition): SkillLevel {
   if (UNIVERSAL_MOVE_IDS.has(move.id)) return 0
