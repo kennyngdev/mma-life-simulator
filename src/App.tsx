@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
 import { advance, bodyMatchupFor, CAREER_HEALTH_RECOVERY_THRESHOLD, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, fighterStandingLabel, getOpponent, getRelationshipBenefit, LEAGUE_LABELS, LEAGUE_TITLE_RATING_FLOORS, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
-import { aptitudeLabel, minimumMoveLevel, nextMoveThreshold, nextSkillThreshold, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
+import { aptitudeLabel, minimumMoveLevel, nextMoveThreshold, nextSkillThreshold, POST_FOUNDATION_MOVE_XP, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
@@ -97,10 +97,6 @@ export default function App() {
       gameScroll.current.scrollTop = 0
       gameScroll.current.scrollLeft = 0
     }
-    document.documentElement.scrollTop = 0
-    document.documentElement.scrollLeft = 0
-    document.body.scrollTop = 0
-    document.body.scrollLeft = 0
   }, [game, loading])
 
   const dispatch = (command: GameCommand) => {
@@ -490,7 +486,7 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
     return relationship ? getRelationshipBenefit(relationship) : undefined
   }
   const techniqueActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
-    { id: 'technique', name: '技術訓練', detail: `穩定累積${BRANCH_META[branch].name} XP；首個 100 XP 自動學會三項基本功，之後里程碑可從最多 4 招中選 1 招`, risk: '增加疲勞', edge: '爭取額外 XP' },
+    { id: 'technique', name: '技術訓練', detail: `穩定累積${BRANCH_META[branch].name} XP；累積至 100 XP 時自動學會 3 招基本功，之後每多 ${POST_FOUNDATION_MOVE_XP} XP 可選一次招：最多 4 招中學會 1 招`, risk: '增加疲勞', edge: '爭取額外 XP' },
   ]
   const generalActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
     { id: 'film', name: '影片研究', detail: '研究對手習慣，穩定增加情報與戰術智商', risk: '疲勞 +3', edge: '爭取更多情報' },
@@ -557,9 +553,12 @@ function TrainingRewardView({ game, dispatch }: ViewProps) {
     .filter((move): move is FightMoveDefinition => Boolean(move))
   const selected = game.trainingMoveSelections ?? []
   const required = game.trainingMoveRequired ?? Math.min(2, moves.length)
+  const choiceExplanation = required === 1
+    ? `你已累積足夠 XP 解鎖 1 招。以下有 ${moves.length} 招可學，選其中 1 招學會。`
+    : `你一次累積跨過 ${required} 次招式解鎖。以下有 ${moves.length} 招可學，選 ${required} 招學會。`
   return <Screen title="把訓練變成你的招式" kicker={`${BRANCH_META[branch].name} · Lv.${skillLevel(game.fighter.skills[branch].xp)}`}>
     <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
-    <p className="lead">{moves.length >= 4 ? `從四條路線選擇 ${required} 招，建立下一場就能使用的技術組合。` : `這個分支還有 ${moves.length} 招可學；選擇 ${required} 招帶進下一場比賽。`}沒有重抽；確認前可以重新選擇。</p>
+    <p className="lead">{choiceExplanation} 確認前可換選，這次不會重抽。</p>
     <p className="training-selection-status" role="status">已選 {selected.length}／{required} 招</p>
     <div className="move-learning-list">{moves.map((move) => {
       const isSelected = selected.includes(move.id)
@@ -1475,6 +1474,7 @@ function FightArena({ game, compact = false, showLiveLog = true }: { game: GameS
   const fight = game.fight!
   const opponent = getOpponent(game)!
   const lastBeat = fight.beatHistory.at(-1)
+  const roundCommentary = fight.commentary.slice(fight.roundCommentaryStart ?? 0)
   const playerHit = lastBeat?.damageEvents.find((event) => event.side === 'player')
   const opponentHit = lastBeat?.damageEvents.find((event) => event.side === 'opponent')
   const critical = (['head', 'body', 'leg'] as const).some((part) => damageSeverity(fight.playerDamageByPart[part], part) === 'critical' || damageSeverity(fight.opponentDamageByPart[part], part) === 'critical')
@@ -1485,7 +1485,7 @@ function FightArena({ game, compact = false, showLiveLog = true }: { game: GameS
     </div>
     {(fight.playerKnockdowns ?? 0) > 0 && <KnockdownCallout fight={fight} careerKnockdowns={game.fighter.evidence.knockdowns} />}
     <PositionScene position={fight.position} league={leagueForGame(game) ?? 'grassroots'} />
-    {showLiveLog && <div className="live-log">{fight.commentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
+    {showLiveLog && <div className="live-log">{roundCommentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
   </section>
 }
 
@@ -1659,7 +1659,7 @@ function SkillProgressCard({ branch, fighter }: { branch: Branch; fighter: Fight
   const thresholds = [0, 100, 300, 600, 1_000, 1_500]
   const next = nextSkillThreshold(progress.xp)
   const nextMove = nextMoveThreshold(progress.xp)
-  const start = next ? thresholds[level] : nextMove - 175
+  const start = next ? thresholds[level] : nextMove - POST_FOUNDATION_MOVE_XP
   const target = next ?? nextMove
   const percent = Math.max(0, Math.min(100, (progress.xp - start) / (target - start) * 100))
   const known = fighter.learnedMoves.filter((id) => FIGHT_INTENTS.find((move) => move.id === id)?.branch === branch).length
@@ -1667,6 +1667,9 @@ function SkillProgressCard({ branch, fighter }: { branch: Branch; fighter: Fight
     <div><span>{BRANCH_META[branch].name}</span><strong className="skill-ability" aria-label={`${BRANCH_META[branch].name}能力 ${ability} / 100`}><em>能力</em>{ability}<small>/100</small></strong><b className="skill-level" aria-label={`${BRANCH_META[branch].name}強度 ${strength}`}>{strength}</b><small className="skill-support">{aptitudeLabel(progress.aptitude)} · 已學 {known} 招</small></div>
     <i><b style={{ width: `${percent}%` }} /></i>
     <p>{next ? `${progress.xp} / ${next} XP` : `${progress.xp} XP · 下一招 ${nextMove} XP`}</p>
+    <small className="skill-move-unlock">{progress.xp < 100
+      ? '累積至 100 XP：自動學會 3 招基本功'
+      : `下一次選招：${nextMove} XP（再累積 ${nextMove - progress.xp} XP）`}</small>
   </article>
 }
 

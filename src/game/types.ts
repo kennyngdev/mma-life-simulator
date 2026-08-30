@@ -611,6 +611,7 @@ export interface FightState {
   positionEntry?: PositionEntry
   lastNarrative?: NarrativeBeat
   beatHistory: FightBeat[]
+  roundCommentaryStart?: number
   activeFinishWindow?: FinishWindow
   finishWindowsUsed: number
   prompt?: DecisionPrompt

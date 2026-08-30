@@ -22,6 +22,7 @@ import {
   minimumMoveLevel,
   moveUnlockCount,
   movesForBranch,
+  nextMoveThreshold,
   NORMIE_DEFAULT_MOVE_IDS,
   skillLevel,
   skillRating,
@@ -1266,7 +1267,7 @@ function applyCampActivity(
       trainingMoveRequired = trainingMoveChoices.length ? Math.min(moveUnlocks, trainingMoveChoices.length) : undefined
       trainingMoveBranch = trainingMoveChoices.length ? focus : undefined
     } else {
-      effects.push('尚未跨過下一個招式里程碑，這次加練只打磨既有招式。')
+      effects.push(`尚未累積到下一次選招的 ${nextMoveThreshold(progress.xp)} XP（目前 ${progress.xp} XP），這次加練只打磨既有招式。`)
     }
     fighter.fatigue = clamp(fighter.fatigue + 7 + repeats * 4)
     effects.push(`疲勞 +${7 + repeats * 4}`)
@@ -1726,7 +1727,7 @@ function startFight(state: GameState): GameState {
     }, stageName: 'contact',
     playerOpenings: [], opponentOpenings: [], opponentAdaptation: {}, opponentMoveHistory: {},
     playerDamageByPart: { head: 0, body: 0, leg: 0 }, opponentDamageByPart: { head: 0, body: 0, leg: 0 },
-    playerControl: 0, opponentControl: 0, finishPressure: 0, beatHistory: [], finishWindowsUsed: 0, techniqueTriggersThisRound: [],
+    playerControl: 0, opponentControl: 0, finishPressure: 0, beatHistory: [], roundCommentaryStart: 0, finishWindowsUsed: 0, techniqueTriggersThisRound: [],
     commentary: [`鐘聲就要響了！${state.fighter.name}與${opponent.name}在籠中央四目交鋒，誰也不肯先退。`], scores: [], finished: false,
   }
   return { ...state, phase: 'round-plan', fight, lastMessage: undefined }
@@ -2354,6 +2355,8 @@ function continueRound(state: GameState): GameState {
   fight.opponentIntent = { intentId: 'probe-range', executionName: '觀察反應', branch: 'boxing', category: 'offense', target: 'head', effectSummary: '等待下一回合的第一個選擇', exploitsOpenings: [], threatLevel: 'watch' }
   fight.playerOpenings = []
   fight.opponentOpenings = []
+  fight.beatHistory = []
+  fight.roundCommentaryStart = fight.commentary.length
   fight.lastNarrative = undefined
   fight.activeFinishWindow = undefined
   fight.plan = undefined

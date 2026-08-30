@@ -111,7 +111,7 @@ function gameAtCounteredTakedownEntry(): GameState {
 
 function gameAtCampDrill(kind: CampAction): GameState {
   const game = createNewRun(input)
-  if (kind === 'technique') game.fighter.skills.boxing.xp = 250
+  if (kind === 'technique') game.fighter.skills.boxing.xp = 340
   const branch = kind === 'technique' ? 'boxing' as const : undefined
   const answer = 'boxing'
   const challenge: CampDrillChallenge = {
@@ -129,7 +129,7 @@ function gameAtCampDrill(kind: CampAction): GameState {
 
 function gameAtGeneratedCampDrill(kind: CampAction, branch: 'boxing' = 'boxing'): GameState {
   const game = createNewRun(input)
-  if (kind === 'technique') game.fighter.skills[branch].xp = 250
+  if (kind === 'technique') game.fighter.skills[branch].xp = 340
   game.phase = 'camp'
   game.selectedOfferId = game.offers[0].id
   return advance(game, { type: 'START_CAMP_DRILL', action: kind, branch: kind === 'technique' ? branch : undefined }).state
@@ -314,15 +314,11 @@ describe('生涯重置', () => {
     await screen.findByRole('heading', { name: '命運揭曉' })
     const gameScroll = document.querySelector<HTMLElement>('.game-scroll')!
     gameScroll.scrollTop = 600
-    document.documentElement.scrollTop = 300
-    document.body.scrollTop = 300
 
     fireEvent.click(screen.getByRole('button', { name: '從這裡開始' }))
 
     await waitFor(() => {
       expect(gameScroll.scrollTop).toBe(0)
-      expect(document.documentElement.scrollTop).toBe(0)
-      expect(document.body.scrollTop).toBe(0)
     })
   })
 
@@ -339,6 +335,7 @@ describe('生涯重置', () => {
     render(<App />)
 
     expect(await screen.findByRole('heading', { name: '把訓練變成你的招式' })).toBeInTheDocument()
+    expect(screen.getByText('你已累積足夠 XP 解鎖 1 招。以下有 4 招可學，選其中 1 招學會。 確認前可換選，這次不會重抽。')).toBeInTheDocument()
     const shotEntry = screen.getByRole('button', { name: /抱摔切入/ })
     expect(shotEntry).toHaveTextContent(/可用位置：遠距站立、近身交換/)
     expect(shotEntry).toHaveTextContent(/最適階段：交鋒/)
@@ -687,15 +684,11 @@ describe('生涯重置', () => {
     const move = await screen.findByRole('button', { name: /背後短拳/ })
     const gameScroll = document.querySelector<HTMLElement>('.game-scroll')!
     gameScroll.scrollTop = 600
-    document.documentElement.scrollTop = 300
-    document.body.scrollTop = 300
 
     fireEvent.click(move)
 
     await waitFor(() => {
       expect(gameScroll.scrollTop).toBe(0)
-      expect(document.documentElement.scrollTop).toBe(0)
-      expect(document.body.scrollTop).toBe(0)
     })
   })
 

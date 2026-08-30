@@ -126,7 +126,7 @@ The five combat skills are boxing, kicking, clinch, wrestling, and ground. Each 
 | 4 | 進階 | 1,000 | 84 |
 | 5 | 大師 | 1,500 | 96 |
 
-Aptitude is visible, seeded independently per branch, and ranges from `0.8×` to `1.2×` XP gain. It affects learning speed but never creates a hard mastery cap. `大師` remains the level-five, 96-rating ceiling, but XP continues afterward: every further 175 XP can unlock one still-unlearned move from that branch.
+Aptitude is visible, seeded independently per branch, and ranges from `0.8×` to `1.2×` XP gain. It affects learning speed but never creates a hard mastery cap. `大師` remains the level-five, 96-rating ceiling, but XP continues afterward: every further 150 XP can unlock one still-unlearned move from that branch.
 
 Level is an access gate and concise summary. Learned moves and earned traits are the identity the player should actually feel.
 
@@ -134,7 +134,7 @@ Level is an access gate and concise summary. Learned moves and earned traits are
 
 Each fight camp has three slots. The available activities are:
 
-- **Technique training**: the player chooses a branch and receives a solid standard result immediately. Reaching the first 100-XP milestone grants that branch's complete level-one toolkit—one attack, one defense, and one transition. Each later 175-XP milestone offers one move from up to four eligible choices. A session that does not cross a move milestone refines the fighter's existing technique without granting a move.
+- **Technique training**: the player chooses a branch and receives a solid standard result immediately. Reaching the first 100-XP milestone grants that branch's complete level-one toolkit—one attack, one defense, and one transition. Each later 150-XP milestone offers one move from up to four eligible choices. A session that does not cross a move milestone refines the fighter's existing technique without granting a move.
 - **Film study**: immediately improves scouting accuracy and fight IQ at a small fatigue cost.
 - **Recovery**: immediately reduces fatigue and restores health; it does not create skill growth.
 
@@ -152,9 +152,9 @@ Technique XP is:
 round((50 + 20 × drill score) × aptitude × coach modifier × learning-trait modifier × camp factor)
 ```
 
-The camp factor is `1.0×` for the first technique session in a branch, `0.85×` for the second, and `0.70×` for the third. Changing branch starts at `1.0×`; the reduced multiplier and added fatigue apply only when repeating the same branch. Coach modifiers are `0.9×` when strained, `1.0×` when steady, and `1.1×` when trusted. There is no first-session XP override: aptitude, coaching, traits, score, and camp order all affect how quickly a level-0 fighter reaches the first 100-XP foundation milestone. Focused camps remain useful, while the 175-XP move spacing and the level-five combat-rating ceiling prevent late XP from turning into unlimited rating growth.
+The camp factor is `1.0×` for the first technique session in a branch, `0.85×` for the second, and `0.70×` for the third. Changing branch starts at `1.0×`; the reduced multiplier and added fatigue apply only when repeating the same branch. Coach modifiers are `0.9×` when strained, `1.0×` when steady, and `1.1×` when trusted. There is no first-session XP override: aptitude, coaching, traits, score, and camp order all affect how quickly a level-0 fighter reaches the first 100-XP foundation milestone. Focused camps remain useful, while the 150-XP move spacing and the level-five combat-rating ceiling prevent late XP from turning into unlimited rating growth.
 
-The first 100-XP foundation is automatic rather than a choice: boxing receives `刺拳接直拳` / `迎擊勾拳切角` / `雙刺拳進場`; kicking receives `低掃` / `前踢` / `換架切外側`; clinch receives `貼身短膝` / `籠邊頭位控制` / `進入纏抱`; wrestling receives `領帶拍頭肩撞` / `下壓防摔繞側` / `抱摔切入`; and ground receives `防守架內短拳` / `打破上位姿勢` / `蝦形調髖`. These are respectively attack, defense, and transition actions. The move offer after that has no reroll. Each later move requires another 175 XP. Aptitude affects the timing of move growth without creating a hard cap.
+The first 100-XP foundation is automatic rather than a choice: boxing receives `刺拳接直拳` / `迎擊勾拳切角` / `雙刺拳進場`; kicking receives `低掃` / `前踢` / `換架切外側`; clinch receives `貼身短膝` / `籠邊頭位控制` / `進入纏抱`; wrestling receives `領帶拍頭肩撞` / `下壓防摔繞側` / `抱摔切入`; and ground receives `防守架內短拳` / `打破上位姿勢` / `蝦形調髖`. These are respectively attack, defense, and transition actions. The move offer after that has no reroll. Each later move requires another 150 XP. Aptitude affects the timing of move growth without creating a hard cap.
 
 ### 4.3 Move access — Accepted
 
@@ -221,7 +221,7 @@ Combat is position-based. The player selects a round plan, learns why the openin
 
 Character creation offers two permanent per-career combat controls. **戰術操作** preserves position-specific move choice. **教練帶領** keeps opponent selection, camp choices, round plans, and between-round corner adjustments under player control, while the coach selects the highest-ranked legal learned or emergency move for each exchange using the same contextual combat scoring as the manual option list. It is not a separate combat ruleset: learned moves, injuries, stamina, traits, scouting, openings, adaptation, positions, and outcome formulas remain identical.
 
-Coach-guided exchanges appear as a readable, chronological live feed that advances automatically rather than requesting empty confirmation taps. Position-entry causality remains visible in that feed. Both player finish opportunities and opponent finish threats still interrupt for the existing playable TKO/submission minigames. Existing careers migrate to **戰術操作** so no active player loses direct control.
+Coach-guided exchanges appear as a readable, chronological live feed that advances automatically rather than requesting empty confirmation taps. The live feed is scoped to the current round and clears at the bell; the complete fight commentary remains available in the final report. Position-entry causality remains visible in that feed. Both player finish opportunities and opponent finish threats still interrupt for the existing playable TKO/submission minigames. Existing careers migrate to **戰術操作** so no active player loses direct control.
 
 The ground-position chain intentionally omits side control. Guard passes progress from defensive-guard top directly to mount, and failed bottom submissions may concede mount defense. Do not restore side-control positions or side-control-only attacks, submissions, transitions, escapes, visuals, or progression rewards without a new explicit decision.
 
@@ -302,7 +302,7 @@ Gameplay changes should preserve or explicitly revise these tests:
 - A level-0 fighter always has a legal action in every reachable position.
 - The reachable ground chain is guard, mount, and back control; side control and its dedicated moves are absent.
 - A Normie's first 100 XP in every branch automatically grants its functional three-move foundation; the first ground foundation includes an escape route and the first wrestling foundation includes a real takedown.
-- The first 100-XP milestone grants its fixed toolkit without a selection. Each later 175-XP milestone offers up to four moves and requires one selection before the move is learned. Sessions that do not cross a milestone grant no move.
+- The first 100-XP milestone grants its fixed toolkit without a selection. Each later 150-XP milestone offers up to four moves and requires one selection before the move is learned. Sessions that do not cross a milestone grant no move.
 - XP thresholds, aptitude, relationship, and trait modifiers are correct and visible.
 - Unlearned non-emergency moves never appear in combat.
 - Trait evidence uses the correct finish method and move attribution, awards once, and persists to history and biography.
@@ -348,3 +348,4 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-29 | Accepted | Expand performance-earned traits using recorded fight evidence, so more careers gain distinct milestones without random post-fight loot. Add the legendary growth-only birth trait `戰鬥天才`: +12% technical XP in every branch and +1 Fight IQ from film study, with no direct combat bonus. |
 | 2026-08-29 | Accepted | Keep XP and 175-XP move milestones active after a branch reaches `大師`, while holding the level-five combat rating at 96. Ease same-branch camp repetition to 100% / 85% / 70% and do not penalize changing branches; this lets late-career fighters complete their authored move pool without reopening runaway rating growth. |
 | 2026-08-30 | Accepted | Offer permanent per-career **戰術操作** and **教練帶領** controls at character creation. Coach-guided combat retains player round plans and corner choices, uses the same legal-move and combat scoring model to choose exchanges automatically, presents those exchanges as a readable live feed, and preserves playable TKO/submission windows for both attack and defense. |
+| 2026-08-30 | Accepted | Keep the automatic 100-XP three-move foundation, then reduce every later move-selection interval from 175 XP to 150 XP. Each interval offers up to four eligible moves and requires one choice. |

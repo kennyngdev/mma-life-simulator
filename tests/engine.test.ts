@@ -3,7 +3,7 @@ import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } fr
 import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
 import { advance, bodyMatchupFor, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, generateOffers, getAnthropometrics, getTechniqueAffinity, leagueRankingAfterWin, mirrorPosition, offerRefreshCost, opponentBodyFor, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
 import { migrateBodyMatchupStats, migrateCareerEndings, migrateCoachGuidedCombat, migrateCompetitiveRatingBreadth, migrateFastTrackMatchmaking, migrateLeagueRankings, migrateMatchmakingCredibility, migrateMoveLearningPacing, migratePostFoundationMoveMilestones, migrateRankingCredibility, migrateRemovedSideControl, migrateTechniqueTrainingPacing, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, migrateXpBasedMoveUnlocks, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
-import { EARNED_TRAITS, FOUNDATION_MOVE_IDS, NORMIE_DEFAULT_MOVE_IDS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, movesForBranch, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
+import { EARNED_TRAITS, FOUNDATION_MOVE_IDS, NORMIE_DEFAULT_MOVE_IDS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, moveUnlockCount, movesForBranch, nextMoveThreshold, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
 import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, Position } from '../src/game/types'
 
 const input = { name: '林致遠', region: 'taiwan' as const, motive: 'prove' as const, seed: 'TESTCAGE01' }
@@ -420,23 +420,29 @@ describe('拳途人生模擬核心', () => {
     expect(state.fighter.skills.boxing.xp).toBe(1_304)
     expect(state.fighter.technique.boxing).toBe(84)
     expect(state.fighter.skills.boxing.xp).toBeLessThan(1_500)
-    expect(state.fighter.learnedMoves).toHaveLength(19)
+    expect(state.fighter.learnedMoves).toHaveLength(21)
   })
 
   it('大師後仍可跨過招式里程碑，但能力值維持在上限', () => {
     let state = enterCamp('MASTER-MOVE-MILESTONE')
-    state.fighter.skills.boxing.xp = 1_650
+    state.fighter.skills.boxing.xp = 1_700
     state.fighter.skills.boxing.aptitude = 1
     state.fighter.traits = []
     state.fighter.relationships.find((relationship) => relationship.role === 'coach')!.trust = 50
 
     state = apply(state, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'boxing' })
 
-    expect(state.fighter.skills.boxing.xp).toBe(1_714)
+    expect(state.fighter.skills.boxing.xp).toBe(1_764)
     expect(skillLevel(state.fighter.skills.boxing.xp)).toBe(5)
     expect(state.fighter.technique.boxing).toBe(96)
     expect(state.phase).toBe('training-reward')
     expect(state.trainingMoveRequired).toBe(1)
+  })
+
+  it('基本功之後每累積 150 XP 解鎖一次四選一招式', () => {
+    expect(moveUnlockCount(249)).toBe(1)
+    expect(moveUnlockCount(250)).toBe(2)
+    expect(nextMoveThreshold(250)).toBe(400)
   })
 
   it('目前生涯切換較慢的訓練與招式規則，不改寫已獲得的技能或招式', () => {
@@ -1333,7 +1339,7 @@ describe('拳途人生模擬核心', () => {
     expect(state.trainingMoveChoices).toBeUndefined()
   })
 
-  it('較低的同分支加練懲罰仍以 175 XP 里程碑授予一招', () => {
+  it('較低的同分支加練懲罰仍以 150 XP 解鎖門檻授予一招', () => {
     let state = apply(createNewRun({ ...input, seed: 'MOVE-PACING', startingExperience: 'normie' }), { type: 'ACK_REVEAL' })
     state = apply(state, { type: 'CONTINUE_GROWTH' })
     state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
@@ -1353,7 +1359,7 @@ describe('拳途人生模擬核心', () => {
     expect(state.phase).toBe('life')
     expect(state.trainingMoveChoices).toBeUndefined()
     expect(state.fighter.learnedMoves).toHaveLength(learnedAfterFoundation)
-    expect(state.campDrillHistory.at(-1)?.effects).toContain('尚未跨過下一個招式里程碑，這次加練只打磨既有招式。')
+    expect(state.campDrillHistory.at(-1)?.effects.some((effect) => effect.includes('尚未累積到下一次選招的'))).toBe(true)
 
     state = { ...state, phase: 'camp', campActions: [] }
     state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
@@ -2080,6 +2086,14 @@ describe('拳途人生模擬核心', () => {
     expect(state.fight!.beatHistory).toHaveLength(4)
     expect(state.fight!.scores).toHaveLength(1)
     expect(state.fight!.position).toBe('range')
+
+    const firstRoundCommentary = [...state.fight!.commentary]
+    state = apply(state, { type: 'CONTINUE_ROUND' })
+    expect(state.phase).toBe('round-plan')
+    expect(state.fight!.round).toBe(2)
+    expect(state.fight!.beatHistory).toHaveLength(0)
+    expect(state.fight!.roundCommentaryStart).toBe(firstRoundCommentary.length)
+    expect(state.fight!.commentary).toEqual(expect.arrayContaining(firstRoundCommentary))
   })
 
   it('終結機會越好，進攻小遊戲的容錯單調增加', () => {

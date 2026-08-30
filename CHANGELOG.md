@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-30
+
+### Fixed
+
+- Cleared the coach-guided live report at each round bell while retaining the complete final fight report, and removed document-level scroll resets that could briefly flash a black lower viewport on mobile.
+- Replaced the vague training “milestone” label with an explicit XP-to-move explanation: the first 100 XP grants three basics, then every additional 150 XP offers up to four moves and teaches one chosen move.
+
+### Changed
+
+- Reduced the post-foundation move-selection interval from 175 XP to 150 XP while keeping the first 100-XP, three-move foundation unchanged.
+
 ## [0.3.0] - 2026-08-30
 
 ### Added

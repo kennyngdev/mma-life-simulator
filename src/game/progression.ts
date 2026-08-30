@@ -19,7 +19,7 @@ export const SKILL_XP_THRESHOLDS = [0, 100, 300, 600, 1_000, 1_500] as const
 export const SKILL_RATINGS = [10, 30, 50, 68, 84, 96] as const
 export const SKILL_STRENGTH_LABELS = ['未受訓', '初學', '中階', '熟練', '進階', '大師'] as const
 export const FIRST_MOVE_XP = 100
-export const POST_FOUNDATION_MOVE_XP = 175
+export const POST_FOUNDATION_MOVE_XP = 150
 
 export function skillLevel(xp: number): SkillLevel {
   if (xp >= SKILL_XP_THRESHOLDS[5]) return 5
