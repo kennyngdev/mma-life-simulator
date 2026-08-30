@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
+import packageMeta from '../package.json'
 import { advance, createNewRun, getCompetitionWeightClass } from '../src/game/engine'
 import { FIGHT_INTENTS, OPENING_LABELS } from '../src/game/fight-content'
 import type { CampAction, CampDrillChallenge, CriticalOption, FightBeat, FinishKind, GameState, LeagueId } from '../src/game/types'
@@ -205,7 +206,7 @@ describe('生涯重置', () => {
   it('拳手建立頁顯示目前遊戲版本', async () => {
     storage.loadGame.mockResolvedValue({})
     render(<App />)
-    expect(await screen.findByLabelText('遊戲版本 0.3.0')).toHaveTextContent('v0.3.0')
+    expect(await screen.findByLabelText(`遊戲版本 ${packageMeta.version}`)).toHaveTextContent(`v${packageMeta.version}`)
   })
 
   it('以 PWA 獨立模式開啟時不顯示安裝提示', async () => {

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import packageMeta from '../package.json'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, intentForExecutionId, MOVE_VISUAL_FAMILY_BY_INTENT, OPENING_LABELS } from './game/fight-content'
 import type { MoveVisualFamily } from './game/fight-content'
@@ -196,7 +197,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
         <p className="eyebrow">MMA LIFE SIMULATOR</p>
         <h1>拳途人生 Cage Life</h1>
         <p className="hero-copy">沒有人能學會所有招式再走進鐵籠。<br />一次次取捨，會決定你成為什麼樣的拳手。</p>
-        <small className="build-version" aria-label="遊戲版本 0.3.0">v0.3.0</small>
+        <small className="build-version" aria-label={`遊戲版本 ${packageMeta.version}`}>v{packageMeta.version}</small>
       </section>
 
       {!standalonePwa && <aside className="pwa-install-prompt" role="note" aria-labelledby="pwa-install-title">
