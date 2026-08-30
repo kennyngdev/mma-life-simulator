@@ -4,7 +4,7 @@ import { FIGHT_INTENTS, MOVE_VISUAL_FAMILY_BY_INTENT, TECHNIQUE_COMBAT_RULES, va
 import { advance, bodyMatchupFor, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, generateOffers, getAnthropometrics, getTechniqueAffinity, leagueRankingAfterWin, mirrorPosition, offerRefreshCost, opponentBodyFor, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
 import { migrateBodyMatchupStats, migrateCareerEndings, migrateCoachGuidedCombat, migrateCompetitiveRatingBreadth, migrateFastTrackMatchmaking, migrateLeagueRankings, migrateMatchmakingCredibility, migrateMoveLearningPacing, migratePostFoundationMoveMilestones, migrateRankingCredibility, migrateRemovedSideControl, migrateTechniqueTrainingPacing, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, migrateXpBasedMoveUnlocks, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
 import { EARNED_TRAITS, FOUNDATION_MOVE_IDS, NORMIE_DEFAULT_MOVE_IDS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, moveUnlockCount, movesForBranch, nextMoveThreshold, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
-import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, Position } from '../src/game/types'
+import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, OpeningKey, Position } from '../src/game/types'
 
 const input = { name: '林致遠', region: 'taiwan' as const, motive: 'prove' as const, seed: 'TESTCAGE01' }
 
@@ -1828,9 +1828,16 @@ describe('拳途人生模擬核心', () => {
     thaiState.fight!.finishWindowsUsed = 4
     thaiState = apply(thaiState, { type: 'RESOLVE_CRITICAL', optionId: collar.id })
     expect(thaiState.fight!.position).toBe('thai-clinch')
+    expect(thaiState.fight!.positionPayoff).toEqual({ position: 'thai-clinch', sourceStep: 1 })
+    expect(thaiState.fight!.sequenceStep).toBe(1)
     expect(thaiState.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
       'plum-body-knees', 'plum-head-knee', 'plum-slicing-elbow', 'plum-outside-trip', 'plum-release-elbow', 'plum-control',
     ]))
+    const plumControl = thaiState.fight!.prompt!.allOptions.find((option) => option.intentId === 'plum-control')!
+    plumControl.chance = { min: 140, max: 140 }
+    thaiState = apply(thaiState, { type: 'RESOLVE_CRITICAL', optionId: plumControl.id })
+    expect(thaiState.fight!.positionPayoff).toBeUndefined()
+    expect(thaiState.fight!.sequenceStep).toBe(2)
 
     let front: GameState | undefined
     for (let index = 0; index < 40 && !front; index += 1) {
@@ -1853,6 +1860,114 @@ describe('拳途人生模擬核心', () => {
     expect(frontState.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
       'front-headlock-go-behind', 'front-headlock-spin-top', 'front-headlock-guillotine', 'front-headlock-anaconda', 'front-headlock-snap',
     ]))
+  })
+
+  it('準備動作能把互有得失的轉位轉成泰式頸抱、騎乘、背控或前頸優勢', () => {
+    const pairedContestedResult = (
+      prefix: string,
+      plan: 'clinch' | 'takedown',
+      setupId: string,
+      transitionId: string,
+      setupOpening: OpeningKey,
+      expectedPosition: Position,
+      configure: (state: GameState) => void,
+    ) => {
+      for (let index = 0; index < 120; index += 1) {
+        let state = reachFirstRoundPlan(createNewRun({ ...input, seed: `${prefix}-${index}` }))
+        configure(state)
+        state = apply(state, { type: 'SET_ROUND_PLAN', plan })
+        const setup = state.fight!.prompt!.allOptions.find((option) => option.intentId === setupId)
+        if (!setup) continue
+        setup.chance = { min: 140, max: 140 }
+        state.fight!.finishWindowsUsed = 4
+        state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: setup.id })
+        const transition = state.fight!.prompt!.allOptions.find((option) => option.intentId === transitionId)
+        if (!transition) continue
+        transition.chance = { min: 60, max: 60 }
+        const withoutSetup = structuredClone(state)
+        withoutSetup.fight!.opponentOpenings = withoutSetup.fight!.opponentOpenings.filter((opening) => opening.key !== setupOpening)
+        const prepared = apply(state, { type: 'RESOLVE_CRITICAL', optionId: transition.id })
+        if (prepared.fight!.lastNarrative?.outcome !== 'contested') continue
+        const unprepared = apply(withoutSetup, { type: 'RESOLVE_CRITICAL', optionId: transition.id })
+        expect(prepared.fight!.position).toBe(expectedPosition)
+        expect(unprepared.fight!.position).not.toBe(expectedPosition)
+        return
+      }
+      throw new Error(`${prefix} did not produce a contested prepared transition`)
+    }
+
+    const neutralClinch = (state: GameState) => {
+      state.fighter.technique.clinch = 55
+      state.fighter.technique.wrestling = 55
+      state.fighter.mind.fightIQ = 50
+      const opponent = state.opponents.find((item) => item.id === state.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+      opponent.technique.clinch = 55
+      opponent.technique.wrestling = 55
+      opponent.composure = 50
+    }
+    const dominantTakedown = (state: GameState) => {
+      state.fighter.technique.wrestling = 95
+      state.fighter.mind.fightIQ = 80
+      const opponent = state.opponents.find((item) => item.id === state.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+      opponent.technique.wrestling = 10
+      opponent.composure = 20
+    }
+
+    pairedContestedResult('PREP-THAI', 'clinch', 'inside-position', 'double-collar-entry', 'underhook-control', 'thai-clinch', neutralClinch)
+    pairedContestedResult('PREP-MOUNT', 'takedown', 'top-control', 'pass-guard', 'hips-flat', 'mount', dominantTakedown)
+    pairedContestedResult('PREP-BACK', 'takedown', 'top-control', 'take-back', 'hips-flat', 'back-control', dominantTakedown)
+    pairedContestedResult('PREP-FRONT', 'clinch', 'collar-tie-club', 'snapdown-entry', 'weight-forward', 'front-headlock-control', neutralClinch)
+  })
+
+  it('第四段攻防才建立騎乘或背控時只追加一次位置追擊', () => {
+    let state = reachFirstRoundPlan(createNewRun({ ...input, seed: 'FINAL-BEAT-POSITION-PAYOFF' }))
+    state.fighter.technique.wrestling = 95
+    state.fighter.mind.fightIQ = 80
+    const opponent = state.opponents.find((item) => item.id === state.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+    opponent.technique.wrestling = 10
+    opponent.composure = 20
+    state = apply(state, { type: 'SET_ROUND_PLAN', plan: 'takedown' })
+    expect(state.fight!.position).toBe('top')
+    state.fight!.sequenceStep = 4
+    state.fight!.finishWindowsUsed = 4
+    const pass = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'pass-guard')!
+    pass.chance = { min: 140, max: 140 }
+    state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: pass.id })
+    expect(state.fight!.position).toBe('mount')
+    expect(state.fight!.positionPayoff).toEqual({ position: 'mount', sourceStep: 4 })
+    expect(state.phase).toBe('critical')
+    const control = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'mount-control')!
+    control.chance = { min: 140, max: 140 }
+    state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: control.id })
+    expect(state.fight!.positionPayoff).toBeUndefined()
+    expect(state.phase).toBe('round-result')
+  })
+
+  it('乾淨下壓防摔會把實際進腿帶入前頸優勢，雙方規則完全鏡像', () => {
+    const start = reachFirstRoundPlan(createNewRun({ ...input, seed: 'SPRAWL-FRONT-HEADLOCK' }))
+    let defense = apply(structuredClone(start), { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    defense.fight!.finishWindowsUsed = 4
+    defense.fight!.opponentIntent = {
+      intentId: 'shot-entry', executionName: '抱摔切入', branch: 'wrestling', category: 'transition',
+      effectSummary: '成功後把你帶到防守架下位', exploitsOpenings: [], threatLevel: 'danger',
+    }
+    const sprawl = defense.fight!.prompt!.allOptions.find((option) => option.intentId === 'sprawl-circle')!
+    sprawl.chance = { min: 140, max: 140 }
+    defense = apply(defense, { type: 'RESOLVE_CRITICAL', optionId: sprawl.id })
+    expect(defense.fight!.position).toBe('front-headlock-control')
+    expect(defense.fight!.positionPayoff?.position).toBe('front-headlock-control')
+
+    let shot = apply(structuredClone(start), { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    shot.fight!.finishWindowsUsed = 4
+    shot.fight!.opponentIntent = {
+      intentId: 'sprawl-circle', executionName: '下壓防摔繞側', branch: 'wrestling', category: 'defense',
+      effectSummary: '拆解抱摔並控制頭頸', exploitsOpenings: [], threatLevel: 'danger',
+    }
+    const shotEntry = shot.fight!.prompt!.allOptions.find((option) => option.intentId === 'shot-entry')!
+    shotEntry.chance = { min: 0, max: 0 }
+    shot = apply(shot, { type: 'RESOLVE_CRITICAL', optionId: shotEntry.id })
+    expect(shot.fight!.position).toBe('front-headlock-defense')
+    expect(shot.fight!.positionPayoff?.position).toBe('front-headlock-defense')
   })
 
   it('籠邊壓制能接入抱腰控制，再選擇回摔、絆摔、繞背或繼續壓籠', () => {

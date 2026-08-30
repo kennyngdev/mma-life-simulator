@@ -1667,9 +1667,9 @@ function positionLabel(position: Position): string {
   return ({
     range: '遠距', pocket: '近身', clinch: '纏抱', cage: '籠邊',
     'cage-control': '籠邊壓制', 'cage-defense': '背靠籠網',
-    'thai-clinch': '泰式頸抱', 'thai-clinch-defense': '被控頸抱',
+    'thai-clinch': '纏抱 · 泰式頸抱優勢', 'thai-clinch-defense': '纏抱 · 對手頸抱優勢',
     'body-lock': '抱腰控制', 'body-lock-defense': '被抱腰',
-    'front-headlock-control': '前頸控制', 'front-headlock-defense': '被控前頸',
+    'front-headlock-control': '混戰 · 前頸控制優勢', 'front-headlock-defense': '混戰 · 對手前頸優勢',
     top: '防守架上位', bottom: '防守架下位', scramble: '混戰',
     mount: '騎乘位', 'mount-defense': '騎乘下位',
     'back-control': '背後控制', 'back-defense': '背部被控',
@@ -1805,6 +1805,8 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   if (state.phase !== 'critical' || !state.fight?.prompt) return state
   let rng = state.rng
   const fight = structuredClone(state.fight)
+  const resolvingPositionPayoff = Boolean(fight.positionPayoff)
+  fight.positionPayoff = undefined
   fight.positionEntry = undefined
   const option = fight.prompt!.allOptions.find((item) => item.id === optionId)
   if (!option) return state
@@ -1924,6 +1926,19 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   const opponentFinishTrait = opponentMove.submission ? traitModifier(opponent.traits, 'submissionPressure') : 0
   fight.finishPressure = clamp(fight.finishPressure + Math.round(playerAmount('finishPressure') * (1 + Math.min(50, playerFinishTrait) / 100))
     - Math.round(opponentAmount('finishPressure') * (1 + opponentFinishTrait / 100)))
+  const marker = fight.round * 10 + fight.sequenceStep
+  const existingOpponentOpenings = fight.opponentOpenings.filter((item) => item.expiresAt >= marker)
+  const existingPlayerOpenings = fight.playerOpenings.filter((item) => item.expiresAt >= marker)
+  const opponentHasOpening = (...keys: OpeningKey[]) => keys.some((key) => existingOpponentOpenings.some((item) => item.key === key))
+  const playerHasOpening = (...keys: OpeningKey[]) => keys.some((key) => existingPlayerOpenings.some((item) => item.key === key))
+  const preparedDestination = (move: FightMoveDefinition, hasOpening: (...keys: OpeningKey[]) => boolean): Position | undefined => {
+    if (['improve-position', 'pass-guard'].includes(move.id) && hasOpening('hips-flat')) return 'mount'
+    if (move.id === 'take-back' && hasOpening('off-balance', 'hips-flat')) return 'back-control'
+    if (move.id === 'double-collar-entry' && hasOpening('underhook-control')) return 'thai-clinch'
+    if (move.id === 'snapdown-entry' && hasOpening('weight-forward')) return 'front-headlock-control'
+    return undefined
+  }
+
   if (outcome === 'clean') fight.position = intent.cleanPosition ?? fight.position
   else if (outcome === 'countered') fight.position = intent.counteredPosition ?? mirrorPosition(opponentMove.cleanPosition ?? opponentMove.contestedPosition ?? positionBefore)
   else if (intent.category === 'transition' && opponentMove.category === 'transition') fight.position = 'scramble'
@@ -1932,10 +1947,20 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   if (outcome === 'countered' && ruleEffects.has('safe-low-kick') && ['damage-base', 'calf-kick', 'inside-low-kick', 'low-kick-pocket'].includes(intent.id)) fight.position = positionBefore
   if (outcome === 'countered' && ruleEffects.has('closed-guard') && (intent.id === 'rebuild-guard' || intent.id === 'pull-guard')) fight.position = 'bottom'
   if (outcome !== 'countered' && ruleEffects.has('jab-exit') && (intent.id === 'probe-range' || intent.id === 'angle-away')) fight.position = 'range'
+  if (outcome === 'contested') {
+    const playerPrepared = preparedDestination(intent, opponentHasOpening)
+    const opponentPrepared = preparedDestination(opponentMove, playerHasOpening)
+    if (playerPrepared && opponentPrepared) fight.position = 'scramble'
+    else if (playerPrepared) fight.position = playerPrepared
+    else if (opponentPrepared) fight.position = mirrorPosition(opponentPrepared)
+  }
+  if (outcome === 'clean' && intent.id === 'sprawl-circle' && opponentMove.category === 'transition' && opponentMove.branch === 'wrestling') {
+    fight.position = 'front-headlock-control'
+  }
+  if (outcome === 'countered' && opponentMove.id === 'sprawl-circle' && intent.category === 'transition' && intent.branch === 'wrestling') {
+    fight.position = 'front-headlock-defense'
+  }
 
-  const marker = fight.round * 10 + fight.sequenceStep
-  const existingOpponentOpenings = fight.opponentOpenings.filter((item) => item.expiresAt >= marker)
-  const existingPlayerOpenings = fight.playerOpenings.filter((item) => item.expiresAt >= marker)
   const consumed = (option.usesOpenings ?? []).filter((key) => existingOpponentOpenings.some((item) => item.key === key))
   const opponentConsumed = opponentMove.exploits.filter((key) => existingPlayerOpenings.some((item) => item.key === key))
   const created = outcome === 'clean' ? [...intent.creates, ...(execution.creates ?? [])]
@@ -2048,6 +2073,15 @@ function resolveCritical(state: GameState, optionId: string): GameState {
     const danger = window.attacker === 'player' ? `${window.threat}！你逮到終結機會，現在就看能不能收掉比賽！` : `${window.threat}！對手已經嗅到終結機會，你得立刻脫身！`
     fight.commentary.push(danger)
     return { ...state, rng, fighter, fight, phase: 'finish-minigame' }
+  }
+  const layeredAdvantage = ['thai-clinch', 'thai-clinch-defense', 'front-headlock-control', 'front-headlock-defense'].includes(fight.position)
+  const finalBeatDominance = fight.sequenceStep === 4 && ['mount', 'mount-defense', 'back-control', 'back-defense'].includes(fight.position)
+  if (!resolvingPositionPayoff && positionBefore !== fight.position && (layeredAdvantage || finalBeatDominance)) {
+    fight.positionPayoff = { position: fight.position, sourceStep: fight.sequenceStep }
+    fight.commentary.push(`位置追擊！${positionLabel(fight.position)}剛剛建立，鐘響前還有一次立即攻防。`)
+    const [prompt, payoffRng] = buildCriticalPrompt({ ...state, fighter, rng, fight }, fight)
+    fight.prompt = prompt
+    return { ...state, rng: payoffRng, fighter, fight, phase: 'critical' }
   }
   return advanceFightSequence({ ...state, rng, fighter, fight })
 }

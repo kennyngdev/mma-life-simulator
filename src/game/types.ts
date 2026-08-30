@@ -51,7 +51,7 @@ export type ThreatLevel = 'watch' | 'danger' | 'critical'
 export type CornerAdjustment = 'rest' | 'protect' | 'recover' | 'press'
 export type OpeningKey =
   | 'high-guard' | 'tight-elbows' | 'weight-forward' | 'lead-leg-heavy' | 'expects-shot'
-  | 'backed-to-cage' | 'off-balance' | 'neck-exposed' | 'arm-isolated' | 'hips-flat'
+  | 'backed-to-cage' | 'underhook-control' | 'off-balance' | 'neck-exposed' | 'arm-isolated' | 'hips-flat'
 export type FightResultMethod = 'decision' | 'draw' | 'ko' | 'tko' | 'submission' | 'doctor'
 
 export type GamePhase =
@@ -504,6 +504,11 @@ export interface PositionEntry {
   explanation: string
 }
 
+export interface PositionPayoff {
+  position: Position
+  sourceStep: 1 | 2 | 3 | 4
+}
+
 export interface DecisionPrompt {
   id: string
   title: string
@@ -609,6 +614,8 @@ export interface FightState {
   cornerTarget?: FightDamagePart
   techniqueTriggersThisRound: string[]
   positionEntry?: PositionEntry
+  /** One bounded follow-up after earning a layered advantage or a final-beat dominant position. */
+  positionPayoff?: PositionPayoff
   lastNarrative?: NarrativeBeat
   beatHistory: FightBeat[]
   roundCommentaryStart?: number

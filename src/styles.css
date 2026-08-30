@@ -697,6 +697,9 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .corner-directive.protect > span { color: #a9c2e5; }
 .corner-directive.press { border-left-color: var(--danger); background: linear-gradient(135deg, rgb(219 82 62 / .16), var(--surface)); }
 .corner-directive.press > span { color: #f0a08c; }
+.position-payoff-notice { display: flex; align-items: baseline; gap: 10px; margin: 10px 0; padding: 10px 12px; border: 1px solid #806a37; border-left: 4px solid var(--gold); border-radius: 10px; background: #211d14; }
+.position-payoff-notice strong { flex: 0 0 auto; color: var(--gold); }
+.position-payoff-notice span { color: var(--text); font-size: 14px; line-height: 1.45; }
 
 @keyframes threat-pulse { 0% { transform: scale(.985); filter: brightness(1.45); } 100% { transform: scale(1); filter: brightness(1); } }
 @keyframes head-impact { 35% { transform: translateX(-4px) rotate(-.5deg); } 70% { transform: translateX(3px); } }

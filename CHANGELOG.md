@@ -6,8 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-30
+
 ### Changed
 
+- Rebalanced rare combat positions: Thai clinch and front-headlock now read as advantages over clinch and scramble, prepared contested transitions can reach mount, back, Thai clinch, or front-headlock, and newly earned advantages receive one bounded position-specific follow-up.
 - Simplified the career and camp UI by replacing three large context cards with one compact status strip, removing the redundant skills/moves context tile and the normal-completion explainer banner; branch cards and training buttons retain the relevant progression and action information.
 - Removed the generic emergency-action explainer from character reveal, leaving the actual learned opening moves as the relevant setup information.
 - Replaced the large camp relationship panel with a compact, conditional influence strip for non-steady coach and family relationships; stable relationships take no vertical space and activity cards retain the detailed effects.

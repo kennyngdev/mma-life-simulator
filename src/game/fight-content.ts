@@ -141,12 +141,12 @@ export const FIGHT_INTENTS: FightMoveDefinition[] = [
   move('low-kick-pocket', '近身低掃', '在拳擊交換尾端踢向前腳。', ['pocket'], 'kicking', 'offense', stages(4, 9, 8, 6), effects(7, 0, 0, 10, 0, 7, 4), { creates: ['off-balance'], counteredPosition: 'bottom' }),
 
   move('frame-space', '撐開空間', '用頭位與前臂重建可呼吸的空間。', ['clinch'], 'clinch', 'defense', stages(7, 6, 9, 9), effects(3, 0, 0, 0, 3, 3, 0), { cleanPosition: 'pocket', defensive: true }),
-  move('inside-position', '搶內側位置', '爭取雙內勾與頭位。', ['clinch', 'cage', 'cage-control', 'cage-defense'], 'clinch', 'transition', stages(8, 9, 10, 7), effects(4, 0, 0, 0, 8, 5, 3), { creates: ['backed-to-cage'] }),
+  move('inside-position', '搶內側位置', '爭取雙內勾與頭位。', ['clinch', 'cage', 'cage-control', 'cage-defense'], 'clinch', 'transition', stages(8, 9, 10, 7), effects(4, 0, 0, 0, 8, 5, 3), { creates: ['underhook-control', 'backed-to-cage'] }),
   move('clinch-short-knee', '貼身短膝', '用頭位穩住對手，從近距離以短膝點打軀幹。', ['clinch', 'cage', 'cage-control'], 'clinch', 'offense', stages(7, 8, 7, 5), effects(5, 0, 5, 0, 2, 5, 2), { creates: ['tight-elbows'] }),
   move('clinch-knees', '單領帶膝擊軀幹', '用單手頸抱和手臂控制固定頭位，以膝擊消耗軀幹。', ['clinch', 'cage', 'cage-control'], 'clinch', 'offense', stages(4, 10, 8, 8), effects(8, 1, 11, 0, 4, 8, 6), { exploits: ['hips-flat'], creates: ['tight-elbows'] }),
   move('short-elbows', '纏抱短肘', '在狹窄空間以短肘切開防線。', ['clinch', 'cage', 'cage-control', 'cage-defense'], 'clinch', 'offense', stages(3, 9, 9, 11), effects(9, 11, 1, 0, 2, 8, 10), { exploits: ['tight-elbows'], creates: ['high-guard'] }),
   move('dirty-boxing', '纏抱短拳', '一手控制後腦或手臂，另一手連續用上鉤和短勾拳進攻。', ['clinch'], 'boxing', 'offense', stages(4, 10, 10, 10), effects(9, 9, 4, 0, 4, 8, 9), { exploits: ['tight-elbows'], creates: ['high-guard'] }),
-  move('double-collar-entry', '建立泰式雙頸抱', '雙手扣住後腦、前臂夾住鎖骨，把對手頭位拉離脊椎。', ['clinch'], 'clinch', 'transition', stages(5, 8, 11, 11), effects(5, 0, 1, 0, 12, 7, 8), { cleanPosition: 'thai-clinch', contestedPosition: 'clinch', counteredPosition: 'thai-clinch-defense', creates: ['neck-exposed'] }),
+  move('double-collar-entry', '建立泰式雙頸抱', '雙手扣住後腦、前臂夾住鎖骨，把對手頭位拉離脊椎。', ['clinch'], 'clinch', 'transition', stages(5, 8, 11, 11), effects(5, 0, 1, 0, 12, 7, 8), { cleanPosition: 'thai-clinch', contestedPosition: 'clinch', counteredPosition: 'thai-clinch-defense', exploits: ['underhook-control'], creates: ['neck-exposed'] }),
   move('body-lock-control', '建立抱腰控制', '雙臂鎖住腰部並貼緊髖線，阻止對手自由轉身。', ['clinch', 'cage', 'cage-control'], 'wrestling', 'transition', stages(6, 8, 10, 8), effects(4, 0, 1, 0, 10, 6, 3), { cleanPosition: 'body-lock', contestedPosition: 'clinch', counteredPosition: 'body-lock-defense', creates: ['hips-flat', 'backed-to-cage'] }),
   move('snapdown-entry', '下壓進入前頸控制', '拉低頭部並退開髖線，讓對手雙手落地後鎖住頭臂。', ['clinch'], 'wrestling', 'transition', stages(4, 8, 12, 10), effects(6, 0, 1, 0, 11, 8, 8), { cleanPosition: 'front-headlock-control', contestedPosition: 'scramble', counteredPosition: 'body-lock-defense', exploits: ['weight-forward'], creates: ['neck-exposed'] }),
   move('arm-drag-clinch', '拖臂繞背', '把手臂拉過中線並切到外側，趁肩線打開時取得背後。', ['clinch'], 'wrestling', 'transition', stages(3, 8, 12, 11), effects(6, 0, 0, 0, 12, 8, 9), { cleanPosition: 'back-control', contestedPosition: 'body-lock', counteredPosition: 'back-defense', exploits: ['arm-isolated', 'weight-forward'] }),
@@ -213,7 +213,7 @@ export const FIGHT_INTENTS: FightMoveDefinition[] = [
   move('ground-strikes', '防守架內短拳', '一手固定胸線，另一手用短拳攻擊頭部，不給對手抓住手臂。', ['top'], 'ground', 'offense', stages(4, 10, 10, 11), effects(9, 8, 3, 0, 5, 7, 8), { exploits: ['hips-flat'], creates: ['high-guard'] }),
   move('guard-body-strikes', '防守架內身體拳', '把肘部收在髖線內，用短拳消耗肋部並逼下位鬆開雙腿。', ['top'], 'ground', 'offense', stages(4, 10, 9, 8), effects(8, 1, 10, 0, 4, 6, 5), { exploits: ['hips-flat'], creates: ['tight-elbows'] }),
   move('improve-position', '切膝過腿進騎乘', '用上半身壓扁髖部，膝蓋切過腿線後直接跨進騎乘位。', ['top'], 'ground', 'transition', stages(4, 9, 12, 10), effects(6, 0, 1, 0, 13, 8, 6), { cleanPosition: 'mount', contestedPosition: 'top', counteredPosition: 'bottom', exploits: ['hips-flat'], creates: ['arm-isolated'] }),
-  move('pass-guard', '疊壓過腿進騎乘', '把雙腿推向頭部，繞過髖線後封住雙髖進入騎乘位。', ['top'], 'ground', 'transition', stages(3, 8, 12, 10), effects(6, 0, 2, 0, 14, 9, 7), { cleanPosition: 'mount', contestedPosition: 'top', counteredPosition: 'bottom', creates: ['arm-isolated', 'neck-exposed'] }),
+  move('pass-guard', '疊壓過腿進騎乘', '把雙腿推向頭部，繞過髖線後封住雙髖進入騎乘位。', ['top'], 'ground', 'transition', stages(3, 8, 12, 10), effects(6, 0, 2, 0, 14, 9, 7), { cleanPosition: 'mount', contestedPosition: 'top', counteredPosition: 'bottom', exploits: ['hips-flat'], creates: ['arm-isolated', 'neck-exposed'] }),
   move('isolate-arm', '壓腕困臂', '把一側手腕壓在地面，迫使下位只能用另一手防守。', ['top'], 'ground', 'transition', stages(4, 8, 11, 10), effects(5, 0, 0, 0, 10, 6, 7), { creates: ['arm-isolated'] }),
   move('stand-reset', '站起重置', '放棄上位，回到熟悉的站立。', ['top'], 'boxing', 'defense', stages(4, 5, 8, 9), effects(2, 0, 0, 0, -2, 2, 0), { cleanPosition: 'range', defensive: true }),
   move('deny-stand', '阻止起身', '壓住髖部，把對手重新拉回地面。', ['top'], 'wrestling', 'defense', stages(4, 7, 11, 11), effects(4, 0, 0, 0, 12, 7, 3), { exploits: ['hips-flat'], creates: ['hips-flat'], defensive: true }),
@@ -430,7 +430,7 @@ export const TECHNIQUE_COMBAT_RULES: Record<string, { intents: string[]; bonus: 
 
 export const OPENING_LABELS: Record<OpeningKey, string> = {
   'high-guard': '防守抬高', 'tight-elbows': '肘部收窄', 'weight-forward': '重心前傾',
-  'lead-leg-heavy': '重心落在前腳', 'expects-shot': '預期抱摔', 'backed-to-cage': '背靠籠網',
+  'lead-leg-heavy': '重心落在前腳', 'expects-shot': '預期抱摔', 'backed-to-cage': '背靠籠網', 'underhook-control': '內勾控制',
   'off-balance': '姿勢失衡', 'neck-exposed': '頸部暴露', 'arm-isolated': '手臂被孤立', 'hips-flat': '髖部被壓平',
 }
 

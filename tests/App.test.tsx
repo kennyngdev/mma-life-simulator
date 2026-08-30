@@ -697,6 +697,24 @@ describe('生涯重置', () => {
     expect(screen.getByRole('button', { name: /背後短拳/ })).toBeInTheDocument()
   })
 
+  it.each([
+    ['thai-clinch', '纏抱 · 泰式頸抱優勢'],
+    ['front-headlock-control', '混戰 · 前頸控制優勢'],
+  ] as const)('%s 以基礎位置上的控制優勢呈現，並顯示立即位置追擊', async (position, label) => {
+    const game = gameAtBackControl()
+    Object.assign(game.fight!, {
+      position,
+      positionPayoff: { position, sourceStep: 3 },
+      prompt: { ...game.fight!.prompt!, title: `轉折｜${label}`, position },
+    })
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByRole('img', { name: `目前位置：${label}` })).toBeInTheDocument()
+    expect(screen.getByText('位置追擊')).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(`剛建立${label}`))).toBeInTheDocument()
+  })
+
   it('在戰鬥中選擇招式後將內容捲回頂部', async () => {
     storage.loadGame.mockResolvedValue({ game: gameAtBackControl() })
     render(<App />)

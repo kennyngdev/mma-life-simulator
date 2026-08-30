@@ -130,7 +130,85 @@ function playStyleFight(seed: string, playerStyle: TestedStyle, opponentStyle: T
   return state.fight!.winner
 }
 
+function reachesAdvancedPositionInRelevantRound(seed: string, plan: Extract<RoundPlan, 'clinch' | 'takedown'>, route: 'thai-or-mount' | 'front-or-back', specialistRouteLearned: boolean) {
+  let state = createNewRun({ name: '位置測試拳手', region: 'taiwan', motive: 'prove', seed })
+  let reached = false
+  let guard = 0
+  while (state.phase !== 'round-result' && state.phase !== 'fight-result' && guard < 60) {
+    guard += 1
+    if (state.phase === 'reveal') state = apply(state, { type: 'ACK_REVEAL' })
+    else if (state.phase === 'growth') state = apply(state, { type: 'CONTINUE_GROWTH' })
+    else if (state.phase === 'offer') state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
+    else if (state.phase === 'camp') state = completeCampDrill(state, state.campActions.length === 0 ? 'film' : 'recovery')
+    else if (state.phase === 'training-reward') state = chooseTrainingMoves(state)
+    else if (state.phase === 'life') state = apply(state, { type: 'RESOLVE_LIFE', optionId: state.lifeEvent!.options[0].id })
+    else if (state.phase === 'prefight') {
+      const opponent = state.opponents.find((item) => item.id === state.selectedOfferId!.replace(/^offer-\d+-/, ''))!
+      state.fighter.technique = { boxing: 55, kicking: 55, clinch: 55, wrestling: 55, ground: 55 }
+      state.fighter.mind = { fightIQ: 55, composure: 55 }
+      const specialistEntries = new Set(['double-collar-entry', 'snapdown-entry', 'improve-position', 'pass-guard', 'take-back', 'scramble-front-headlock'])
+      state.fighter.learnedMoves = FIGHT_INTENTS.filter((move) => specialistRouteLearned || !specialistEntries.has(move.id)).map((move) => move.id)
+      state.fighter.traits = []
+      opponent.technique = { boxing: 55, kicking: 55, clinch: 55, wrestling: 55, ground: 55 }
+      opponent.composure = 55
+      opponent.learnedMoves = FIGHT_INTENTS.map((move) => move.id)
+      opponent.traits = []
+      opponent.naturalWeight = state.fighter.naturalWeight
+      opponent.heightCm = state.fighter.heightCm
+      opponent.reachCm = state.fighter.reachCm
+      opponent.frame = state.fighter.frame
+      opponent.rating = competitiveRatingForOpponent(opponent)
+      state = apply(state, { type: 'START_FIGHT' })
+    } else if (state.phase === 'round-plan') state = apply(state, { type: 'SET_ROUND_PLAN', plan })
+    else if (state.phase === 'critical') {
+      state.fight!.finishWindowsUsed = 4
+      const advanced = ['thai-clinch', 'front-headlock-control', 'mount', 'back-control']
+      reached ||= advanced.includes(state.fight!.position)
+      const openings = new Set(state.fight!.opponentOpenings.map((opening) => opening.key))
+      const priorities = state.fight!.position === 'clinch'
+        ? route === 'thai-or-mount'
+          ? openings.has('underhook-control') ? ['double-collar-entry'] : ['inside-position', 'double-collar-entry']
+          : openings.has('weight-forward') ? ['snapdown-entry'] : ['collar-tie-club', 'snapdown-entry']
+        : state.fight!.position === 'top'
+          ? route === 'thai-or-mount'
+            ? openings.has('hips-flat') ? ['pass-guard'] : ['top-control', 'pass-guard']
+            : openings.has('hips-flat') ? ['take-back'] : ['top-control', 'take-back']
+          : state.fight!.position === 'scramble' ? ['scramble-front-headlock', 'take-back']
+            : []
+      const choice = priorities.map((id) => state.fight!.prompt!.allOptions.find((option) => option.intentId === id)).find(Boolean)
+        ?? [...state.fight!.prompt!.allOptions].sort((a, b) => b.odds.clean - a.odds.clean)[0]
+      state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: choice!.id })
+      reached ||= advanced.includes(state.fight!.position)
+    } else if (state.phase === 'finish-minigame') {
+      const window = state.fight!.activeFinishWindow!
+      state = apply(state, { type: 'RESOLVE_FINISH_MINIGAME', result: window.kind === 'strike'
+        ? { kind: 'strike', aimError: 1, timingError: 1 }
+        : { kind: 'submission', progress: 0, acceptedInputs: 0, elapsedMs: 5_000 } })
+    }
+  }
+  expect(guard).toBeLessThan(60)
+  return reached
+}
+
 describe('戰鬥平衡', () => {
+  it('同評級中期拳手追求纏抱或地面路線時，進階位置保持稀有但不再近乎看不到', () => {
+    const results = Array.from({ length: 200 }, (_, index) => ({
+      plan: index % 2 === 0 ? 'clinch' as const : 'takedown' as const,
+      reached: reachesAdvancedPositionInRelevantRound(
+        `ADVANCED-POSITION-${index}`,
+        index % 2 === 0 ? 'clinch' : 'takedown',
+        index % 4 < 2 ? 'thai-or-mount' : 'front-or-back',
+        index % 16 < 4,
+      ),
+    }))
+    const reached = results.filter((result) => result.reached).length
+    const clinchReached = results.filter((result) => result.plan === 'clinch' && result.reached).length
+    const takedownReached = results.filter((result) => result.plan === 'takedown' && result.reached).length
+    const detail = `advanced positions=${reached}/200, clinch=${clinchReached}/100, takedown=${takedownReached}/100`
+    expect(reached, detail).toBeGreaterThanOrEqual(70)
+    expect(reached, detail).toBeLessThanOrEqual(90)
+  })
+
   it('只選最高乾淨命中率也會在最難邀約中輸掉一部分比賽', () => {
     const results = Array.from({ length: 60 }, (_, index) => playGreedyFight(`BALANCE-${index}`))
     const losses = results.filter((result) => result.winner === 'opponent').length

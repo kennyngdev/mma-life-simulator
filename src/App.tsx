@@ -1009,6 +1009,7 @@ function CriticalView({ game, dispatch }: ViewProps) {
     {fight.positionEntry && <PositionEntryDialog game={game} dispatch={dispatch} />}
     <FightArena game={game} compact showLiveLog={false} />
     <CornerDirective fight={fight} />
+    {fight.positionPayoff && <aside className="position-payoff-notice" aria-live="polite"><strong>位置追擊</strong><span>你剛建立{positionLabel(fight.position)}，這次選擇不會額外消耗一段回合時間。</span></aside>}
     <div className="fight-trait-strip"><span>你的特質</span>{game.fighter.traits.map((owned) => {
       const trait = traitDefinition(owned.id)
       return trait ? <b className={`rarity-${trait.rarity}`} key={owned.id} title={`${trait.condition}：${trait.effect}`}>{trait.name}</b> : null
@@ -1051,6 +1052,7 @@ function CoachGuidedCriticalView({ game, dispatch }: ViewProps) {
   return <Screen className="coach-guided-screen" title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · 教練帶領`}>
     <FightArena game={game} compact showLiveLog={false} />
     <CornerDirective fight={fight} />
+    {fight.positionPayoff && <aside className="position-payoff-notice" aria-live="polite"><strong>位置追擊</strong><span>剛建立{positionLabel(fight.position)}，教練還能追加一次攻防。</span></aside>}
     <section className="coach-fight-feed" aria-label="即時賽況">
       <header><span>即時賽況</span><strong>教練正在指揮</strong></header>
       {!latestBeat && fight.positionEntry && <article className="feed-entry position-entry-feed">
@@ -1650,9 +1652,9 @@ function positionLabel(position: string) {
   return ({
     range: '遠距站立', pocket: '近身交換', clinch: '中央纏抱', cage: '籠邊爭位',
     'cage-control': '籠邊壓制', 'cage-defense': '背靠籠網',
-    'thai-clinch': '泰式頸抱', 'thai-clinch-defense': '被控頸抱',
+    'thai-clinch': '纏抱 · 泰式頸抱優勢', 'thai-clinch-defense': '纏抱 · 對手頸抱優勢',
     'body-lock': '抱腰控制', 'body-lock-defense': '被抱腰',
-    'front-headlock-control': '前頸控制', 'front-headlock-defense': '被控前頸',
+    'front-headlock-control': '混戰 · 前頸控制優勢', 'front-headlock-defense': '混戰 · 對手前頸優勢',
     top: '防守架上位', bottom: '防守架下位', scramble: '混戰',
     mount: '騎乘位', 'mount-defense': '騎乘下位',
     'back-control': '背後控制', 'back-defense': '背部被控',
