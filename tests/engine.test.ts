@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } from '../src/game/content'
-import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
+import { FIGHT_INTENTS, MOVE_VISUAL_FAMILY_BY_INTENT, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
 import { advance, bodyMatchupFor, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, generateOffers, getAnthropometrics, getTechniqueAffinity, leagueRankingAfterWin, mirrorPosition, offerRefreshCost, opponentBodyFor, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
 import { migrateBodyMatchupStats, migrateCareerEndings, migrateCoachGuidedCombat, migrateCompetitiveRatingBreadth, migrateFastTrackMatchmaking, migrateLeagueRankings, migrateMatchmakingCredibility, migrateMoveLearningPacing, migratePostFoundationMoveMilestones, migrateRankingCredibility, migrateRemovedSideControl, migrateTechniqueTrainingPacing, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, migrateXpBasedMoveUnlocks, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
 import { EARNED_TRAITS, FOUNDATION_MOVE_IDS, NORMIE_DEFAULT_MOVE_IDS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, moveUnlockCount, movesForBranch, nextMoveThreshold, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
@@ -135,6 +135,11 @@ function reachFirstRoundPlan(initial: GameState): GameState {
 }
 
 describe('拳途人生模擬核心', () => {
+  it('每個招式都映射到成敗動作圖家族', () => {
+    expect(FIGHT_INTENTS.every((intent) => MOVE_VISUAL_FAMILY_BY_INTENT[intent.id])).toBe(true)
+    expect(Object.keys(MOVE_VISUAL_FAMILY_BY_INTENT)).toHaveLength(FIGHT_INTENTS.length)
+  })
+
   it('將對手實力差分成五級風險', () => {
     expect([-8, -7, 3, 9, 15].map(riskLabelForGap)).toEqual([
       '低風險', '中度風險', '高風險', '極高風險', '絕望',
@@ -1006,7 +1011,8 @@ describe('拳途人生模擬核心', () => {
     const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
 
     expect(settled.fighter.evidence.fights).toBe(20)
-    expect(settled.growthDestination).toBe('offer')
+    expect(['growth', 'offer']).toContain(settled.phase)
+    if (settled.phase === 'growth') expect(settled.growthDestination).toBe('offer')
   })
 
   it('賽後健康落在療傷線時可選擇停賽或退役，硬性退役線才強制結束生涯', () => {
@@ -1423,14 +1429,17 @@ describe('拳途人生模擬核心', () => {
     expect(second).toEqual(first)
   })
 
-  it('每場比賽後顯示特質進度，而非發放科技點數', () => {
+  it('每場比賽只有新特質或特質進度才停在成果畫面', () => {
     const result = reachFirstFightResult(createNewRun(input))
     const growth = apply(result, { type: 'ACK_FIGHT_RESULT' })
-    expect(growth.phase).toBe('growth')
-    expect(growth.growthDestination).toBe('offer')
+    expect(['growth', 'offer']).toContain(growth.phase)
     expect(growth.insightGained).toBeUndefined()
     expect(growth.fighter.insight).toBe(0)
-    expect(apply(growth, { type: 'CONTINUE_GROWTH' }).phase).toBe('offer')
+    if (growth.phase === 'growth') {
+      expect(growth.growthDestination).toBe('offer')
+      expect(growth.traitAwards!.length + growth.traitProgressUpdates!.length).toBeGreaterThan(0)
+      expect(apply(growth, { type: 'CONTINUE_GROWTH' }).phase).toBe('offer')
+    }
   })
 
   it('任何背景在籠邊都會依壓制方取得合法的摔法或脫困路線', () => {
@@ -1488,6 +1497,34 @@ describe('拳途人生模擬核心', () => {
       checkedCounteredEntry = true
     }
     expect(checkedCounteredEntry).toBe(true)
+  })
+
+  it('抱摔、纏抱與籠邊戰術都依開局優勢決定控制權', () => {
+    const topStart = reachFirstRoundPlan(createNewRun({ ...input, seed: 'ROUND-PLAN-TOP' }))
+    topStart.fighter.technique.wrestling = 100
+    topStart.fighter.mind.fightIQ = 100
+    const topOpponent = topStart.opponents.find((item) => item.id === topStart.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+    topOpponent.technique.wrestling = 0
+    topOpponent.composure = 0
+    expect(apply(topStart, { type: 'SET_ROUND_PLAN', plan: 'takedown' }).fight!.position).toBe('top')
+
+    const cageControlStart = reachFirstRoundPlan(createNewRun({ ...input, seed: 'ROUND-PLAN-CAGE-CONTROL' }))
+    cageControlStart.fighter.technique.clinch = 100
+    cageControlStart.fighter.mind.fightIQ = 100
+    const cageControlOpponent = cageControlStart.opponents.find((item) => item.id === cageControlStart.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+    cageControlOpponent.technique.clinch = 0
+    cageControlOpponent.composure = 0
+    expect(apply(cageControlStart, { type: 'SET_ROUND_PLAN', plan: 'cage' }).fight!.position).toBe('cage-control')
+
+    const cageDefenseStart = reachFirstRoundPlan(createNewRun({ ...input, seed: 'ROUND-PLAN-CAGE-DEFENSE' }))
+    cageDefenseStart.fighter.technique.clinch = 0
+    cageDefenseStart.fighter.mind.fightIQ = 0
+    const cageDefenseOpponent = cageDefenseStart.opponents.find((item) => item.id === cageDefenseStart.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+    cageDefenseOpponent.technique.clinch = 100
+    cageDefenseOpponent.technique.wrestling = 0
+    cageDefenseOpponent.weakness = 'clinch'
+    cageDefenseOpponent.composure = 100
+    expect(apply(cageDefenseStart, { type: 'SET_ROUND_PLAN', plan: 'cage' }).fight!.position).toBe('cage-defense')
   })
 
   it('成功的雙腿抱摔會進入上位並計入抱摔紀錄', () => {
@@ -1773,29 +1810,47 @@ describe('拳途人生模擬核心', () => {
   })
 
   it('中立纏抱能乾淨推進到泰式頸抱與前頸控制的專屬招式庫', () => {
-    const thaiStart = reachFirstRoundPlan(createNewRun({ ...input, seed: 'THAI-CLINCH-CHAIN' }))
-    thaiStart.fighter.technique.wrestling = 90
-    thaiStart.opponents.find((opponent) => opponent.id === thaiStart.selectedOfferId?.replace(/^offer-\d+-/, ''))!.technique.wrestling = 20
-    let thai = apply(thaiStart, { type: 'SET_ROUND_PLAN', plan: 'takedown' })
-    const collar = thai.fight!.prompt!.allOptions.find((option) => option.intentId === 'double-collar-entry')!
+    let thai: GameState | undefined
+    for (let index = 0; index < 40 && !thai; index += 1) {
+      const start = reachFirstRoundPlan(createNewRun({ ...input, seed: `THAI-CLINCH-CHAIN-${index}` }))
+      start.fighter.technique.clinch = 60
+      start.fighter.mind.fightIQ = 50
+      const opponent = start.opponents.find((item) => item.id === start.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+      opponent.technique.clinch = 60
+      opponent.composure = 50
+      const candidate = apply(start, { type: 'SET_ROUND_PLAN', plan: 'clinch' })
+      if (candidate.fight!.position === 'clinch') thai = candidate
+    }
+    expect(thai).toBeDefined()
+    let thaiState = thai!
+    const collar = thaiState.fight!.prompt!.allOptions.find((option) => option.intentId === 'double-collar-entry')!
     collar.chance = { min: 140, max: 140 }
-    thai.fight!.finishWindowsUsed = 4
-    thai = apply(thai, { type: 'RESOLVE_CRITICAL', optionId: collar.id })
-    expect(thai.fight!.position).toBe('thai-clinch')
-    expect(thai.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
+    thaiState.fight!.finishWindowsUsed = 4
+    thaiState = apply(thaiState, { type: 'RESOLVE_CRITICAL', optionId: collar.id })
+    expect(thaiState.fight!.position).toBe('thai-clinch')
+    expect(thaiState.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
       'plum-body-knees', 'plum-head-knee', 'plum-slicing-elbow', 'plum-outside-trip', 'plum-release-elbow', 'plum-control',
     ]))
 
-    const frontStart = reachFirstRoundPlan(createNewRun({ ...input, seed: 'FRONT-HEADLOCK-CHAIN' }))
-    frontStart.fighter.technique.wrestling = 90
-    frontStart.opponents.find((opponent) => opponent.id === frontStart.selectedOfferId?.replace(/^offer-\d+-/, ''))!.technique.wrestling = 20
-    let front = apply(frontStart, { type: 'SET_ROUND_PLAN', plan: 'takedown' })
-    const snapdown = front.fight!.prompt!.allOptions.find((option) => option.intentId === 'snapdown-entry')!
+    let front: GameState | undefined
+    for (let index = 0; index < 40 && !front; index += 1) {
+      const start = reachFirstRoundPlan(createNewRun({ ...input, seed: `FRONT-HEADLOCK-CHAIN-${index}` }))
+      start.fighter.technique.clinch = 60
+      start.fighter.mind.fightIQ = 50
+      const opponent = start.opponents.find((item) => item.id === start.selectedOfferId?.replace(/^offer-\d+-/, ''))!
+      opponent.technique.clinch = 60
+      opponent.composure = 50
+      const candidate = apply(start, { type: 'SET_ROUND_PLAN', plan: 'clinch' })
+      if (candidate.fight!.position === 'clinch') front = candidate
+    }
+    expect(front).toBeDefined()
+    let frontState = front!
+    const snapdown = frontState.fight!.prompt!.allOptions.find((option) => option.intentId === 'snapdown-entry')!
     snapdown.chance = { min: 140, max: 140 }
-    front.fight!.finishWindowsUsed = 4
-    front = apply(front, { type: 'RESOLVE_CRITICAL', optionId: snapdown.id })
-    expect(front.fight!.position).toBe('front-headlock-control')
-    expect(front.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
+    frontState.fight!.finishWindowsUsed = 4
+    frontState = apply(frontState, { type: 'RESOLVE_CRITICAL', optionId: snapdown.id })
+    expect(frontState.fight!.position).toBe('front-headlock-control')
+    expect(frontState.fight!.prompt!.allOptions.map((option) => option.intentId)).toEqual(expect.arrayContaining([
       'front-headlock-go-behind', 'front-headlock-spin-top', 'front-headlock-guillotine', 'front-headlock-anaconda', 'front-headlock-snap',
     ]))
   })

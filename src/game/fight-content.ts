@@ -1,5 +1,7 @@
 import type { Branch, ExecutionVariant, FightMoveDefinition, FightStageName, OpeningKey, Position, SkillLevel } from './types'
 
+export type MoveVisualFamily = 'punch' | 'kick' | 'takedown' | 'clinch' | 'ground-strike' | 'submission' | 'position' | 'escape'
+
 const stages = (contact: number, exchange: number, turn: number, finish: number): Record<FightStageName, number> => ({ contact, exchange, turn, finish })
 const effects = (score: number, headDamage: number, bodyDamage: number, legDamage: number, control: number, staminaCost: number, finishPressure: number) =>
   ({ score, headDamage, bodyDamage, legDamage, control, staminaCost, finishPressure })
@@ -54,6 +56,39 @@ function move(
     : undefined)
   const commitment = extras.commitment ?? (strikeKind === 'punch' ? 'quick' : strikeKind === 'kick' ? (COMMITTED_KICKS.has(id) ? 'committed' : 'set') : undefined)
   return { id, label, description, positions, branch, category, stageWeights, effects: vector, basic: true, creates: [], exploits: [], strikeKind, commitment, minimumLevel: AUTHORED_MOVE_LEVELS[id], ...extras }
+}
+
+const MOVE_VISUAL_FAMILY_OVERRIDES: Partial<Record<string, MoveVisualFamily>> = {
+  'double-jab-entry': 'punch', 'cut-angle-entry': 'punch', 'outside-angle-step': 'kick', 'push-kick-pressure': 'kick',
+  'front-kick': 'kick', 'check-low-kick': 'kick', 'check-hook': 'punch', 'anti-shot-uppercut': 'punch', 'shell-counter': 'punch',
+  'level-change': 'clinch', 'cage-underhook-escape': 'escape', 'body-lock-cage-drive': 'clinch', 'body-lock-peel-exit': 'escape',
+  'front-headlock-pull-guard': 'position', 'scramble-sitout': 'escape', 'switch-reversal': 'position', 'trap-arm-roll': 'position',
+  'dirty-boxing': 'clinch', 'collar-tie-club': 'clinch', 'spinning-elbow': 'clinch',
+  'step-knee': 'clinch', 'cage-knee-elbow': 'clinch', 'cage-elbow-exit': 'clinch',
+  'front-headlock-body-knees': 'clinch', 'body-lock-knees': 'clinch',
+  'head-control': 'clinch', 'cage-pressure': 'clinch', 'body-lock-grind': 'clinch', 'plum-control': 'clinch',
+  'top-control': 'position', 'mount-control': 'position', 'secure-back': 'position', 'body-triangle': 'position',
+  'high-mount': 'position', 'take-back': 'position', 'back-to-mount': 'position',
+  'pull-guard': 'position', 'isolate-arm': 'position', 'improve-position': 'position', 'pass-guard': 'position',
+  'rebuild-guard': 'escape', 'safe-bottom': 'escape', 'mount-shell': 'escape',
+}
+
+function visualFamilyForMove(move: Pick<FightMoveDefinition, 'id' | 'branch' | 'category' | 'positions' | 'strikeKind' | 'submission' | 'cleanPosition'>): MoveVisualFamily | undefined {
+  if (MOVE_VISUAL_FAMILY_OVERRIDES[move.id]) return MOVE_VISUAL_FAMILY_OVERRIDES[move.id]
+  if (move.submission) return 'submission'
+  if (move.strikeKind === 'punch') return 'punch'
+  if (move.strikeKind === 'kick') return 'kick'
+  if (move.branch === 'wrestling' && move.category === 'transition') {
+    if (move.cleanPosition === 'top') return 'takedown'
+    if (move.cleanPosition === 'back-control') return 'position'
+    if (['clinch', 'body-lock', 'front-headlock-control', 'thai-clinch'].includes(move.cleanPosition ?? '')) return 'clinch'
+    return 'escape'
+  }
+  if (move.category === 'defense') return 'escape'
+  if (move.branch === 'clinch' || move.positions.some((position) => ['clinch', 'cage', 'cage-control', 'cage-defense', 'thai-clinch', 'thai-clinch-defense', 'body-lock', 'body-lock-defense', 'front-headlock-control', 'front-headlock-defense'].includes(position))) return 'clinch'
+  if (move.branch === 'ground' && move.category === 'offense') return 'ground-strike'
+  if (move.branch === 'ground' && move.category === 'transition') return ['top', 'mount', 'back-control'].includes(move.cleanPosition ?? '') ? 'position' : 'escape'
+  return undefined
 }
 
 /** Every legal positional action lives here. The engine ranks this full pool instead of enforcing branch diversity. */
@@ -243,6 +278,11 @@ export const FIGHT_INTENTS: FightMoveDefinition[] = [
   move('back-hammerfists', '背後鎚拳連打', '放開一側控制手連續攻擊耳側，擴大頭部傷害，但也增加對手轉身滑脫的空間。', ['back-control'], 'ground', 'offense', stages(2, 8, 11, 14), effects(11, 14, 1, 0, 6, 11, 18), { contestedPosition: 'back-control', counteredPosition: 'back-defense', exploits: ['high-guard'], creates: ['neck-exposed', 'off-balance'] }),
 ]
 
+/** Every authored move must resolve to one action-art family; new moves should add an explicit override when inference is ambiguous. */
+export const MOVE_VISUAL_FAMILY_BY_INTENT: Record<string, MoveVisualFamily | undefined> = Object.fromEntries(
+  FIGHT_INTENTS.map((intent) => [intent.id, visualFamilyForMove(intent)]),
+)
+
 const variant = (id: string, intentId: string, name: string, preview: string, extras: Partial<ExecutionVariant> = {}): ExecutionVariant => ({ id, intentId, name, preview, ...extras })
 
 export const EXECUTION_VARIANTS: ExecutionVariant[] = [
@@ -396,4 +436,9 @@ export const OPENING_LABELS: Record<OpeningKey, string> = {
 
 export function variantsForIntent(intentId: string): ExecutionVariant[] {
   return EXECUTION_VARIANTS.filter((item) => item.intentId === intentId)
+}
+
+export function intentForExecutionId(executionId: string): FightMoveDefinition | undefined {
+  const execution = EXECUTION_VARIANTS.find((item) => item.id === executionId)
+  return execution ? FIGHT_INTENTS.find((intent) => intent.id === execution.intentId) : undefined
 }

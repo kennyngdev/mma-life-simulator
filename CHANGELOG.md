@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- Simplified the career and camp UI by replacing three large context cards with one compact status strip, removing the redundant skills/moves context tile and the normal-completion explainer banner; branch cards and training buttons retain the relevant progression and action information.
+- Removed the generic emergency-action explainer from character reveal, leaving the actual learned opening moves as the relevant setup information.
+- Replaced the large camp relationship panel with a compact, conditional influence strip for non-steady coach and family relationships; stable relationships take no vertical space and activity cards retain the detailed effects.
+- Moved the latest camp-result summary above technical focus so players see the immediate result before choosing their next training action.
+- Skipped empty growth acknowledgements, while retaining result screens for new or advanced trait progress and mandatory injury outcomes.
+- Made coach-guided fights player-paced: the arena retains only the newest live update and an explicit button advances the coach's next exchange.
+- Added the contested 「尋找纏抱」 round plan. Takedown openings can now directly establish top guard, while cage control requires a clearly favorable opening rather than any non-negative margin.
+- Added clean-success and countered-failure transparent pixel-art action sprites for eight move families, replacing the position sprite until the next tactical choice while contested exchanges retain the position scene.
+
 ## [0.3.0] - 2026-08-30
 
 ### Added

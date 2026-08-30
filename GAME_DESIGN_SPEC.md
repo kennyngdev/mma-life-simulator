@@ -189,7 +189,7 @@ A trait must describe a recognizable fighter. It needs a condition, a gameplay e
 
 ### 5.2 Performance-earned traits — Accepted
 
-Only the player earns new traits during a career. There is no hard count cap and no duplicate trait IDs. Progress becomes visible after the first qualifying action, with the exact threshold shown. Awards occur after fight processing, enter history, and appear before the career continues.
+Only the player earns new traits during a career. There is no hard count cap and no duplicate trait IDs. Progress becomes visible after the first qualifying action, with the exact threshold shown. Awards occur after fight processing, enter history, and appear before the career continues. A growth screen appears only for a new trait, newly advanced trait progress, or a mandatory injury/retirement consequence; an empty acknowledgement always flows directly to the next required career screen.
 
 | Trait | Evidence threshold | Effect |
 |---|---|---|
@@ -221,7 +221,11 @@ Combat is position-based. The player selects a round plan, learns why the openin
 
 Character creation offers two permanent per-career combat controls. **戰術操作** preserves position-specific move choice. **教練帶領** keeps opponent selection, camp choices, round plans, and between-round corner adjustments under player control, while the coach selects the highest-ranked legal learned or emergency move for each exchange using the same contextual combat scoring as the manual option list. It is not a separate combat ruleset: learned moves, injuries, stamina, traits, scouting, openings, adaptation, positions, and outcome formulas remain identical.
 
-Coach-guided exchanges appear as a readable, chronological live feed that advances automatically rather than requesting empty confirmation taps. The live feed is scoped to the current round and clears at the bell; the complete fight commentary remains available in the final report. Position-entry causality remains visible in that feed. Both player finish opportunities and opponent finish threats still interrupt for the existing playable TKO/submission minigames. Existing careers migrate to **戰術操作** so no active player loses direct control.
+Round plans establish a contested opening rather than promise control: **尋找抱摔** resolves to top guard, neutral clinch, or bottom guard based on the opening margin; **尋找纏抱** resolves to a favorable Thai clinch, neutral clinch, or defensive Thai clinch; and **籠邊消耗** requires a clearly positive margin for cage control, with narrow margins becoming neutral cage contention and negative margins becoming cage defense.
+
+Coach-guided exchanges show only the newest readable update, keeping the current position image visible. The player advances each coach-selected exchange with an explicit next-step button; this is a pacing control, not a move-selection decision. The live feed is scoped to the current round and clears at the bell; the complete fight commentary remains available in the final report. Position-entry causality remains visible before the first exchange. Both player finish opportunities and opponent finish threats still interrupt for the existing playable TKO/submission minigames. Existing careers migrate to **戰術操作** so no active player loses direct control.
+
+Action outcomes use transparent pixel-art pair sprites for eight authored visual families: punch, kick, takedown, clinch, ground strike, submission, position, and escape. Each family has a clean-success and countered-failure pose. The clean or countered pose remains visible while the player reads the result and chooses the next exchange; contested outcomes retain the normal position image and impact feedback. Artwork is presentation-only, is anchored to the same fixed arena camera (including the left inner cage edge and lower ground framing), and falls back to the position image when an old execution or asset cannot be resolved.
 
 The ground-position chain intentionally omits side control. Guard passes progress from defensive-guard top directly to mount, and failed bottom submissions may concede mount defense. Do not restore side-control positions or side-control-only attacks, submissions, transitions, escapes, visuals, or progression rewards without a new explicit decision.
 
@@ -244,6 +248,7 @@ Coach, family, and training-partner relationships persist across the career. Tra
 - Coach trust modifies technique XP.
 - Family trust modifies recovery.
 - The training partner remains a relationship and biography character even though practical sparring is retired.
+- In camp, only non-steady coach or family relationships appear in a compact influence strip. The affected activity card retains the full causal effect; the training partner appears there only if it gains a direct camp effect in a future accepted design.
 - Life events may trade money, fatigue, health, readiness, trust, and reputation, and should create a remembered consequence rather than isolated flavor text.
 
 Failure should redirect, scar, constrain, or conclude a career meaningfully instead of invalidating the run. Retirement output must synthesize starting experience, final skill levels, signature moves, birth and earned traits, turning points, relationships, achievements, failures, and unrealized possibilities. Raw totals are secondary evidence, not the ending itself.
@@ -276,6 +281,10 @@ Regional multipliers apply consistently to local-stage income and stage-relative
 `UI_PRINCIPLES.md` is the detailed authority for interface work. In particular, the game is mobile-first, Traditional Chinese is the primary player-facing language, the current decision must dominate the screen, and cause/effect must remain legible.
 
 The status UI should show each branch's derived 0–100 combat ability alongside its player-facing strength label and XP. Status strength badges are `未受訓`, `初學`, `中階`, `熟練`, `進階`, and `大師` for levels 0–5 respectively; do not use raw `Lv.` notation for those fighter-strength badges. The screen should also emphasize aptitude, learned moves, traits, trait discovery progress, injuries, current objective, and recent changes. The ability value must come from the canonical skill-rating mapping rather than presenting a stale compatibility field. It must not revive the old tech-tree or present every stored compatibility field as meaningful player state.
+
+The compact career context strip presents only preparation, lowest health, and career funds. Skill and move detail belongs in the status surface and the selected camp branch card, not in a persistent summary tile. The most recent camp-result summary appears before the technical-focus selector so the outcome is visible before the next training choice. Camp training cards already name their normal-completion and optional challenge actions, so a separate explanatory banner is unnecessary.
+
+Character reveal shows the fighter's actual learned moves but does not include a generic emergency-action explainer; those safety fallbacks are presented only when relevant in combat.
 
 ## 11. Smallest complete-life standard
 

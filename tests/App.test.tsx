@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 import { advance, createNewRun, getCompetitionWeightClass } from '../src/game/engine'
 import { FIGHT_INTENTS, OPENING_LABELS } from '../src/game/fight-content'
-import type { CampAction, CampDrillChallenge, CriticalOption, FinishKind, GameState, LeagueId } from '../src/game/types'
+import type { CampAction, CampDrillChallenge, CriticalOption, FightBeat, FinishKind, GameState, LeagueId } from '../src/game/types'
 
 const storage = vi.hoisted(() => ({
   archiveBiography: vi.fn(),
@@ -181,6 +181,7 @@ describe('生涯重置', () => {
     const label = await screen.findByText('比賽量級')
     expect(label.closest('.metric')).toHaveTextContent(getCompetitionWeightClass(game.fighter.naturalWeight).name)
     expect(label.closest('.metric')).toHaveTextContent('依體格與自然體重安排')
+    expect(screen.queryByText('共同基本動作')).not.toBeInTheDocument()
   })
 
   it('建立拳手時直接說明三個家鄉賽事生態', async () => {
@@ -351,7 +352,7 @@ describe('生涯重置', () => {
     })
   })
 
-  it('沒有新特質時顯示實戰進度而非科技樹', async () => {
+  it('沒有新特質或進度時跳過實戰成果畫面', async () => {
     const game = createNewRun(input)
     game.phase = 'growth'
     game.fighter.insight = 0
@@ -360,9 +361,9 @@ describe('生涯重置', () => {
 
     render(<App />)
 
-    expect(await screen.findByText('沒有憑空出現的新能力')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '下一場戰鬥' })).toBeInTheDocument()
+    expect(screen.queryByText('沒有憑空出現的新能力')).not.toBeInTheDocument()
     expect(screen.queryByText('技術領悟')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '繼續生涯' })).toBeInTheDocument()
   })
 
   it('賽果會明確顯示本場擊倒與擊倒嗅覺進度', async () => {
@@ -447,6 +448,10 @@ describe('生涯重置', () => {
     expect(techniqueFocus).not.toHaveTextContent('影片研究')
     expect(techniqueFocus).not.toHaveTextContent('醫療恢復')
     expect(screen.getByText('通用訓練')).toBeInTheDocument()
+    expect(screen.queryByText('技能／招式')).not.toBeInTheDocument()
+    expect(screen.queryByText('熟悉或重複的安排可直接以「正常完成」結算。只有想把這次成果推得更高時，才進入挑戰。')).not.toBeInTheDocument()
+    expect(document.querySelector('.context-strip')).toHaveClass('context-strip')
+    expect(document.querySelectorAll('.context-strip .metric')).toHaveLength(3)
     expect(screen.queryByText('體能訓練')).not.toBeInTheDocument()
   })
 
@@ -459,7 +464,9 @@ describe('生涯重置', () => {
     const filmCard = (await screen.findByText('影片研究')).closest('.camp-activity') as HTMLElement
     fireEvent.click(within(filmCard).getByRole('button', { name: '正常完成' }))
     expect(await screen.findByRole('heading', { name: '訓練營' })).toBeInTheDocument()
-    expect(screen.getByLabelText('最近一次訓練成果')).toHaveTextContent('情報 +31')
+    const summary = screen.getByLabelText('最近一次訓練成果')
+    expect(summary).toHaveTextContent('情報 +31')
+    expect(summary.compareDocumentPosition(screen.getByText('技術焦點')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
     const updatedFilmCard = screen.getByText('影片研究').closest('.camp-activity') as HTMLElement
     fireEvent.click(within(updatedFilmCard).getByRole('button', { name: '挑戰：爭取更多情報' }))
@@ -540,7 +547,7 @@ describe('生涯重置', () => {
     expect(screen.getByText(/最高獎勵不變/)).toBeInTheDocument()
   })
 
-  it('訓練營會預告每段關係目前帶來的實際效果', async () => {
+  it('訓練營以緊湊提示列預告目前的關係影響', async () => {
     const game = createNewRun(input)
     game.phase = 'camp'
     game.fighter.relationships.find((item) => item.role === 'coach')!.trust = 75
@@ -549,17 +556,29 @@ describe('生涯重置', () => {
 
     render(<App />)
 
-    const support = await screen.findByRole('region', { name: '關係支援' })
-    expect(support).toHaveTextContent('關係會改變訓練與生涯')
+    const support = await screen.findByRole('region', { name: '本次營隊的關係影響' })
     expect(support).toHaveTextContent('招式熟練度更容易達到上限')
     expect(support).toHaveTextContent('家庭壓力會讓這次休養打些折扣')
+    expect(support).not.toHaveTextContent('陪練')
     expect(screen.getByText('技術訓練').closest('.camp-activity')).toHaveTextContent('深厚信任')
     expect(screen.getByText('休養治療').closest('.camp-activity')).toHaveTextContent('關係緊張')
+  })
+
+  it('訓練營在關係穩定時不佔用提示列空間', async () => {
+    const game = createNewRun(input)
+    game.phase = 'camp'
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: '訓練營' })
+    expect(screen.queryByRole('region', { name: '本次營隊的關係影響' })).not.toBeInTheDocument()
   })
 
   it('人生事件選擇後顯示故事與效果結果彈窗', async () => {
     const game = createNewRun(input)
     game.phase = 'life'
+    game.selectedOfferId = game.offers[0].id
     game.lifeEvent = {
       id: 'test-life', title: '教練臨時要求加練', description: '教練希望你再練一輪。', personId: 'coach',
       options: [{ id: 'train', label: '留下來加練', detail: '訓練帶來一些代價。', outcome: '拳館熄燈後，你仍留在墊上反覆拆解動作。離開時，你和教練都更確定這場比賽該怎麼打。', effects: { trust: 7, fatigue: 9, readiness: 2 } }],
@@ -575,7 +594,8 @@ describe('生涯重置', () => {
     expect(dialog).toHaveTextContent('疲勞 +9')
     expect(dialog).toHaveTextContent('準備度 +2')
     fireEvent.click(screen.getByRole('button', { name: '接受結果，繼續' }))
-    expect(screen.queryByRole('dialog', { name: '留下來加練' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '留下來加練' })).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '籠門之前' })).toBeInTheDocument()
   })
 
   it('用教練口吻交代每名邀約對手的強項與弱點', async () => {
@@ -741,6 +761,41 @@ describe('生涯重置', () => {
     expect(scene.querySelector('.position-sprite')).toHaveAttribute('href', '/assets/fighters-cage-defense-pixel.png')
   })
 
+  it('乾淨奏效後顯示對應動作圖，並保留目前位置作為語意背景', async () => {
+    const game = gameAtBackControl()
+    game.fight!.beatHistory = [{
+      outcome: 'clean',
+      narrative: { executionId: 'base-back-strikes' },
+      damageEvents: [],
+    } as unknown as FightBeat]
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const scene = await screen.findByRole('img', { name: /上一招背後短拳奏效/ })
+    expect(scene.querySelector('.action-result-sprite')).toHaveAttribute('href', '/assets/action-ground-strike-clean-pixel.png')
+    expect(scene.querySelector('.position-sprite')).toBeNull()
+  })
+
+  it('遭到反制後顯示失敗動作圖，互有得失則回到位置圖', async () => {
+    const countered = gameAtBackControl()
+    countered.fight!.beatHistory = [{ outcome: 'countered', narrative: { executionId: 'base-shot' }, damageEvents: [] } as unknown as FightBeat]
+    storage.loadGame.mockResolvedValue({ game: countered })
+    render(<App />)
+
+    const counteredScene = await screen.findByRole('img', { name: /上一招抱摔切入遭到反制/ })
+    expect(counteredScene.querySelector('.action-result-sprite')).toHaveAttribute('href', '/assets/action-takedown-countered-pixel.png')
+    expect(counteredScene.querySelector('.position-sprite')).toBeNull()
+
+    cleanup()
+    const contested = gameAtBackControl()
+    contested.fight!.beatHistory = [{ outcome: 'contested', narrative: { executionId: 'base-shot' }, damageEvents: [] } as unknown as FightBeat]
+    storage.loadGame.mockResolvedValue({ game: contested })
+    render(<App />)
+
+    const contestedScene = await screen.findByRole('img', { name: '目前位置：背後控制' })
+    expect(contestedScene.querySelector('.action-result-sprite')).toBeNull()
+  })
+
   it.each([
     ['amateur', '/assets/combat-arena-amateur-pixel.png'],
     ['regional', '/assets/combat-arena-regional-pixel.png'],
@@ -779,6 +834,9 @@ describe('生涯重置', () => {
     expect(screen.getByText(/後撤髖部避開切入/)).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '你怎麼來到這個位置？' })).not.toBeInTheDocument()
     expect(screen.queryByText('關鍵選擇')).not.toBeInTheDocument()
+    const advanceButton = screen.getByRole('button', { name: '下一步' })
+    expect(document.querySelectorAll('.coach-fight-feed .feed-entry')).toHaveLength(1)
+    fireEvent.click(advanceButton)
   })
 
   it.each([

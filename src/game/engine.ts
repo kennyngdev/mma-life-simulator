@@ -1360,7 +1360,7 @@ function planBranch(plan: RoundPlan): Branch {
   if (plan === 'distance') return 'kicking'
   if (plan === 'pressure') return 'boxing'
   if (plan === 'takedown') return 'wrestling'
-  if (plan === 'cage') return 'clinch'
+  if (plan === 'clinch' || plan === 'cage') return 'clinch'
   return 'ground'
 }
 
@@ -1740,15 +1740,15 @@ function setRoundPlan(state: GameState, plan: RoundPlan): GameState {
   const opponent = state.opponents.find((item) => item.id === fight.opponentId)!
   const branch = planBranch(plan)
   const playerRating = branchSkill(state.fighter.technique[branch], state.fighter.mind.fightIQ)
-    - damageSkillPenalty(fight.playerDamageByPart, branch, plan === 'takedown' || plan === 'cage' ? 'transition' : 'offense')
+    - damageSkillPenalty(fight.playerDamageByPart, branch, plan === 'takedown' || plan === 'clinch' || plan === 'cage' ? 'transition' : 'offense')
   const opponentRating = branchSkill(opponent.technique[branch], opponent.composure)
-    - damageSkillPenalty(fight.opponentDamageByPart, branch, plan === 'takedown' || plan === 'cage' ? 'transition' : 'offense')
+    - damageSkillPenalty(fight.opponentDamageByPart, branch, plan === 'takedown' || plan === 'clinch' || plan === 'cage' ? 'transition' : 'offense')
   let variance: number
   ;[variance, rng] = drawInt(rng, 'fights', -10, 10)
   const bodyMatchup = bodyMatchupFor(state.fighter, opponent)
   const bodyEdge = plan === 'distance' ? bodyMatchup.rangeEdge
     : plan === 'pressure' ? bodyMatchup.insideEdge
-      : plan === 'takedown' || plan === 'cage' ? bodyMatchup.clinchEdge : 0
+      : plan === 'takedown' || plan === 'clinch' || plan === 'cage' ? bodyMatchup.clinchEdge : 0
   const legPlanPenalty = (plan === 'distance' || plan === 'pressure') ? [0, -3, -7, -12][severityTier(fight.playerDamageByPart.leg, 'leg')] : 0
   const cornerMargin = fight.cornerAdjustment === 'recover' ? -10 : fight.cornerAdjustment === 'protect' ? -4 : 0
   const margin = playerRating - opponentRating + variance + bodyEdge + (plan === 'recover' ? -5 : 0) + legPlanPenalty + cornerMargin
@@ -1758,11 +1758,15 @@ function setRoundPlan(state: GameState, plan: RoundPlan): GameState {
   fight.criticalCount = 1
   fight.momentum = clamp(margin, -30, 30)
   fight.initiative = margin > 5 ? 'player' : margin < -5 ? 'opponent' : 'even'
-  fight.playerStamina = clamp(fight.playerStamina - (plan === 'recover' ? 3 : plan === 'pressure' || plan === 'takedown' ? 7 : 5))
+  fight.playerStamina = clamp(fight.playerStamina - (plan === 'recover' ? 3 : plan === 'pressure' || plan === 'takedown' ? 7 : plan === 'clinch' ? 6 : 5))
   fight.opponentStamina = clamp(fight.opponentStamina - (plan === 'pressure' || plan === 'cage' ? 6 : 4))
-  fight.position = margin < -8 && opponent.technique.wrestling >= opponent.technique[opponent.weakness]
+  const counterWrestled = margin < -8 && opponent.technique.wrestling >= opponent.technique[opponent.weakness]
+  fight.position = counterWrestled
     ? 'bottom'
-    : plan === 'takedown' ? 'clinch' : plan === 'cage' ? (margin >= 0 ? 'cage-control' : 'cage-defense') : plan === 'pressure' ? 'pocket' : 'range'
+    : plan === 'takedown' ? (margin >= 8 ? 'top' : 'clinch')
+      : plan === 'clinch' ? (margin >= 6 ? 'thai-clinch' : margin <= -6 ? 'thai-clinch-defense' : 'clinch')
+        : plan === 'cage' ? (margin >= 6 ? 'cage-control' : margin <= -6 ? 'cage-defense' : 'cage')
+          : plan === 'pressure' ? 'pocket' : 'range'
   const explanation = positionEntryExplanation(plan, fight.position, opponent.name)
   fight.positionEntry = { round: fight.round, plan, position: fight.position, explanation }
   fight.commentary.push(`第 ${fight.round} 回合開打！${planLabel(plan)}。${explanation}`)
@@ -1779,7 +1783,13 @@ function positionEntryExplanation(plan: RoundPlan, position: Position, opponentN
     if (plan === 'recover') return `你放慢節奏保存體力，也暫時讓出籠中央；${opponentName}逮到空檔切入抱摔，把你帶到防守架下位。`
     return `你想在外圍控制距離，${opponentName}卻看穿後撤路線，用抱摔截住移動！落地後，你被壓在防守架下位。`
   }
-  if (position === 'clinch') return `你變換高度抱住${opponentName}的髖部，但他迅速拉開腿距守住平衡！抱摔還沒完成，雙方先纏在籠中央。`
+  if (position === 'top') return `你變換高度切進雙腿，頂住${opponentName}的重心後一路把人放倒！你在防守架上位開始這回合。`
+  if (position === 'clinch') return plan === 'takedown'
+    ? `你變換高度抱住${opponentName}的髖部，但他迅速拉開腿距守住平衡！抱摔還沒完成，雙方先纏在籠中央。`
+    : `你主動縮短距離，雙方都在爭頭位與內勾；纏抱的控制權還沒分出來。`
+  if (position === 'thai-clinch') return `你先把額頭壓進${opponentName}的下巴，搶到內勾與頸後控制！近身主動權在你手上。`
+  if (position === 'thai-clinch-defense') return `你想先進入纏抱，${opponentName}卻反而搶到頸後與內勾；你得先拆掉這個近身控制。`
+  if (position === 'cage') return `你們一起撞上鐵網，頭位與手臂位置還在爭奪；誰都還沒能把對方釘住。`
   if (position === 'cage-control') return `你搶下頭位和內勾，封住${opponentName}的轉身路線，一步步把人壓上鐵網！籠邊主動權在你手上。`
   if (position === 'cage-defense') return `你想建立籠邊控制，${opponentName}卻先搶到內側位置，順勢轉過你的肩線！方向一換，現在是你的背貼著鐵網。`
   if (position === 'pocket') return `你一路壓縮空間，不讓${opponentName}留在外圍！雙方進入近身交換，短拳和纏抱隨時都會爆發。`
@@ -1788,7 +1798,7 @@ function positionEntryExplanation(plan: RoundPlan, position: Position, opponentN
 }
 
 function planLabel(plan: RoundPlan): string {
-  return ({ distance: '你決定保持距離', pressure: '你開始向前壓迫', takedown: '你主動尋找抱摔機會', cage: '你把對手逼向籠邊', recover: '你放慢節奏保存體力' } as const)[plan]
+  return ({ distance: '你決定保持距離', pressure: '你開始向前壓迫', takedown: '你主動尋找抱摔機會', clinch: '你主動尋找纏抱', cage: '你把對手逼向籠邊', recover: '你放慢節奏保存體力' } as const)[plan]
 }
 
 function resolveCritical(state: GameState, optionId: string): GameState {
@@ -2502,6 +2512,10 @@ function processFightResult(state: GameState): GameState {
     updatedFighter.history.push({ id: `stage-${nextStage}`, year: updatedFighter.year, age: updatedFighter.age, title: `踏上${STAGE_LABELS[nextStage]}`, summary: '接下來的對手更強、報酬更高，風險也更大。你的打法也開始被其他人仔細研究。', people: [], importance: 3, tags: ['階段'] })
   }
   const traitAwards = awardEarnedTraits(updatedFighter)
+  const previousTraitProgress = new Map(state.fighter.traitProgress.map((progress) => [progress.traitId, progress.current]))
+  const traitProgressUpdates = updatedFighter.traitProgress
+    .filter((progress) => progress.current > (previousTraitProgress.get(progress.traitId) ?? 0))
+    .map((progress) => progress.traitId)
   for (const id of traitAwards) {
     const trait = traitDefinition(id)!
     updatedFighter.history.push({ id: `trait-${id}`, year: updatedFighter.year, age: updatedFighter.age, title: `獲得特質：${trait.name}`, summary: `${trait.condition}；${trait.effect}`, people: [], importance: 2, tags: ['特質', trait.rarity] })
@@ -2513,6 +2527,8 @@ function processFightResult(state: GameState): GameState {
   // A successful defense re-opens the same move-up decision. World has no
   // higher league, so a World defense simply returns to ordinary offers.
   const promotionTo = wonTitle && league ? NEXT_LEAGUE[league] : undefined
+  const growthDestination = shouldRetire ? 'retirement' : needsInjuryRecovery ? 'injury-recovery' : promotionTo ? 'league-decision' : 'offer'
+  const needsGrowthAcknowledgement = shouldRetire || needsInjuryRecovery || traitAwards.length > 0 || traitProgressUpdates.length > 0
   const offerResult = generateOffers(updatedFighter, opponents, offerStreams)
   return {
     ...state,
@@ -2522,12 +2538,13 @@ function processFightResult(state: GameState): GameState {
     offers: offerResult.offers,
     offerRefreshUsed: false,
     stage: nextStage,
-    phase: 'growth',
-    growthDestination: shouldRetire ? 'retirement' : needsInjuryRecovery ? 'injury-recovery' : promotionTo ? 'league-decision' : 'offer',
+    phase: needsGrowthAcknowledgement ? 'growth' : growthDestination === 'league-decision' ? 'league-decision' : 'offer',
+    growthDestination: needsGrowthAcknowledgement ? growthDestination : undefined,
     promotionFrom: promotionTo ? league : undefined,
     promotionTo,
     insightGained: undefined,
     traitAwards,
+    traitProgressUpdates,
     fight: undefined,
     selectedOfferId: undefined,
     campActions: [],
@@ -2622,6 +2639,7 @@ function takeMedicalLayoff(state: GameState): GameState {
     growthDestination: undefined,
     insightGained: undefined,
     traitAwards: undefined,
+    traitProgressUpdates: undefined,
     lastMessage: `停賽一年後，${healthLabel(weakestPart)}健康回到 ${fighter.health[weakestPart]}。你失去了一些時間，但還能繼續生涯。`,
   }
 }
@@ -2771,6 +2789,7 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
         growthDestination: undefined,
         insightGained: undefined,
         traitAwards: undefined,
+        traitProgressUpdates: undefined,
       }
     }
   }

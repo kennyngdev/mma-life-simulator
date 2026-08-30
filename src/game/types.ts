@@ -31,7 +31,7 @@ export type CampAction = 'technique' | 'film' | 'recovery'
 export type CampDrillKind = CampAction
 export type StrikeKind = 'punch' | 'kick'
 export type StrikeCommitment = 'quick' | 'set' | 'committed'
-export type RoundPlan = 'distance' | 'pressure' | 'takedown' | 'cage' | 'recover'
+export type RoundPlan = 'distance' | 'pressure' | 'takedown' | 'clinch' | 'cage' | 'recover'
 export type Position =
   | 'range' | 'pocket' | 'clinch' | 'cage'
   | 'cage-control' | 'cage-defense'
@@ -715,6 +715,8 @@ export interface GameState {
   promotionTo?: LeagueId
   insightGained?: number
   traitAwards?: string[]
+  /** Earned-trait counters advanced in the most recently resolved fight. */
+  traitProgressUpdates?: string[]
   scouting: number
   fight?: FightState
   lastMessage?: string

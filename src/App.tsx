@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
-import { FIGHT_INTENTS, OPENING_LABELS } from './game/fight-content'
+import { FIGHT_INTENTS, intentForExecutionId, MOVE_VISUAL_FAMILY_BY_INTENT, OPENING_LABELS } from './game/fight-content'
+import type { MoveVisualFamily } from './game/fight-content'
 import { advance, bodyMatchupFor, CAREER_HEALTH_RECOVERY_THRESHOLD, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, fighterStandingLabel, getOpponent, getRelationshipBenefit, LEAGUE_LABELS, LEAGUE_TITLE_RATING_FLOORS, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
 import { aptitudeLabel, minimumMoveLevel, nextMoveThreshold, nextSkillThreshold, POST_FOUNDATION_MOVE_XP, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
@@ -16,6 +17,7 @@ import type {
   CriticalOption,
   FighterState,
   FightDamagePart,
+  FightBeat,
   FightOffer,
   FightMoveDefinition,
   FightStageName,
@@ -347,9 +349,6 @@ function RevealView({ game, dispatch }: ViewProps) {
       </div>
       <SkillOverview fighter={fighter} />
       <section><SectionTitle title="天生特質" subtitle="稀有度影響力量；每項效果都有明確生效條件。" /><TraitGrid traits={fighter.traits} /></section>
-      <section><SectionTitle title="共同基本動作" subtitle="每位拳手都會保有足以繼續比賽的基礎動作，不需要花費技能 XP 解鎖。" />
-        <div className="empty-progression">站立觀察、移動防守、防摔繞開、籠邊脫困、下位防護與安全起身，會依當下位置自動加入戰鬥選單。</div>
-      </section>
       <section><SectionTitle title="已學招式" subtitle={initialMoves.length ? '武術背景提供第一批招式；之後只有透過訓練學會的新招才會加入戰鬥選單。' : '你還沒有受過正式訓練。'} />
         {initialMoves.length ? <MoveChips moveIds={initialMoves.map((move) => move.id)} /> : <div className="empty-progression">第一次技術訓練會讓一項技能升到 Lv.1，並讓你選擇真正學會的第一招。</div>}
       </section>
@@ -506,9 +505,9 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
   return (
     <Screen title="訓練營" kicker={`第 ${game.fighter.evidence.fights + 1} 場比賽`}>
       <ContextStrip fighter={game.fighter} />
-      <RelationshipSupport relationships={game.fighter.relationships} />
       <div className="budget-row"><span>本次營隊</span><div>{[0, 1, 2].map((slot) => <i key={slot} className={slot < game.campActions.length ? 'spent' : ''} />)}</div><strong>剩餘 {3 - game.campActions.length}</strong></div>
-      <p className="camp-flow-note">熟悉或重複的安排可直接以「正常完成」結算。只有想把這次成果推得更高時，才進入挑戰。</p>
+      <RelationshipInfluenceStrip relationships={game.fighter.relationships} />
+      <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
       <fieldset className="branch-selector">
         <legend>技術焦點</legend>
         <div className="branch-tabs five">{BRANCHES.map((value) => <button key={value} className={branch === value ? 'selected' : ''} onClick={() => setBranch(value)}>{BRANCH_META[value].short}<small>{BRANCH_META[value].name}</small></button>)}</div>
@@ -517,7 +516,6 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
       </fieldset>
       <SectionTitle title="通用訓練" subtitle="不論本次主練哪一門技術，都可以安排以下項目。" />
       <div className="camp-activity-list">{generalActions.map((action) => renderActivity(action))}</div>
-      <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
       <div className="camp-log">{relaxedDrills ? '寬鬆節奏只影響挑戰的讀取與操作窗口，最高獎勵不變。 ' : ''}{game.campActions.length ? `已完成：${game.campDrillHistory.map((result) => `${campLabel(result.kind)} · ${Math.round(result.score * 100)}%`).join(' → ')}` : '已完成：尚未安排'}</div>
     </Screen>
   )
@@ -761,17 +759,18 @@ function RecoveryDrill({ challenge, dispatch }: { challenge: CampDrillChallenge;
   </section>
 }
 
-function RelationshipSupport({ relationships }: { relationships: FighterState['relationships'] }) {
-  return <section className="support-network" aria-label="關係支援">
-    <div className="support-network-head"><strong>關係會改變訓練與生涯</strong><small>你的選擇決定誰願意在備戰時幫你。</small></div>
-    <div>{relationships.map((relationship) => {
-      const benefit = getRelationshipBenefit(relationship)
-      return <article key={relationship.id} className={benefit.tier}>
-        <span>{relationship.role === 'coach' ? '教練' : relationship.role === 'family' ? '家人' : '陪練'}</span>
-        <strong>{benefit.tierLabel}</strong>
-        <small>{benefit.action}：{benefit.effect}</small>
-      </article>
-    })}</div>
+function RelationshipInfluenceStrip({ relationships }: { relationships: FighterState['relationships'] }) {
+  const influences = relationships
+    .filter((relationship) => relationship.role === 'coach' || relationship.role === 'family')
+    .map((relationship) => ({ relationship, benefit: getRelationshipBenefit(relationship) }))
+    .filter(({ benefit }) => benefit.tier !== 'steady')
+  if (!influences.length) return null
+  return <section className="relationship-influence-strip" aria-label="本次營隊的關係影響">
+    {influences.map(({ relationship, benefit }) => <div key={relationship.id} className={`relationship-influence-chip ${benefit.tier}`}>
+      <span>{relationship.role === 'coach' ? '教練' : '家人'}</span>
+      <strong>{benefit.tierLabel}</strong>
+      <small>{benefit.effect}</small>
+    </div>)}
   </section>
 }
 
@@ -811,19 +810,26 @@ function LifeView({ game, dispatch }: ViewProps) {
 
 function GrowthView({ game, dispatch }: ViewProps) {
   const awards = (game.traitAwards ?? []).map((id) => traitDefinition(id)).filter(Boolean)
+  const traitProgressUpdates = game.traitProgressUpdates ?? []
   const weakestHealth = weakestHealthEntry(game.fighter)
   const injuryRetirement = game.growthDestination === 'retirement' && weakestHealth[1] <= CAREER_HEALTH_RETIREMENT_THRESHOLD
   const injuryRecovery = game.growthDestination === 'injury-recovery'
+  if (!injuryRetirement && !injuryRecovery && !awards.length && !traitProgressUpdates.length && !game.lifeEventResult) return <EmptyGrowthAdvance dispatch={dispatch} />
   return (
     <Screen title={injuryRetirement ? '傷勢終結了職業生涯' : injuryRecovery ? '傷勢逼你停賽' : awards.length ? '打法成為了特質' : '實戰留下的痕跡'} kicker={injuryRetirement || injuryRecovery ? `${healthPartLabel(weakestHealth[0])}健康 ${weakestHealth[1]}` : awards.length ? `${awards.length} 項新特質` : '生涯進度'}>
       {injuryRetirement && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康已降至 {weakestHealth[1]}。達到 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下的硬性退役線；剛才那場比賽是你的職業生涯終點。</p>}
       {injuryRecovery && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康降至 {weakestHealth[1]}。你不能直接簽下一場比賽：可停賽一年，讓這個部位恢復 18 點健康後再回來；或選擇現在退役。療傷的代價是失去一年生涯時間與一輪合約。</p>}
       {awards.length ? <div className="trait-awards">{awards.map((trait) => trait && <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity)}</span><h2>{trait.name}</h2><p>{trait.description}</p><strong>{trait.effect}</strong><small>生效：{trait.condition}</small></article>)}</div>
         : <div className="growth-complete"><span>✓</span><div><strong>沒有憑空出現的新能力</strong><small>真正的招式來自訓練；重複的實戰行為則會逐步形成特質。</small></div></div>}
-      {game.fighter.traitProgress.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="第一次做出符合條件的表現後，進度會保持可見。" /><TraitProgressList fighter={game.fighter} /></>}
+      {traitProgressUpdates.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="這場比賽推進了以下實戰特質。" /><TraitProgressList fighter={game.fighter} traitIds={traitProgressUpdates} /></>}
       <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : injuryRecovery ? '停賽一年，專心療傷' : game.growthDestination === 'prefight' ? '查看賽前簡報' : game.growthDestination === 'league-decision' ? '查看晉級選擇' : '繼續生涯'}</button>{injuryRecovery && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>不等了，現在退役</button>}</ActionDock>
     </Screen>
   )
+}
+
+function EmptyGrowthAdvance({ dispatch }: { dispatch: (command: GameCommand) => void }) {
+  useEffect(() => { dispatch({ type: 'CONTINUE_GROWTH' }) }, [dispatch])
+  return null
 }
 
 function PreFightView({ game, dispatch }: ViewProps) {
@@ -972,7 +978,8 @@ function RoundPlanView({ game, dispatch }: ViewProps) {
   const plans: Array<{ id: RoundPlan; label: string; detail: string }> = [
     { id: 'distance', label: '保持距離', detail: '以前踢、刺拳和移動控制外圍' },
     { id: 'pressure', label: '向前壓迫', detail: '冒險近身換拳，把對手逼到鐵網邊' },
-    { id: 'takedown', label: '尋找抱摔', detail: '改變高度，把回合帶到地面' },
+    { id: 'takedown', label: '尋找抱摔', detail: '改變高度，把回合帶到上位、纏抱或下位的爭奪' },
+    { id: 'clinch', label: '尋找纏抱', detail: '主動進入近身，爭搶頭位與內勾' },
     { id: 'cage', label: '籠邊消耗', detail: '控制對手的頭部與身體，讓他難以脫身' },
     { id: 'recover', label: '放慢節奏', detail: '暫時讓出主動權，保存後半場的體力' },
   ]
@@ -1039,39 +1046,24 @@ function CriticalView({ game, dispatch }: ViewProps) {
 function CoachGuidedCriticalView({ game, dispatch }: ViewProps) {
   const fight = game.fight!
   const prompt = fight.prompt!
-  const feedEnd = useRef<HTMLDivElement>(null)
-  const recentBeats = fight.beatHistory.slice(-4)
-  const latestBeat = recentBeats.at(-1)
-
-  useLayoutEffect(() => {
-    const feed = feedEnd.current
-    if (typeof feed?.scrollIntoView === 'function') feed.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  }, [fight.round, fight.sequenceStep, recentBeats.length])
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => dispatch({ type: 'RESOLVE_COACH_EXCHANGE' }), 4_000)
-    return () => window.clearTimeout(timer)
-  }, [dispatch, prompt.id])
+  const latestBeat = fight.beatHistory.at(-1)
 
   return <Screen className="coach-guided-screen" title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · 教練帶領`}>
     <FightArena game={game} compact showLiveLog={false} />
     <CornerDirective fight={fight} />
     <section className="coach-fight-feed" aria-label="即時賽況">
       <header><span>即時賽況</span><strong>教練正在指揮</strong></header>
-      {fight.positionEntry && <article className="feed-entry position-entry-feed">
+      {!latestBeat && fight.positionEntry && <article className="feed-entry position-entry-feed">
         <span>回合戰術</span><p>{fight.positionEntry.explanation}</p>
       </article>}
-      {recentBeats.map((beat) => <article className={`feed-entry ${beat.outcome}`} key={`${fight.round}-${beat.step}-${beat.action}`}>
-        <header><span>攻防 {beat.step}/4</span><strong>{beat.outcome === 'clean' ? '奏效' : beat.outcome === 'contested' ? '互有得失' : '遭到反制'}</strong></header>
-        <div className="feed-actions"><b>{beat.action}</b><i>對上</i><b>{beat.opponentAction}</b></div>
-        <p>{beat.summary}</p>
-        {beat.narrative.impactTags.length > 0 && <div className="impact-tags">{beat.narrative.impactTags.map((tag) => <b key={tag}>{tag}</b>)}</div>}
-      </article>)}
-      <article className="feed-entry pending" aria-live="polite">
-        <span>下一段攻防</span><p>{prompt.description} 教練正根據你已學會的招式、傷勢與對手動作選擇應對。</p>
-        <small>{latestBeat ? '賽況更新後會自動繼續。' : '開場局勢已就位，賽況即將開始。'}</small>
-      </article>
-      <div ref={feedEnd} />
+      {latestBeat && <article className={`feed-entry ${latestBeat.outcome}`}>
+        <header><span>攻防 {latestBeat.step}/4</span><strong>{latestBeat.outcome === 'clean' ? '奏效' : latestBeat.outcome === 'contested' ? '互有得失' : '遭到反制'}</strong></header>
+        <div className="feed-actions"><b>{latestBeat.action}</b><i>對上</i><b>{latestBeat.opponentAction}</b></div>
+        <p>{latestBeat.summary}</p>
+        {latestBeat.narrative.impactTags.length > 0 && <div className="impact-tags">{latestBeat.narrative.impactTags.map((tag) => <b key={tag}>{tag}</b>)}</div>}
+      </article>}
+      {!latestBeat && !fight.positionEntry && <article className="feed-entry pending"><p>{prompt.description}</p></article>}
+      <button type="button" className="coach-next-exchange" onClick={() => dispatch({ type: 'RESOLVE_COACH_EXCHANGE' })}>下一步</button>
     </section>
   </Screen>
 }
@@ -1080,7 +1072,7 @@ function PositionEntryDialog({ game, dispatch }: ViewProps) {
   const entry = game.fight!.positionEntry!
   const visual = POSITION_VISUALS[entry.position]
   const ownerLabel = visual.owner === 'player' ? '你先取得主動位置' : visual.owner === 'opponent' ? '對手先取得主動位置' : '雙方仍在爭奪位置'
-  const tactic = ({ distance: '保持距離', pressure: '向前壓迫', takedown: '尋找抱摔', cage: '籠邊消耗', recover: '放慢節奏' } as const)[entry.plan]
+  const tactic = ({ distance: '保持距離', pressure: '向前壓迫', takedown: '尋找抱摔', clinch: '尋找纏抱', cage: '籠邊消耗', recover: '放慢節奏' } as const)[entry.plan]
   return <div className="position-entry-backdrop">
     <section className={`position-entry-dialog owner-${visual.owner}`} role="dialog" aria-modal="true" aria-labelledby="position-entry-title" aria-describedby="position-entry-explanation">
       <p className="eyebrow">ROUND {entry.round} · 戰術落點</p>
@@ -1484,7 +1476,7 @@ function FightArena({ game, compact = false, showLiveLog = true }: { game: GameS
       <div><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /><DamageRibbon damage={fight.opponentDamageByPart} opponent /></div>
     </div>
     {(fight.playerKnockdowns ?? 0) > 0 && <KnockdownCallout fight={fight} careerKnockdowns={game.fighter.evidence.knockdowns} />}
-    <PositionScene position={fight.position} league={leagueForGame(game) ?? 'grassroots'} />
+    <PositionScene position={fight.position} league={leagueForGame(game) ?? 'grassroots'} lastBeat={lastBeat} />
     {showLiveLog && <div className="live-log">{roundCommentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
   </section>
 }
@@ -1547,6 +1539,13 @@ interface PositionSprite {
   flip?: boolean
 }
 
+interface ActionSprite extends PositionSprite {
+  playerLabelX: number
+  opponentLabelX: number
+  moveLabel: string
+  outcome: 'clean' | 'countered'
+}
+
 const STANDING_SPRITE: PositionSprite = { src: '/assets/fighters-standing-pixel.png', x: 10, y: 14, width: 80, height: 34 }
 const CLINCH_SPRITE: PositionSprite = { src: '/assets/fighters-clinch-pixel.png', x: 13, y: 14, width: 74, height: 34 }
 const CAGE_NEUTRAL_SPRITE: PositionSprite = { ...CLINCH_SPRITE, x: -3, width: 58 }
@@ -1575,18 +1574,57 @@ const POSITION_SPRITES: Record<Position, PositionSprite> = {
   scramble: { src: '/assets/fighters-scramble-pixel.png', x: 15, y: 15, width: 70, height: 34 },
 }
 
-function PositionScene({ position, league }: { position: Position; league: LeagueId | 'grassroots' }) {
+const ACTION_SPRITE_GEOMETRY: Record<'center' | 'cage' | 'ground', Pick<ActionSprite, 'x' | 'y' | 'width' | 'height' | 'playerLabelX' | 'opponentLabelX'>> = {
+  center: { x: 13, y: 14, width: 74, height: 34, playerLabelX: 31, opponentLabelX: 69 },
+  cage: { x: -3, y: 14, width: 58, height: 34, playerLabelX: 10, opponentLabelX: 35 },
+  ground: { x: 18, y: 17, width: 64, height: 34, playerLabelX: 35, opponentLabelX: 65 },
+}
+
+const ACTION_SPRITES: Record<MoveVisualFamily, { clean: string; countered: string }> = {
+  punch: { clean: '/assets/action-punch-clean-pixel.png', countered: '/assets/action-punch-countered-pixel.png' },
+  kick: { clean: '/assets/action-kick-clean-pixel.png', countered: '/assets/action-kick-countered-pixel.png' },
+  takedown: { clean: '/assets/action-takedown-clean-pixel.png', countered: '/assets/action-takedown-countered-pixel.png' },
+  clinch: { clean: '/assets/action-clinch-clean-pixel.png', countered: '/assets/action-clinch-countered-pixel.png' },
+  'ground-strike': { clean: '/assets/action-ground-strike-clean-pixel.png', countered: '/assets/action-ground-strike-countered-pixel.png' },
+  submission: { clean: '/assets/action-submission-clean-pixel.png', countered: '/assets/action-submission-countered-pixel.png' },
+  position: { clean: '/assets/action-position-clean-pixel.png', countered: '/assets/action-position-countered-pixel.png' },
+  escape: { clean: '/assets/action-escape-clean-pixel.png', countered: '/assets/action-escape-countered-pixel.png' },
+}
+
+function actionSpriteForBeat(beat: FightBeat | undefined): ActionSprite | undefined {
+  if (!beat || (beat.outcome !== 'clean' && beat.outcome !== 'countered')) return undefined
+  const intent = intentForExecutionId(beat.narrative.executionId)
+  const family = intent ? MOVE_VISUAL_FAMILY_BY_INTENT[intent.id] : undefined
+  const src = family ? ACTION_SPRITES[family][beat.outcome] : undefined
+  if (!intent || !family || !src) return undefined
+  const geometry = ['cage', 'cage-control', 'cage-defense'].includes(beat.narrative.positionBefore) ? ACTION_SPRITE_GEOMETRY.cage
+    : ['top', 'bottom', 'mount', 'mount-defense', 'back-control', 'back-defense'].includes(beat.narrative.positionBefore) ? ACTION_SPRITE_GEOMETRY.ground
+      : ACTION_SPRITE_GEOMETRY.center
+  return { src, ...geometry, moveLabel: intent.label, outcome: beat.outcome }
+}
+
+function PositionScene({ position, league, lastBeat }: { position: Position; league: LeagueId | 'grassroots'; lastBeat?: FightBeat }) {
   const visual = POSITION_VISUALS[position]
   const sprite = POSITION_SPRITES[position]
+  const action = actionSpriteForBeat(lastBeat)
+  const [failedActionSrc, setFailedActionSrc] = useState<string | undefined>()
+
+  useEffect(() => {
+    setFailedActionSrc(undefined)
+  }, [action?.src])
+
+  const visibleAction = action?.src === failedActionSrc ? undefined : action
   const ownerLabel = visual.owner === 'player' ? '你掌握位置' : visual.owner === 'opponent' ? '對手掌握位置' : '位置仍在爭奪'
+  const sceneLabel = visibleAction ? `目前位置：${positionLabel(position)}；上一招${visibleAction.moveLabel}${visibleAction.outcome === 'clean' ? '奏效' : '遭到反制'}` : `目前位置：${positionLabel(position)}`
   return <div className={`position-scene family-${visual.family} owner-${visual.owner}`}>
-    <svg viewBox="0 0 100 58" role="img" aria-label={`目前位置：${positionLabel(position)}`}>
+    <svg viewBox="0 0 100 58" role="img" aria-label={sceneLabel}>
       <image href={LEAGUE_ARENA_BACKDROPS[league]} x="0" y="0" width="100" height="58" preserveAspectRatio="xMidYMid slice" />
       <rect className="scene-frame" x="1" y="1" width="98" height="56" rx="1" />
       {visual.cageSide && <CagePressureZone side={visual.cageSide} />}
-      <text className="scene-name player-name" x={visual.player.x} y="17" textAnchor="middle">你</text>
-      <text className="scene-name opponent-name" x={visual.opponent.x} y="17" textAnchor="middle">對手</text>
-      <image className="position-sprite" href={sprite.src} x={sprite.x} y={sprite.y} width={sprite.width} height={sprite.height} preserveAspectRatio="xMidYMid meet" transform={sprite.flip ? 'translate(100 0) scale(-1 1)' : undefined} />
+      {!visibleAction && <image className="position-sprite" href={sprite.src} x={sprite.x} y={sprite.y} width={sprite.width} height={sprite.height} preserveAspectRatio="xMidYMid meet" transform={sprite.flip ? 'translate(100 0) scale(-1 1)' : undefined} />}
+      {visibleAction && <image className="action-result-sprite" href={visibleAction.src} x={visibleAction.x} y={visibleAction.y} width={visibleAction.width} height={visibleAction.height} preserveAspectRatio="xMidYMid meet" onError={() => { setFailedActionSrc(visibleAction.src) }} />}
+      <text className="scene-name player-name" x={visibleAction?.playerLabelX ?? visual.player.x} y="17" textAnchor="middle">你</text>
+      <text className="scene-name opponent-name" x={visibleAction?.opponentLabelX ?? visual.opponent.x} y="17" textAnchor="middle">對手</text>
     </svg>
     <div className="position-readout"><div><strong>{positionLabel(position)}</strong></div><em>{ownerLabel}</em><p>{visual.detail}</p></div>
   </div>
@@ -1623,8 +1661,7 @@ function positionLabel(position: string) {
 
 function ContextStrip({ fighter }: { fighter: FighterState }) {
   const minHealth = Math.min(...Object.values(fighter.health))
-  const best = Math.max(...BRANCHES.map((branch) => skillLevel(fighter.skills[branch].xp)))
-  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="最低健康" value={`${minHealth}`} note={`賽後 ${CAREER_HEALTH_RECOVERY_THRESHOLD}↓療傷 · ${CAREER_HEALTH_RETIREMENT_THRESHOLD}↓退役`} /><Metric label="技能／招式" value={`Lv.${best}`} note={`已學 ${fighter.learnedMoves.length} 招`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={`${careerRunwayLabel(fighter)} · ${REGION_PROFILES[fighter.region].economyLabel}`} /></div>
+  return <div className="context-strip"><Metric label="準備度" value={`${fighter.readiness}`} note={fighter.fatigue > 55 ? '疲勞偏高' : '可以訓練'} /><Metric label="最低健康" value={`${minHealth}`} note={`賽後 ${CAREER_HEALTH_RECOVERY_THRESHOLD}↓療傷 · ${CAREER_HEALTH_RETIREMENT_THRESHOLD}↓退役`} /><Metric label="生涯資金" value={formatRegionalMoney(fighter.money, fighter.region)} note={`${careerRunwayLabel(fighter)} · ${REGION_PROFILES[fighter.region].economyLabel}`} /></div>
 }
 
 function StatusBar({ label, value, tone }: { label: string; value: number; tone: string }) {
@@ -1686,8 +1723,9 @@ function TraitGrid({ traits }: { traits: FighterState['traits'] }) {
   })}</div>
 }
 
-function TraitProgressList({ fighter }: { fighter: FighterState }) {
-  return <div className="trait-progress-list">{fighter.traitProgress.map((progress) => {
+function TraitProgressList({ fighter, traitIds }: { fighter: FighterState; traitIds?: string[] }) {
+  const progressItems = traitIds ? fighter.traitProgress.filter((progress) => traitIds.includes(progress.traitId)) : fighter.traitProgress
+  return <div className="trait-progress-list">{progressItems.map((progress) => {
     const trait = traitDefinition(progress.traitId)
     if (!trait) return null
     const percent = Math.min(100, progress.current / progress.threshold * 100)
