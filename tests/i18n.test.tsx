@@ -20,8 +20,16 @@ describe('i18n runtime', () => {
   })
 
   it('defaults Chinese browsers to Traditional Chinese and others to English', () => {
+    expect(resolveInitialLocale('', ['zh'])).toBe('zh-Hant')
     expect(resolveInitialLocale('', ['zh-HK', 'en'])).toBe('zh-Hant')
+    expect(resolveInitialLocale('', ['zh-Hans-CN'])).toBe('zh-Hant')
     expect(resolveInitialLocale('', ['ja-JP', 'en-US'])).toBe('en')
+    expect(resolveInitialLocale('', ['en-US'])).toBe('en')
+  })
+
+  it('falls back to Traditional Chinese when browser language is unavailable', () => {
+    expect(resolveInitialLocale('', [])).toBe('zh-Hant')
+    expect(resolveInitialLocale('', [''])).toBe('zh-Hant')
   })
 
   it('switches immediately, persists outside the career, and updates metadata', () => {

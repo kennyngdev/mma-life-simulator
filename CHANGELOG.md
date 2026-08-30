@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- Made Traditional Chinese the fallback when browser-language detection is unavailable, while Chinese locales select Traditional Chinese and known non-Chinese locales select English on first visit.
 - Kept both language-switch labels visible on iOS and synchronized manual language changes with the shareable `lang` URL so an old override cannot undo the player's choice.
 - Derived the character-creation version label from the package release version so the live UI cannot retain a stale number after deployment.
 

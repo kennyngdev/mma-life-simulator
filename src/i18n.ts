@@ -170,12 +170,17 @@ function validLocale(value: string | null | undefined): value is Locale {
   return value === 'zh-Hant' || value === 'en'
 }
 
-export function resolveInitialLocale(locationSearch = window.location.search, browserLanguages = navigator.languages): Locale {
+export function resolveInitialLocale(
+  locationSearch = window.location.search,
+  browserLanguages = navigator.languages.length ? navigator.languages : [navigator.language],
+): Locale {
   const queryLocale = new URLSearchParams(locationSearch).get('lang')
   if (validLocale(queryLocale)) return queryLocale
   const stored = localStorage.getItem(LOCALE_STORAGE_KEY)
   if (validLocale(stored)) return stored
-  return browserLanguages.some((language) => language.toLowerCase().startsWith('zh')) ? 'zh-Hant' : 'en'
+  const detectedLanguages = browserLanguages.map((language) => language.trim().toLowerCase()).filter(Boolean)
+  if (detectedLanguages.some((language) => language === 'zh' || language.startsWith('zh-'))) return 'zh-Hant'
+  return detectedLanguages.length ? 'en' : 'zh-Hant'
 }
 
 type I18nContextValue = {
