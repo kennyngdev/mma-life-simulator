@@ -343,7 +343,7 @@ export function createNewRun(input: NewRunInput): GameState {
   let rng = createStreams(input.seed.trim().toUpperCase())
   const startingExperience = input.startingExperience ?? 'hobbyist'
   let fighterName = input.name.trim()
-  let alias: string | undefined
+  let alias: string | undefined = input.latinName?.trim() || undefined
   if (!fighterName) {
     let identity: RegionalIdentity
     ;[identity, rng] = generatedRegionalIdentity(input.region, rng)

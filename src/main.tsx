@@ -2,12 +2,14 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import App from './App'
+import { I18nProvider } from './i18n'
+import { LocalizedSurface } from './LocalizedSurface'
 import './styles.css'
 
 registerSW({ immediate: true })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <I18nProvider><LocalizedSurface><App /></LocalizedSurface></I18nProvider>
   </StrictMode>,
 )

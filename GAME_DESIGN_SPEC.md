@@ -23,6 +23,10 @@ When a new explicit product decision conflicts with this document, the new decis
 
 Character creation must display a compact Traditional-Chinese prompt whenever the game is opened in an ordinary browser tab rather than PWA standalone mode. The prompt explains that adding the game to the device home screen provides an app-like launch experience and that progress remains on the device. When the browser exposes an install prompt, provide a direct install action; otherwise give browser-agnostic “install app / add to home screen” guidance. Do not show this prompt in standalone mode.
 
+### 1.3 Language support — Accepted
+
+Traditional Chinese and global MMA English are complete presentation locales. An explicit `lang` URL choice takes priority, followed by the independently saved language preference and then browser-language detection; Chinese browsers begin in Traditional Chinese and other browsers begin in English. Language is never part of career or combat state and must not alter seeded results. Players may switch immediately from the start screen or in-game settings. Generated regional identities use an authored Latin name alongside their native name where available, and a custom fighter may provide an optional English or romanized display name. Existing prose-only saves use exact localized history where semantic data survives and a faithful generic reconstruction where it does not.
+
 ## 2. Design thesis
 
 `拳途人生 Cage Life` is a seeded, mobile-first MMA career life simulation. A run should answer:

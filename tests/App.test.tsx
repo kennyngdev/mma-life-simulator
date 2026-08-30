@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
+import { I18nProvider } from '../src/i18n'
+import { LocalizedSurface } from '../src/LocalizedSurface'
 import packageMeta from '../package.json'
 import { advance, createNewRun, getCompetitionWeightClass } from '../src/game/engine'
 import { FIGHT_INTENTS, OPENING_LABELS } from '../src/game/fight-content'
@@ -192,6 +194,28 @@ describe('生涯重置', () => {
     expect(await screen.findByRole('button', { name: /香港.*國際門戶/ })).toHaveTextContent('高收入／高成本')
     expect(screen.getByRole('button', { name: /台灣.*拳館網絡/ })).toHaveTextContent('65% 台灣')
     expect(screen.getByRole('button', { name: /中國大陸.*深度賽事/ })).toHaveTextContent('低收入／低成本')
+  })
+
+  it('英文建立頁不留下未翻譯介面文字', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    storage.loadGame.mockResolvedValue({})
+    render(<I18nProvider><LocalizedSurface><App /></LocalizedSurface></I18nProvider>)
+
+    expect(await screen.findByRole('heading', { name: 'Cage Life' })).toBeInTheDocument()
+    await waitFor(() => expect(document.body.textContent).not.toMatch(/[\u3400-\u9fff]/))
+    expect(screen.getByRole('button', { name: /Hong Kong.*International gateway/ })).toBeInTheDocument()
+  })
+
+  it('英文戰鬥頁會翻譯動態引擎敘事而不改變存檔', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = gameAtBackControl()
+    const original = structuredClone(game)
+    storage.loadGame.mockResolvedValue({ game })
+    render(<I18nProvider><LocalizedSurface><App /></LocalizedSurface></I18nProvider>)
+
+    expect(await screen.findByRole('heading', { name: /Back control/i })).toBeInTheDocument()
+    expect(screen.getByText('Rear Short Punch')).toBeInTheDocument()
+    expect(game).toEqual(original)
   })
 
   it('在非 PWA 瀏覽器的拳手建立畫面提示加入主畫面', async () => {

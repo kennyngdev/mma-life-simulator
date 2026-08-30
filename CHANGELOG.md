@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- Added complete Traditional Chinese and English localization support with automatic browser detection, shareable language URLs, persistent switching, localized start/PWA surfaces, and an optional romanized fighter name.
+
 ### Fixed
 
 - Derived the character-creation version label from the package release version so the live UI cannot retain a stale number after deployment.

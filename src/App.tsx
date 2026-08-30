@@ -36,7 +36,7 @@ import type {
   StartingExperience,
   LeagueId,
 } from './game/types'
-import { t } from './i18n'
+import { useI18n } from './i18n'
 
 const BRANCHES: Branch[] = ['boxing', 'kicking', 'clinch', 'wrestling', 'ground']
 const minigameTutorialKey = (kind: 'strike' | 'submission') => `cage-life:minigame-tutorial-seen-v2:${kind}`
@@ -52,6 +52,7 @@ function isStandalonePwa() {
 }
 
 export default function App() {
+  const { t } = useI18n()
   const [game, setGame] = useState<GameState>()
   const [biographies, setBiographies] = useState<Biography[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,7 +60,7 @@ export default function App() {
   const [showResetConfirmation, setShowResetConfirmation] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resetError, setResetError] = useState<string>()
-  const [startupNotice, setStartupNotice] = useState<string>()
+  const [showStartupResetNotice, setShowStartupResetNotice] = useState(false)
   const [sfxEnabled, setSfxEnabled] = useState(() => localStorage.getItem('cage-life:sfx') !== 'off')
   const [relaxedDrills, setRelaxedDrills] = useState(() => localStorage.getItem('cage-life:relaxed-drills') === 'on')
   const saveQueue = useRef<Promise<void>>(Promise.resolve())
@@ -69,7 +70,7 @@ export default function App() {
   useEffect(() => {
     Promise.all([loadGame(), listBiographies()]).then(([saved, archived]) => {
       setGame(saved.game)
-      if (saved.resetReason) setStartupNotice('戰鬥系統已全面更新，舊生涯無法安全轉換；生涯殿堂仍完整保留。')
+      if (saved.resetReason) setShowStartupResetNotice(true)
       setBiographies(archived)
       setLoading(false)
     })
@@ -130,14 +131,14 @@ export default function App() {
       setShowResetConfirmation(false)
       setGame(undefined)
     } catch {
-      setResetError('無法清除本機進度，請稍後再試。')
+      setResetError(t('save.resetError'))
     } finally {
       setResetting(false)
     }
   }
 
-  if (loading) return <div className="loading-screen"><CageMark /><p>正在整理拳套與生涯紀錄……</p></div>
-  if (!game) return <><StartScreen biographies={biographies} onStart={setGame} onDelete={async (id) => { await deleteBiography(id); setBiographies(await listBiographies()) }} />{startupNotice && <div className="startup-notice" role="status">{startupNotice}</div>}</>
+  if (loading) return <div className="loading-screen"><CageMark /><p>{t('loading')}</p></div>
+  if (!game) return <><StartScreen biographies={biographies} onStart={setGame} onDelete={async (id) => { await deleteBiography(id); setBiographies(await listBiographies()) }} />{showStartupResetNotice && <div className="startup-notice" role="status">{t('save.resetNotice')}</div>}</>
 
   const finishMode = game.phase === 'finish-minigame'
 
@@ -155,7 +156,9 @@ export default function App() {
 }
 
 function StartScreen({ biographies, onStart, onDelete }: { biographies: Biography[]; onStart: (game: GameState) => void; onDelete: (id: string) => void }) {
+  const { locale, setLocale, t } = useI18n()
   const [name, setName] = useState('')
+  const [latinName, setLatinName] = useState('')
   const [region, setRegion] = useState<Region>('taiwan')
   const [motive, setMotive] = useState<Motive>('prove')
   const [startingExperience, setStartingExperience] = useState<StartingExperience>('hobbyist')
@@ -192,61 +195,64 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
 
   return (
     <main className="start-shell">
+      <LanguageSwitch locale={locale} setLocale={setLocale} label={t('locale.label')} />
       <section className="hero">
         <CageMark />
         <p className="eyebrow">MMA LIFE SIMULATOR</p>
-        <h1>拳途人生 Cage Life</h1>
-        <p className="hero-copy">沒有人能學會所有招式再走進鐵籠。<br />一次次取捨，會決定你成為什麼樣的拳手。</p>
-        <small className="build-version" aria-label={`遊戲版本 ${packageMeta.version}`}>v{packageMeta.version}</small>
+        <h1>{t('app.name')}</h1>
+        <p className="hero-copy">{t('start.tagline').split('\n').map((line, index) => <span key={line}>{index > 0 && <br />}{line}</span>)}</p>
+        <small className="build-version" aria-label={t('start.version', { version: packageMeta.version })}>v{packageMeta.version}</small>
       </section>
 
       {!standalonePwa && <aside className="pwa-install-prompt" role="note" aria-labelledby="pwa-install-title">
         <div>
           <span className="pwa-install-mark" aria-hidden="true">▣</span>
           <div>
-            <strong id="pwa-install-title">以 App 模式踏進鐵籠</strong>
-            <p>加入主畫面後，可全螢幕開啟《拳途人生》，進度仍會保留在這台裝置。</p>
+            <strong id="pwa-install-title">{t('start.installTitle')}</strong>
+            <p>{t('start.installBody')}</p>
           </div>
         </div>
         {installPrompt
-          ? <button type="button" className="pwa-install-button" onClick={() => void requestInstall()}>安裝 App</button>
-          : <small>請在瀏覽器選單選擇「安裝 App」或「加入主畫面」。</small>}
+          ? <button type="button" className="pwa-install-button" onClick={() => void requestInstall()}>{t('start.installAction')}</button>
+          : <small>{t('start.installHelp')}</small>}
       </aside>}
 
       <section className="setup-panel">
-        <label className="field-label" htmlFor="fighter-name">拳手姓名（選填）</label>
-        <input id="fighter-name" value={name} maxLength={16} placeholder="留空將隨機產生姓名" onChange={(event) => setName(event.target.value)} />
+        <label className="field-label" htmlFor="fighter-name">{t('start.fighterName')}</label>
+        <input id="fighter-name" value={name} maxLength={16} placeholder={t('start.fighterNamePlaceholder')} onChange={(event) => setName(event.target.value)} />
+        <label className="field-label" htmlFor="fighter-latin-name">{t('start.latinName')}</label>
+        <input id="fighter-latin-name" value={latinName} maxLength={32} placeholder={t('start.latinNamePlaceholder')} onChange={(event) => setLatinName(event.target.value)} />
 
         <fieldset>
-          <legend>出身地</legend>
+          <legend>{t('start.region')}</legend>
           <div className="region-profile-grid">
             {(Object.keys(REGION_LABELS) as Region[]).map((value) => {
-              const profile = REGION_PROFILES[value]
+              const prefix = `region.${value}` as const
               return <button key={value} type="button" className={`region-choice ${region === value ? 'selected' : ''}`} onClick={() => setRegion(value)}>
-                <span>{profile.label}</span><strong>{profile.circuit}</strong><p>{profile.description}</p><small>{profile.opponentMix}</small><em>{profile.economyLabel}</em>
+                <span>{t(`${prefix}.label`)}</span><strong>{t(`${prefix}.circuit`)}</strong><p>{t(`${prefix}.description`)}</p><small>{t(`${prefix}.mix`)}</small><em>{t(`${prefix}.economy`)}</em>
               </button>
             })}
           </div>
         </fieldset>
 
         <fieldset>
-          <legend>為何而戰</legend>
+          <legend>{t('start.motive')}</legend>
           <div className="choice-list compact">
             {(Object.keys(MOTIVES) as Motive[]).map((value) => (
               <button key={value} type="button" className={`choice-row ${motive === value ? 'selected' : ''}`} onClick={() => setMotive(value)}>
-                <strong>{MOTIVES[value].name}</strong><span>{MOTIVES[value].description}</span>
+                <strong>{t(`motive.${value}.name`)}</strong><span>{t(`motive.${value}.description`)}</span>
               </button>
             ))}
           </div>
         </fieldset>
 
         <fieldset>
-          <legend>你的起點</legend>
+          <legend>{t('start.experience')}</legend>
           <div className="choice-list compact experience-list">
             {([
-              ['normie', '普通人', '五項技能都是 Lv.0，從帶點荒謬的草根試煉開始。'],
-              ['hobbyist', '業餘愛好者', '帶著一項隨 Seed 揭曉的武術背景，從正式業餘賽起步。'],
-              ['semi-pro', '半職業選手', '已經有成形打法與較多招式，直接進入地區職業舞台。'],
+              ['normie', t('experience.normie.name'), t('experience.normie.description')],
+              ['hobbyist', t('experience.hobbyist.name'), t('experience.hobbyist.description')],
+              ['semi-pro', t('experience.semi-pro.name'), t('experience.semi-pro.description')],
             ] as Array<[StartingExperience, string, string]>).map(([value, label, detail]) => <button key={value} type="button" className={`choice-row ${startingExperience === value ? 'selected' : ''}`} onClick={() => setStartingExperience(value)}>
               <strong>{label}</strong><span>{detail}</span>
             </button>)}
@@ -254,37 +260,38 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
         </fieldset>
 
         <fieldset>
-          <legend>比賽操作</legend>
+          <legend>{t('start.combatMode')}</legend>
           <div className="choice-list compact combat-mode-list">
             {([
-              ['manual', '戰術操作', '每段攻防親自選招；適合想研究位置、招式與反制的玩家。'],
-              ['coach-guided', '教練帶領', '你決定每回合戰術，教練依你的招式與場上局勢自動指揮；終結與脫困仍由你親手完成。'],
+              ['manual', t('combat.manual.name'), t('combat.manual.description')],
+              ['coach-guided', t('combat.coach.name'), t('combat.coach.description')],
             ] as Array<[CombatMode, string, string]>).map(([value, label, detail]) => <button key={value} type="button" className={`choice-row ${combatMode === value ? 'selected' : ''}`} onClick={() => setCombatMode(value)}>
               <strong>{label}</strong><span>{detail}</span>
             </button>)}
           </div>
-          <small className="mode-choice-note">開始生涯後無法更改。</small>
+          <small className="mode-choice-note">{t('start.modeLocked')}</small>
         </fieldset>
 
         <div className="seed-row">
-          <label className="field-label" htmlFor="seed">世界 Seed</label>
-          <div><input id="seed" value={seed} maxLength={16} onChange={(event) => setSeed(event.target.value.toUpperCase())} /><button type="button" className="icon-button" onClick={() => setSeed(randomSeed())} aria-label="重新產生 Seed">換</button></div>
-          <small>遊戲版本、Seed 和選擇都相同，就會走出同一段人生。</small>
+          <label className="field-label" htmlFor="seed">{t('start.seed')}</label>
+          <div><input id="seed" value={seed} maxLength={16} onChange={(event) => setSeed(event.target.value.toUpperCase())} /><button type="button" className="icon-button" onClick={() => setSeed(randomSeed())} aria-label={t('start.seedRandomize')}>{t('start.seedAction')}</button></div>
+          <small>{t('start.seedHelp')}</small>
         </div>
 
-        <button className="primary-action" disabled={!seed.trim()} onClick={() => onStart(createNewRun({ name: name.trim(), region, motive, seed, startingExperience, combatMode }))}>
-          <span>開始拳手生涯</span><small>開始後將揭曉武術背景與先天條件</small>
+        <button className="primary-action" disabled={!seed.trim()} onClick={() => onStart(createNewRun({ name: name.trim(), latinName: latinName.trim(), region, motive, seed, startingExperience, combatMode }))}>
+          <span>{t('start.begin')}</span><small>{t('start.beginHelp')}</small>
         </button>
-        <button type="button" className="text-button" onClick={() => setShowHall((value) => !value)}>生涯殿堂 · {biographies.length}</button>
+        <button type="button" className="text-button" onClick={() => setShowHall((value) => !value)}>{t('start.hall', { count: biographies.length })}</button>
       </section>
 
       {showHall && <HallOfFame biographies={biographies} onDelete={onDelete} />}
-      <footer className="source-note">聯盟與選手皆為虛構 · 採綜合格鬥統一規則 · 進度只存在本機</footer>
+      <footer className="source-note">{t('start.disclaimer')}</footer>
     </main>
   )
 }
 
 function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx, relaxedDrills, onToggleRelaxedDrills }: { game: GameState; onOverlay: (type: 'status' | 'history') => void; onReset: () => void; sfxEnabled: boolean; onToggleSfx: () => void; relaxedDrills: boolean; onToggleRelaxedDrills: () => void }) {
+  const { t } = useI18n()
   const fighter = game.fighter
   return (
     <header className="game-header">
@@ -296,12 +303,19 @@ function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx, relaxed
       <div className="header-actions">
         <button type="button" onClick={onToggleRelaxedDrills} aria-label={relaxedDrills ? '關閉寬鬆訓練節奏' : '開啟寬鬆訓練節奏'} title="訓練操作節奏">{relaxedDrills ? '寬鬆' : '節奏'}</button>
         <button type="button" onClick={onToggleSfx} aria-label={sfxEnabled ? '關閉音效' : '開啟音效'} title={sfxEnabled ? '音效開啟' : '音效關閉'}>{sfxEnabled ? '聲效' : '靜音'}</button>
-        <button type="button" onClick={() => onOverlay('status')} aria-label={t('status')}>狀態</button>
-        <button type="button" onClick={() => onOverlay('history')} aria-label={t('history')}>歷程</button>
+        <button type="button" onClick={() => onOverlay('status')} aria-label={t('nav.status')}>狀態</button>
+        <button type="button" onClick={() => onOverlay('history')} aria-label={t('nav.history')}>歷程</button>
         <button type="button" className="reset-button" onClick={onReset}>重置</button>
       </div>
     </header>
   )
+}
+
+function LanguageSwitch({ locale, setLocale, label, compact = false }: { locale: 'zh-Hant' | 'en'; setLocale: (locale: 'zh-Hant' | 'en') => void; label: string; compact?: boolean }) {
+  return <div className={`language-switch ${compact ? 'compact' : ''}`} role="group" aria-label={label}>
+    <button type="button" aria-pressed={locale === 'zh-Hant'} onClick={() => setLocale('zh-Hant')}>繁中</button>
+    <button type="button" aria-pressed={locale === 'en'} onClick={() => setLocale('en')}>EN</button>
+  </div>
 }
 
 function GameView({ game, dispatch, onNew, relaxedDrills }: { game: GameState; dispatch: (command: GameCommand) => void; onNew: () => void; relaxedDrills: boolean }) {
@@ -1797,7 +1811,8 @@ function ResetConfirmation({ resetting, error, onCancel, onConfirm }: { resettin
 }
 
 function InfoOverlay({ game, type, dispatch, onClose }: { game: GameState; type: 'status' | 'history'; dispatch: (command: GameCommand) => void; onClose: () => void }) {
-  return <div className="overlay-backdrop" onClick={onClose}><section className="info-overlay" role="dialog" aria-modal="true" aria-label={type === 'status' ? '拳手狀態' : '生涯歷程'} onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">{game.fighter.name}</p><h2>{type === 'status' ? '拳手狀態' : '生涯歷程'}</h2></div><button onClick={onClose} aria-label="關閉">×</button></header><div className="overlay-scroll">{type === 'status' ? <StatusDetails game={game} dispatch={dispatch} /> : <HistoryDetails game={game} />}</div></section></div>
+  const { locale, setLocale, t } = useI18n()
+  return <div className="overlay-backdrop" onClick={onClose}><section className="info-overlay" role="dialog" aria-modal="true" aria-label={type === 'status' ? '拳手狀態' : '生涯歷程'} onClick={(event) => event.stopPropagation()}><header><div><p className="eyebrow">{game.fighter.name}</p><h2>{type === 'status' ? '拳手狀態' : '生涯歷程'}</h2></div><LanguageSwitch locale={locale} setLocale={setLocale} label={t('locale.label')} compact /><button onClick={onClose} aria-label="關閉">×</button></header><div className="overlay-scroll">{type === 'status' ? <StatusDetails game={game} dispatch={dispatch} /> : <HistoryDetails game={game} />}</div></section></div>
 }
 
 function StatusDetails({ game }: { game: GameState; dispatch: (command: GameCommand) => void }) {

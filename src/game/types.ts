@@ -764,6 +764,7 @@ export interface TransitionResult {
 
 export interface NewRunInput {
   name: string
+  latinName?: string
   region: Region
   motive: Motive
   seed: string

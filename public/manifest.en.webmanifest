@@ -1,0 +1,12 @@
+{
+  "name": "Cage Life — MMA Career Simulator",
+  "short_name": "Cage Life",
+  "description": "Build an MMA career from obscurity to retirement.",
+  "lang": "en",
+  "start_url": "/?lang=en",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#12110f",
+  "background_color": "#12110f",
+  "icons": [{ "src": "/cage-mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
