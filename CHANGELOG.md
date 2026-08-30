@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-31
+
+### Fixed
+
+- Prevented English header controls and long reveal labels from expanding the game shell beyond wide iPhone viewports, eliminating horizontal page scrolling without relying on `100vw` clipping.
+- Restored all Traditional Chinese interface text immediately when switching back from English, including character creation and career screens handled by the legacy prose translator.
+
 ## [0.4.0] - 2026-08-30
 
 ### Added

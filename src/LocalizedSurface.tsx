@@ -18,12 +18,16 @@ function translateNode(node: Node, english: boolean) {
     const current = node.textContent ?? ''
     const previous = translatedText.get(node)
     if (!english) {
-      if (previous) node.textContent = previous.source
+      if (previous && current === previous.translated) node.textContent = previous.source
       translatedText.delete(node)
       return
     }
     const source = previous && current === previous.translated ? previous.source : current
     const translated = localizeLegacyText(source)
+    if (translated === source) {
+      translatedText.delete(node)
+      return
+    }
     translatedText.set(node, { source, translated })
     if (current !== translated) node.textContent = translated
     return
@@ -40,12 +44,16 @@ function translateNode(node: Node, english: boolean) {
     if (current === null) continue
     const previous = attributeState.get(name)
     if (!english) {
-      if (previous) element.setAttribute(name, previous.source)
+      if (previous && current === previous.translated) element.setAttribute(name, previous.source)
       attributeState.delete(name)
       continue
     }
     const source = previous && current === previous.translated ? previous.source : current
     const translated = localizeLegacyText(source)
+    if (translated === source) {
+      attributeState.delete(name)
+      continue
+    }
     attributeState.set(name, { source, translated })
     if (current !== translated) element.setAttribute(name, translated)
   }

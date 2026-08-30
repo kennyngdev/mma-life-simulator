@@ -146,6 +146,7 @@ describe('生涯重置', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    window.history.replaceState({}, '', '/')
     storage.loadGame.mockResolvedValue({ game: createNewRun(input) })
     storage.listBiographies.mockResolvedValue([])
     storage.saveGame.mockResolvedValue(undefined)
@@ -209,6 +210,20 @@ describe('生涯重置', () => {
     })
     expect(screen.getByRole('button', { name: 'Traditional Chinese' })).toHaveTextContent('繁中')
     expect(screen.getByRole('button', { name: /Hong Kong.*International gateway/ })).toBeInTheDocument()
+  })
+
+  it('從英文切回繁中時立即還原完整建立頁', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    storage.loadGame.mockResolvedValue({})
+    render(<I18nProvider><LocalizedSurface><App /></LocalizedSurface></I18nProvider>)
+
+    expect(await screen.findByLabelText('Fighter name (optional)')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Traditional Chinese' }))
+
+    expect(await screen.findByLabelText('拳手姓名（選填）')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /香港.*國際門戶/ })).toHaveTextContent('高收入／高成本')
+    expect(screen.queryByText('Home region')).not.toBeInTheDocument()
+    expect(document.documentElement.lang).toBe('zh-Hant')
   })
 
   it('英文戰鬥頁會翻譯動態引擎敘事而不改變存檔', async () => {
