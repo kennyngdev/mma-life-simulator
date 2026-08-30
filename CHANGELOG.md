@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-30
+
 ### Added
 
 - Added complete Traditional Chinese and English localization support with automatic browser detection, shareable language URLs, persistent switching, localized start/PWA surfaces, and an optional romanized fighter name.
