@@ -31,8 +31,11 @@ export async function loadGame(): Promise<LoadGameResult> {
   const db = await database()
   const envelope = await db.get(STORE, ACTIVE_KEY) as (SaveEnvelope & { game: unknown }) | undefined
   if (!envelope) return {}
-  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.24.0' && envelope.contentVersion === '1.6.0') {
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.25.0' && envelope.contentVersion === '1.6.0') {
     return { game: envelope.game as GameState }
+  }
+  if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.24.0' && envelope.contentVersion === '1.6.0') {
+    return { game: migrateCoachGuidedCombat(envelope.game) }
   }
   if (envelope.saveVersion === 15 && envelope.rulesVersion === '0.23.0' && envelope.contentVersion === '1.6.0') {
     return { game: migrateInjuryRecoveryWindow(envelope.game) }
@@ -98,6 +101,13 @@ export async function loadGame(): Promise<LoadGameResult> {
   if (envelope.saveVersion === 11 && envelope.rulesVersion === '0.7.0') return { game: migrateLeagueRankings(migrateVersion11(envelope.game)) }
   if (envelope.saveVersion === 10 && envelope.rulesVersion === '0.7.0') return { game: migrateLeagueRankings(migrateVersion10(envelope.game)) }
   return { resetReason: 'combat-rules-upgrade' }
+}
+
+/** Adds the opt-in combat-control preference without changing an existing career's controls. */
+export function migrateCoachGuidedCombat(game: unknown): GameState {
+  const legacy = structuredClone(game) as GameState
+  if (!legacy.fighter || !legacy.opponents) throw new Error('無法讀取舊生涯存檔')
+  return { ...legacy, combatMode: 'manual', rulesVersion: '0.25.0', contentVersion: '1.6.0' }
 }
 
 type FightLimitGame = Omit<GameState, 'fighter' | 'rulesVersion'> & {

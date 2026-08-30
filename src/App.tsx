@@ -12,6 +12,7 @@ import type {
   CampAction,
   CampDrillChallenge,
   CampDrillResult,
+  CombatMode,
   CriticalOption,
   FighterState,
   FightDamagePart,
@@ -91,6 +92,7 @@ export default function App() {
   }, [game, sfxEnabled])
 
   useLayoutEffect(() => {
+    if (game?.combatMode === 'coach-guided' && game.phase === 'critical') return
     if (gameScroll.current) {
       gameScroll.current.scrollTop = 0
       gameScroll.current.scrollLeft = 0
@@ -158,6 +160,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
   const [region, setRegion] = useState<Region>('taiwan')
   const [motive, setMotive] = useState<Motive>('prove')
   const [startingExperience, setStartingExperience] = useState<StartingExperience>('hobbyist')
+  const [combatMode, setCombatMode] = useState<CombatMode>('manual')
   const [seed, setSeed] = useState(randomSeed())
   const [showHall, setShowHall] = useState(false)
   const [standalonePwa, setStandalonePwa] = useState(isStandalonePwa)
@@ -195,7 +198,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
         <p className="eyebrow">MMA LIFE SIMULATOR</p>
         <h1>拳途人生 Cage Life</h1>
         <p className="hero-copy">沒有人能學會所有招式再走進鐵籠。<br />一次次取捨，會決定你成為什麼樣的拳手。</p>
-        <small className="build-version" aria-label="遊戲版本 0.2.0">v0.2.0</small>
+        <small className="build-version" aria-label="遊戲版本 0.3.0">v0.3.0</small>
       </section>
 
       {!standalonePwa && <aside className="pwa-install-prompt" role="note" aria-labelledby="pwa-install-title">
@@ -251,13 +254,26 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
           </div>
         </fieldset>
 
+        <fieldset>
+          <legend>比賽操作</legend>
+          <div className="choice-list compact combat-mode-list">
+            {([
+              ['manual', '戰術操作', '每段攻防親自選招；適合想研究位置、招式與反制的玩家。'],
+              ['coach-guided', '教練帶領', '你決定每回合戰術，教練依你的招式與場上局勢自動指揮；終結與脫困仍由你親手完成。'],
+            ] as Array<[CombatMode, string, string]>).map(([value, label, detail]) => <button key={value} type="button" className={`choice-row ${combatMode === value ? 'selected' : ''}`} onClick={() => setCombatMode(value)}>
+              <strong>{label}</strong><span>{detail}</span>
+            </button>)}
+          </div>
+          <small className="mode-choice-note">開始生涯後無法更改。</small>
+        </fieldset>
+
         <div className="seed-row">
           <label className="field-label" htmlFor="seed">世界 Seed</label>
           <div><input id="seed" value={seed} maxLength={16} onChange={(event) => setSeed(event.target.value.toUpperCase())} /><button type="button" className="icon-button" onClick={() => setSeed(randomSeed())} aria-label="重新產生 Seed">換</button></div>
           <small>遊戲版本、Seed 和選擇都相同，就會走出同一段人生。</small>
         </div>
 
-        <button className="primary-action" disabled={!seed.trim()} onClick={() => onStart(createNewRun({ name: name.trim(), region, motive, seed, startingExperience }))}>
+        <button className="primary-action" disabled={!seed.trim()} onClick={() => onStart(createNewRun({ name: name.trim(), region, motive, seed, startingExperience, combatMode }))}>
           <span>開始拳手生涯</span><small>開始後將揭曉武術背景與先天條件</small>
         </button>
         <button type="button" className="text-button" onClick={() => setShowHall((value) => !value)}>生涯殿堂 · {biographies.length}</button>
@@ -970,6 +986,7 @@ function RoundPlanView({ game, dispatch }: ViewProps) {
 }
 
 function CriticalView({ game, dispatch }: ViewProps) {
+  if (game.combatMode === 'coach-guided') return <CoachGuidedCriticalView game={game} dispatch={dispatch} />
   const prompt = game.fight!.prompt!
   const fight = game.fight!
   const [showAllMoves, setShowAllMoves] = useState(false)
@@ -1017,6 +1034,46 @@ function CriticalView({ game, dispatch }: ViewProps) {
         <div className="sheet-scroll move-sheet-list">{categoryMoves.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} compact />)}</div>
       </section>
     </div>}
+  </Screen>
+}
+
+function CoachGuidedCriticalView({ game, dispatch }: ViewProps) {
+  const fight = game.fight!
+  const prompt = fight.prompt!
+  const feedEnd = useRef<HTMLDivElement>(null)
+  const recentBeats = fight.beatHistory.slice(-4)
+  const latestBeat = recentBeats.at(-1)
+
+  useLayoutEffect(() => {
+    const feed = feedEnd.current
+    if (typeof feed?.scrollIntoView === 'function') feed.scrollIntoView({ block: 'end', behavior: 'smooth' })
+  }, [fight.round, fight.sequenceStep, recentBeats.length])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => dispatch({ type: 'RESOLVE_COACH_EXCHANGE' }), 4_000)
+    return () => window.clearTimeout(timer)
+  }, [dispatch, prompt.id])
+
+  return <Screen className="coach-guided-screen" title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · 教練帶領`}>
+    <FightArena game={game} compact showLiveLog={false} />
+    <CornerDirective fight={fight} />
+    <section className="coach-fight-feed" aria-label="即時賽況">
+      <header><span>即時賽況</span><strong>教練正在指揮</strong></header>
+      {fight.positionEntry && <article className="feed-entry position-entry-feed">
+        <span>回合戰術</span><p>{fight.positionEntry.explanation}</p>
+      </article>}
+      {recentBeats.map((beat) => <article className={`feed-entry ${beat.outcome}`} key={`${fight.round}-${beat.step}-${beat.action}`}>
+        <header><span>攻防 {beat.step}/4</span><strong>{beat.outcome === 'clean' ? '奏效' : beat.outcome === 'contested' ? '互有得失' : '遭到反制'}</strong></header>
+        <div className="feed-actions"><b>{beat.action}</b><i>對上</i><b>{beat.opponentAction}</b></div>
+        <p>{beat.summary}</p>
+        {beat.narrative.impactTags.length > 0 && <div className="impact-tags">{beat.narrative.impactTags.map((tag) => <b key={tag}>{tag}</b>)}</div>}
+      </article>)}
+      <article className="feed-entry pending" aria-live="polite">
+        <span>下一段攻防</span><p>{prompt.description} 教練正根據你已學會的招式、傷勢與對手動作選擇應對。</p>
+        <small>{latestBeat ? '賽況更新後會自動繼續。' : '開場局勢已就位，賽況即將開始。'}</small>
+      </article>
+      <div ref={feedEnd} />
+    </section>
   </Screen>
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } from '../src/game/content'
 import { FIGHT_INTENTS, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
 import { advance, bodyMatchupFor, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, generateOffers, getAnthropometrics, getTechniqueAffinity, leagueRankingAfterWin, mirrorPosition, offerRefreshCost, opponentBodyFor, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
-import { migrateBodyMatchupStats, migrateCareerEndings, migrateCompetitiveRatingBreadth, migrateFastTrackMatchmaking, migrateLeagueRankings, migrateMatchmakingCredibility, migrateMoveLearningPacing, migratePostFoundationMoveMilestones, migrateRankingCredibility, migrateRemovedSideControl, migrateTechniqueTrainingPacing, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, migrateXpBasedMoveUnlocks, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
+import { migrateBodyMatchupStats, migrateCareerEndings, migrateCoachGuidedCombat, migrateCompetitiveRatingBreadth, migrateFastTrackMatchmaking, migrateLeagueRankings, migrateMatchmakingCredibility, migrateMoveLearningPacing, migratePostFoundationMoveMilestones, migrateRankingCredibility, migrateRemovedSideControl, migrateTechniqueTrainingPacing, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, migrateXpBasedMoveUnlocks, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
 import { EARNED_TRAITS, FOUNDATION_MOVE_IDS, NORMIE_DEFAULT_MOVE_IDS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, movesForBranch, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
 import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, Position } from '../src/game/types'
 
@@ -160,6 +160,27 @@ describe('拳途人生模擬核心', () => {
     expect(Object.values(hobbyist.fighter.skills).filter((skill) => skillLevel(skill.xp) === 1)).toHaveLength(2)
     expect(semiPro.stage).toBe('regional')
     expect(Object.values(semiPro.fighter.skills).map((skill) => skillLevel(skill.xp)).sort()).toEqual([1, 1, 1, 2, 3])
+  })
+
+  it('教練帶領會保留回合戰術並自動選擇目前最高順位的合法招式', () => {
+    let state = reachFirstRoundPlan(createNewRun({ ...input, seed: 'COACH-GUIDED', combatMode: 'coach-guided' }))
+    expect(state.combatMode).toBe('coach-guided')
+    state = apply(state, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const expected = state.fight!.prompt!.allOptions[0]
+    state = apply(state, { type: 'RESOLVE_COACH_EXCHANGE' })
+    expect(state.fight!.beatHistory.at(-1)?.action).toBe(expected.executionName)
+    expect(state.fight!.beatHistory.at(-1)?.action).not.toBeUndefined()
+  })
+
+  it('手動戰術不會接受教練自動出招，舊生涯遷移後維持手動模式', () => {
+    let manual = reachFirstRoundPlan(createNewRun({ ...input, seed: 'MANUAL-CONTROL' }))
+    manual = apply(manual, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    const unchanged = apply(manual, { type: 'RESOLVE_COACH_EXCHANGE' })
+    expect(unchanged).toEqual(manual)
+
+    const migrated = migrateCoachGuidedCombat(manual)
+    expect(migrated.combatMode).toBe('manual')
+    expect(migrated.rulesVersion).toBe('0.25.0')
   })
 
   it('每位拳手依 Seed 出生一至三項特質，且同 Seed 完全重現', () => {

@@ -204,7 +204,7 @@ describe('生涯重置', () => {
   it('拳手建立頁顯示目前遊戲版本', async () => {
     storage.loadGame.mockResolvedValue({})
     render(<App />)
-    expect(await screen.findByLabelText('遊戲版本 0.2.0')).toHaveTextContent('v0.2.0')
+    expect(await screen.findByLabelText('遊戲版本 0.3.0')).toHaveTextContent('v0.3.0')
   })
 
   it('以 PWA 獨立模式開啟時不顯示安裝提示', async () => {
@@ -773,6 +773,19 @@ describe('生涯重置', () => {
     expect(dialog).toHaveTextContent('對手先取得主動位置')
     fireEvent.click(screen.getByRole('button', { name: '明白，開始攻防' }))
     expect(screen.queryByRole('dialog', { name: '你怎麼來到這個位置？' })).not.toBeInTheDocument()
+  })
+
+  it('教練帶領以可閱讀的即時賽況取代招式選單與落點對話框', async () => {
+    const game = gameAtCounteredTakedownEntry()
+    game.combatMode = 'coach-guided'
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByLabelText('即時賽況')).toHaveTextContent('教練正在指揮')
+    expect(screen.getByText('回合戰術')).toBeInTheDocument()
+    expect(screen.getByText(/後撤髖部避開切入/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '你怎麼來到這個位置？' })).not.toBeInTheDocument()
+    expect(screen.queryByText('關鍵選擇')).not.toBeInTheDocument()
   })
 
   it.each([

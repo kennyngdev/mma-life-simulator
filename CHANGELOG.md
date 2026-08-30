@@ -6,11 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-30
+
 ### Added
 
 - Made recorded knockdowns explicit during a fight and in its result summary, including the current career progress toward `擊倒嗅覺`.
+- Added a character-creation-only `教練帶領` combat mode: players choose round plans and corner adjustments while the coach uses legal learned moves automatically; TKO and submission opportunities and threats remain playable.
 
 ### Changed
+
+- Updated the Threads promotion specification so every original post requires an accurate topic tag and a current visual demonstrating the discussed game change or player moment.
+- Reworked coach-guided fights into a readable, auto-advancing live feed that preserves position-entry and exchange causality without move-selection taps.
 
 - Halved the TKO/KO strike timing window so the highlighted hit bar matches the intended finish difficulty.
 - Kept master-level skills training past 1,500 XP for further 175-XP move milestones, while capping combat rating at the existing 96. Same-branch camp sessions now retain 85% and 70% XP on the second and third session, and switching branches no longer incurs the repeat penalty.

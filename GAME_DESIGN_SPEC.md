@@ -38,7 +38,7 @@ reveal a particular fighter
 → choose an opponent and the risk to accept
 → spend three camp slots preparing
 → resolve a life event
-→ choose a fight plan and position-specific actions
+→ choose a fight plan and either position-specific actions or coach-guided exchanges
 → persist damage, relationships, evidence, moves, traits, and history
 → face the next career question or retire into a biography
 ```
@@ -217,6 +217,12 @@ Trait activation must be causally legible in fight choices, narration, or result
 
 Combat is position-based. The player selects a round plan, learns why the opening position occurred, and then chooses legal learned or emergency moves under bounded uncertainty. Important actions can change damage, stamina, control, openings, position, finish pressure, later availability, and the opponent's response.
 
+### 6.1 Combat control modes — Accepted
+
+Character creation offers two permanent per-career combat controls. **戰術操作** preserves position-specific move choice. **教練帶領** keeps opponent selection, camp choices, round plans, and between-round corner adjustments under player control, while the coach selects the highest-ranked legal learned or emergency move for each exchange using the same contextual combat scoring as the manual option list. It is not a separate combat ruleset: learned moves, injuries, stamina, traits, scouting, openings, adaptation, positions, and outcome formulas remain identical.
+
+Coach-guided exchanges appear as a readable, chronological live feed that advances automatically rather than requesting empty confirmation taps. Position-entry causality remains visible in that feed. Both player finish opportunities and opponent finish threats still interrupt for the existing playable TKO/submission minigames. Existing careers migrate to **戰術操作** so no active player loses direct control.
+
 The ground-position chain intentionally omits side control. Guard passes progress from defensive-guard top directly to mount, and failed bottom submissions may concede mount defense. Do not restore side-control positions or side-control-only attacks, submissions, transitions, escapes, visuals, or progression rewards without a new explicit decision.
 
 Preserve these constraints:
@@ -308,7 +314,7 @@ Gameplay changes should preserve or explicitly revise these tests:
 - Offer, standings, promotion, accessible-label, and 320 px UI surfaces expose league standing without rendering a champion as a number.
 - Legacy active careers migrate to World, old global ranks map with `ceil(oldRank × 15 / 99)`, current records and title history are preserved where possible, and unsigned offers are rebuilt deterministically.
 - Seeded height, reach, natural weight, and frame persist for each opponent; range, pressure, takedown, and clinch outcomes receive only the documented small body-matchup edges, while displayed division remains non-mechanical.
-- Existing `0.12.0 / 1.5.0`, `0.12.1 / 1.5.1`, `0.13.0 / 1.6.0`, `0.14.0 / 1.6.0`, `0.15.0 / 1.6.0`, `0.16.0 / 1.6.0`, `0.17.0 / 1.6.0`, `0.18.0 / 1.6.0`, `0.19.0 / 1.6.0`, `0.20.0 / 1.6.0`, `0.21.0 / 1.6.0`, `0.22.0 / 1.6.0`, and `0.23.0 / 1.6.0` saves deterministically backfill league standings, opponent body records, breadth-sensitive ratings, revised training and move-learning pace, fast-track cards, title eligibility, and the injury-recovery window, then load as `0.24.0 / 1.6.0` without losing an active fight or career. Unsigned offer sets can be refreshed; a signed fight is never rewritten.
+- Existing `0.12.0 / 1.5.0`, `0.12.1 / 1.5.1`, `0.13.0 / 1.6.0`, `0.14.0 / 1.6.0`, `0.15.0 / 1.6.0`, `0.16.0 / 1.6.0`, `0.17.0 / 1.6.0`, `0.18.0 / 1.6.0`, `0.19.0 / 1.6.0`, `0.20.0 / 1.6.0`, `0.21.0 / 1.6.0`, `0.22.0 / 1.6.0`, `0.23.0 / 1.6.0`, and `0.24.0 / 1.6.0` saves deterministically backfill league standings, opponent body records, breadth-sensitive ratings, revised training and move-learning pace, fast-track cards, title eligibility, the injury-recovery window, and manual combat control, then load as `0.25.0 / 1.6.0` without losing an active fight or career. Unsigned offer sets can be refreshed; a signed fight is never rewritten.
 - Fight count never triggers retirement, while age 38 and post-fight health at 10 or below do; 11–25 requires choosing the documented medical layoff or immediate voluntary retirement before the career can continue.
 - Offer, status, injury-layoff, and injury-retirement surfaces state the health rule and current relevant condition.
 - Retired practical-sparring state migrates back to a playable camp without losing a slot.
@@ -341,3 +347,4 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-29 | Accepted | A Normie begins with exactly two weak learned actions per branch—attack plus defense in boxing/kicking, defense plus escape in clinch/wrestling/ground—rather than a hidden universal toolkit. Hobbyists begin with their two trained branches' foundations; Semi-pros begin with a foundation in all five branches. |
 | 2026-08-29 | Accepted | Expand performance-earned traits using recorded fight evidence, so more careers gain distinct milestones without random post-fight loot. Add the legendary growth-only birth trait `戰鬥天才`: +12% technical XP in every branch and +1 Fight IQ from film study, with no direct combat bonus. |
 | 2026-08-29 | Accepted | Keep XP and 175-XP move milestones active after a branch reaches `大師`, while holding the level-five combat rating at 96. Ease same-branch camp repetition to 100% / 85% / 70% and do not penalize changing branches; this lets late-career fighters complete their authored move pool without reopening runaway rating growth. |
+| 2026-08-30 | Accepted | Offer permanent per-career **戰術操作** and **教練帶領** controls at character creation. Coach-guided combat retains player round plans and corner choices, uses the same legal-move and combat scoring model to choose exchanges automatically, presents those exchanges as a readable live feed, and preserves playable TKO/submission windows for both attack and defense. |

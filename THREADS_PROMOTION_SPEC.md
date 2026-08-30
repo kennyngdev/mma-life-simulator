@@ -1,8 +1,8 @@
 # 拳途人生 Cage Life — Threads Promotion Specification
 
 - Status: accepted promotion baseline
-- Version: 1.0.0
-- Last updated: 2026-08-29
+- Version: 1.1.0
+- Last updated: 2026-08-30
 - Account: `@play_cagelife`
 - Primary destination: `https://playcagelife.com/`
 
@@ -132,12 +132,19 @@ Keep the opening understandable before the “more” fold. Use short paragraphs
 
 ### 7.2 Topics and discovery
 
-- Add one relevant Threads topic when the platform offers an accurate choice, prioritizing indie games, game development, MMA, browser games, or life simulation.
+- Add at least one accurate Threads topic tag to every original post, prioritizing indie games, game development, MMA, browser games, or life simulation. Do not publish an original post without a topic tag.
 - Use hashtags sparingly. A short cluster is acceptable for a launch or milestone, but tagged topics and natural language are preferred for routine posts.
 - Create original Threads-native copy. Do not mechanically copy an Instagram caption.
 - When eligible, allow useful posts to be recommended on Instagram or Facebook unless a specific post should remain Threads-only.
 
-### 7.3 Link policy
+### 7.3 Visual proof requirement
+
+- Attach at least one current game screenshot, short clip, or other game visual to every original Threads post.
+- The media must show the specific feature, screen, change, or player situation discussed in the post. For an update post, favor a before/after pair or a screenshot of the changed result; do not attach generic art as a substitute for proof.
+- Capture media from the current live build whenever possible. If a change cannot yet be shown in the live build, label the visual as in development and state that it is not live.
+- Write the post text so readers know what to look for in the attached media. Use an accessible crop and ensure Traditional-Chinese UI text remains legible on a phone.
+
+### 7.4 Link policy
 
 - Keep `https://playcagelife.com/` in the profile links and bio.
 - Include the direct game link in playable-build, launch, major-update, and explicit playtest-recruitment posts.
@@ -307,7 +314,7 @@ Change one main variable at a time—hook, format, topic, CTA, or posting time�
 2. Read unresolved player feedback and current development priorities.
 3. Choose four posts across at least three content pillars.
 4. Draft each post with one primary goal and one primary CTA.
-5. Prepare accurate screenshots or clips from the current live build.
+5. Prepare accurate screenshots or clips from the current live build, attach one to every original post, and add an accurate Threads topic tag.
 6. Schedule where useful, leaving room for timely conversation.
 7. Engage with replies and relevant community discussions.
 8. Categorize feedback and route it to the appropriate design or implementation work.
@@ -339,3 +346,4 @@ Official references:
 | 2026-08-29 | Accepted | Publish four original posts per baseline week across playable stories, development decisions, focused feedback, design discussion, and project personality. |
 | 2026-08-29 | Accepted | Use `playcagelife.com` as the only promoted game URL and disclose that the game remains in development. |
 | 2026-08-29 | Accepted | Treat replies and community participation as a core distribution channel; prohibit spam, cold promotional DMs, artificial followers, and mass-follow tactics. |
+| 2026-08-30 | Accepted | Every original Threads post must include an accurate Threads topic tag and a current visual that directly demonstrates the post's discussed game change or player moment. |

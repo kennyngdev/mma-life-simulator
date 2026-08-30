@@ -22,6 +22,7 @@ export interface LeagueRecord {
 }
 export type Branch = 'boxing' | 'kicking' | 'clinch' | 'wrestling' | 'ground'
 export type StartingExperience = 'normie' | 'hobbyist' | 'semi-pro'
+export type CombatMode = 'manual' | 'coach-guided'
 export type SkillLevel = 0 | 1 | 2 | 3 | 4 | 5
 export type TraitRarity = 'common' | 'uncommon' | 'rare' | 'legendary'
 export type MindStat = 'fightIQ' | 'composure'
@@ -687,6 +688,8 @@ export interface GameState {
   saveVersion: number
   rulesVersion: string
   contentVersion: string
+  /** Chosen at character creation; coach-guided keeps round plans but automates legal moves. */
+  combatMode: CombatMode
   seed: string
   phase: GamePhase
   stage: Stage
@@ -736,6 +739,7 @@ export type GameCommand =
   | { type: 'SET_ROUND_PLAN'; plan: RoundPlan }
   | { type: 'ACK_POSITION_ENTRY' }
   | { type: 'RESOLVE_CRITICAL'; optionId: string }
+  | { type: 'RESOLVE_COACH_EXCHANGE' }
   | { type: 'RESOLVE_FINISH_MINIGAME'; result: FinishMinigameResult }
   | { type: 'CONTINUE_ROUND' }
   | { type: 'SET_CORNER_ADJUSTMENT'; adjustment: CornerAdjustment }
@@ -754,6 +758,7 @@ export interface NewRunInput {
   motive: Motive
   seed: string
   startingExperience?: StartingExperience
+  combatMode?: CombatMode
 }
 
 export interface SaveEnvelope {

@@ -418,7 +418,7 @@ export function createNewRun(input: NewRunInput): GameState {
   const offerResult = generateOffers(fighter, generated.opponents, rng)
   rng = offerResult.rng
   return {
-    saveVersion: 15, rulesVersion: '0.24.0', contentVersion: '1.6.0', seed: input.seed.trim().toUpperCase(),
+    saveVersion: 15, rulesVersion: '0.25.0', contentVersion: '1.6.0', combatMode: input.combatMode ?? 'manual', seed: input.seed.trim().toUpperCase(),
     phase: 'reveal', stage: initialLeague ?? 'grassroots', fighter, rng, opponents: generated.opponents, offers: offerResult.offers,
     offerRefreshUsed: false, campActions: [], campDrillHistory: [], scouting: 0,
   }
@@ -2041,6 +2041,13 @@ function resolveCritical(state: GameState, optionId: string): GameState {
   return advanceFightSequence({ ...state, rng, fighter, fight })
 }
 
+/** Resolves the coach's highest-ranked legal move without exposing move selection. */
+function resolveCoachExchange(state: GameState): GameState {
+  if (state.combatMode !== 'coach-guided' || state.phase !== 'critical' || !state.fight?.prompt) return state
+  const option = state.fight.prompt.allOptions[0]
+  return option ? resolveCritical(state, option.id) : state
+}
+
 function buildNarrativeBeat(
   opponentName: string, executionId: string, executionName: string, opponentExecutionName: string, outcome: FightOutcome,
   positionBefore: Position, positionAfter: Position, created: OpeningKey[], consumed: OpeningKey[], category: FightMoveDefinition['category'], matchup: TacticalMatchup, impactTags: string[], cornerNarrative = '', colorCommentary = '',
@@ -2770,6 +2777,7 @@ export function advance(state: GameState, command: GameCommand): TransitionResul
     next = { ...state, fight: { ...state.fight, positionEntry: undefined } }
   }
   else if (command.type === 'RESOLVE_CRITICAL') next = resolveCritical(state, command.optionId)
+  else if (command.type === 'RESOLVE_COACH_EXCHANGE') next = resolveCoachExchange(state)
   else if (command.type === 'RESOLVE_FINISH_MINIGAME') next = resolveFinishMinigame(state, command.result)
   else if (command.type === 'SET_CORNER_ADJUSTMENT') next = setCornerAdjustment(state, command.adjustment)
   else if (command.type === 'CONTINUE_ROUND') next = continueRound(state)
