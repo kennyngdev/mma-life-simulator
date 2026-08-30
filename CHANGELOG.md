@@ -6,17 +6,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-08-30
-
-### Fixed
-
-- Cleared the coach-guided live report at each round bell while retaining the complete final fight report, and removed document-level scroll resets that could briefly flash a black lower viewport on mobile.
-- Replaced the vague training “milestone” label with an explicit XP-to-move explanation: the first 100 XP grants three basics, then every additional 150 XP offers up to four moves and teaches one chosen move.
-
-### Changed
-
-- Reduced the post-foundation move-selection interval from 175 XP to 150 XP while keeping the first 100-XP, three-move foundation unchanged.
-
 ## [0.3.0] - 2026-08-30
 
 ### Added
@@ -26,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
+- Reduced the post-foundation move-selection interval from 175 XP to 150 XP while keeping the first 100-XP, three-move foundation unchanged.
 - Updated the Threads promotion specification so every original post requires an accurate topic tag and a current visual demonstrating the discussed game change or player moment.
 - Reworked coach-guided fights into a readable, auto-advancing live feed that preserves position-entry and exchange causality without move-selection taps.
 
@@ -33,6 +23,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Kept master-level skills training past 1,500 XP for further 175-XP move milestones, while capping combat rating at the existing 96. Same-branch camp sessions now retain 85% and 70% XP on the second and third session, and switching branches no longer incurs the repeat penalty.
 - Replaced the former 25-health instant injury retirement with an 11–25 health recovery decision: take a one-year medical layoff that heals the weakest part by 18, or retire immediately; only 10 or below now ends a career immediately.
 - Expanded retirement biographies to include every significant career event rather than stopping after the first four.
+
+### Fixed
+
+- Cleared the coach-guided live report at each round bell while retaining the complete final fight report, and removed document-level scroll resets that could briefly flash a black lower viewport on mobile.
+- Replaced the vague training “milestone” label with an explicit XP-to-move explanation: the first 100 XP grants three basics, then every additional 150 XP offers up to four moves and teaches one chosen move.
 
 ## [0.2.0] - 2026-08-29
 
