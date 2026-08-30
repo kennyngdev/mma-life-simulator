@@ -977,11 +977,21 @@ fieldset { margin: 22px 0 0; padding: 0; border: 0; }
 .language-switch button {
   min-width: 44px;
   min-height: 44px;
+  padding: 0 12px;
+  appearance: none;
+  border: 1px solid var(--line-bright);
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--surface);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .language-switch button[aria-pressed='true'] {
   border-color: var(--accent, #e45c3b);
   color: var(--accent, #e45c3b);
+  background: rgb(226 83 53 / .12);
 }
 
 .language-switch.compact {

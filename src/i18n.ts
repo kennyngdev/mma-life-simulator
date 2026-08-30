@@ -100,7 +100,7 @@ const en: Record<TranslationKey, string> = {
   'nav.insight': 'Technical insight',
   'start.noSave': 'No career started yet',
   'locale.label': 'Language',
-  'locale.zh-Hant': '繁體中文',
+  'locale.zh-Hant': 'Traditional Chinese',
   'locale.en': 'English',
   'loading': 'Preparing the gloves and career records…',
   'save.resetNotice': 'The combat system has been rebuilt and this old career cannot be converted safely. Hall of Fame biographies remain available.',
@@ -196,6 +196,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const intl = useMemo(() => createIntl({ locale, messages: translationCatalogs[locale] }, cache), [locale])
   const setLocale = useCallback((next: Locale) => {
     localStorage.setItem(LOCALE_STORAGE_KEY, next)
+    const url = new URL(window.location.href)
+    url.searchParams.set('lang', next)
+    window.history.replaceState(window.history.state, '', url)
     setLocaleState(next)
   }, [])
   const t = useCallback((id: TranslationKey, values?: Record<string, string | number>) => intl.formatMessage({ id, defaultMessage: zhHant[id] }, values), [intl])

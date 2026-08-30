@@ -312,9 +312,10 @@ function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx, relaxed
 }
 
 function LanguageSwitch({ locale, setLocale, label, compact = false }: { locale: 'zh-Hant' | 'en'; setLocale: (locale: 'zh-Hant' | 'en') => void; label: string; compact?: boolean }) {
+  const { t } = useI18n()
   return <div className={`language-switch ${compact ? 'compact' : ''}`} role="group" aria-label={label}>
-    <button type="button" aria-pressed={locale === 'zh-Hant'} onClick={() => setLocale('zh-Hant')}>繁中</button>
-    <button type="button" aria-pressed={locale === 'en'} onClick={() => setLocale('en')}>EN</button>
+    <button type="button" aria-label={t('locale.zh-Hant')} aria-pressed={locale === 'zh-Hant'} onClick={() => setLocale('zh-Hant')}><span data-i18n-native>繁中</span></button>
+    <button type="button" aria-label={t('locale.en')} aria-pressed={locale === 'en'} onClick={() => setLocale('en')}><span data-i18n-native>EN</span></button>
   </div>
 }
 

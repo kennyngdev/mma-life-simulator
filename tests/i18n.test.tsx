@@ -30,7 +30,18 @@ describe('i18n runtime', () => {
     act(() => result.current.setLocale('en'))
     expect(result.current.t('start.begin')).toBe('Begin fighter career')
     expect(localStorage.getItem('cage-life:locale:v1')).toBe('en')
+    expect(window.location.search).toBe('?lang=en')
     expect(document.documentElement.lang).toBe('en')
     expect(document.title).toBe('Cage Life — MMA Career Simulator')
+  })
+
+  it('replaces an explicit URL override when the player switches language', () => {
+    window.history.replaceState({}, '', '/?lang=en')
+    const wrapper = ({ children }: { children: ReactNode }) => <I18nProvider>{children}</I18nProvider>
+    const { result } = renderHook(() => useI18n(), { wrapper })
+    act(() => result.current.setLocale('zh-Hant'))
+    expect(result.current.locale).toBe('zh-Hant')
+    expect(window.location.search).toBe('?lang=zh-Hant')
+    expect(localStorage.getItem('cage-life:locale:v1')).toBe('zh-Hant')
   })
 })

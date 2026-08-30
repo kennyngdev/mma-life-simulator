@@ -12,6 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 
+- Kept both language-switch labels visible on iOS and synchronized manual language changes with the shareable `lang` URL so an old override cannot undo the player's choice.
 - Derived the character-creation version label from the package release version so the live UI cannot retain a stale number after deployment.
 
 ## [0.3.1] - 2026-08-30

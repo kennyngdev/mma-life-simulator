@@ -202,7 +202,12 @@ describe('生涯重置', () => {
     render(<I18nProvider><LocalizedSurface><App /></LocalizedSurface></I18nProvider>)
 
     expect(await screen.findByRole('heading', { name: 'Cage Life' })).toBeInTheDocument()
-    await waitFor(() => expect(document.body.textContent).not.toMatch(/[\u3400-\u9fff]/))
+    await waitFor(() => {
+      const surface = document.body.cloneNode(true) as HTMLElement
+      surface.querySelectorAll('[data-i18n-native]').forEach((node) => node.remove())
+      expect(surface.textContent).not.toMatch(/[\u3400-\u9fff]/)
+    })
+    expect(screen.getByRole('button', { name: 'Traditional Chinese' })).toHaveTextContent('繁中')
     expect(screen.getByRole('button', { name: /Hong Kong.*International gateway/ })).toBeInTheDocument()
   })
 
