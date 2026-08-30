@@ -849,6 +849,7 @@ function EmptyGrowthAdvance({ dispatch }: { dispatch: (command: GameCommand) => 
 }
 
 function PreFightView({ game, dispatch }: ViewProps) {
+  const { locale } = useI18n()
   const opponent = getOpponent(game)!
   const offer = game.offers.find((item) => item.id === game.selectedOfferId)!
   const coach = game.fighter.relationships.find((relationship) => relationship.role === 'coach')
@@ -865,22 +866,24 @@ function PreFightView({ game, dispatch }: ViewProps) {
   const opponentStanding = opponent.standing === 'champion'
     ? `${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
     : opponent.rank !== undefined ? `排名 #${opponent.rank}` : '未排名'
+  const playerFrame = localizedFrameLabel(game.fighter.frame, locale)
+  const opponentFrame = localizedFrameLabel(opponent.frame, locale)
   return <Screen title="籠門之前" kicker={offer.promotion}>
     <div className="tale-of-tape">
-      <FighterFace label="你" name={game.fighter.name} value={playerRating} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} body={`體重 ${game.fighter.naturalWeight} kg · ${game.fighter.frame}`} />
+      <FighterFace label="你" name={game.fighter.name} value={playerRating} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} body={locale === 'en' ? `Weight ${game.fighter.naturalWeight} kg · ${playerFrame}` : `體重 ${game.fighter.naturalWeight} kg · ${game.fighter.frame}`} />
       <span className="versus">VS</span>
-      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={opponentRating} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} body={`骨架 ${opponent.frame}`} opponent />
+      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={opponentRating} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} body={locale === 'en' ? `Frame · ${opponentFrame}` : `骨架 ${opponent.frame}`} opponent />
     </div>
     <div className="briefing">
       <Metric label="比賽" value={offer.titleFight ? '五回合冠軍戰' : '三回合'} note={`${opponentStanding} · ${offer.riskLabel}`} />
       <Metric label="比賽量級" value={game.fighter.weightClass} note={`準備度 ${game.fighter.readiness}`} />
       <Metric label="情報" value={game.scouting >= 50 ? '充分' : game.scouting >= 25 ? '基本' : '有限'} note={`最強 ${BRANCH_META[strength].name}／最弱 ${BRANCH_META[opponent.weakness].name}`} />
       <Metric label="技術對位" value={`${BRANCH_META[playerStrength].name} 對 ${BRANCH_META[opponent.weakness].name}`} note={`你的弱項 ${BRANCH_META[playerWeakness].name}／他最強 ${BRANCH_META[strength].name}`} />
-      <Metric label="體格對位" value={bodyMatchupLabel(bodyMatchup)} note={`你 ${game.fighter.frame}／對手 ${opponent.frame} · 身高差 ${signedDelta(bodyMatchup.heightDelta)} cm · 臂展差 ${signedDelta(bodyMatchup.reachDelta)} cm · 只帶來小幅影響`} />
+      <Metric label="體格對位" value={locale === 'en' ? bodyMatchupLabelEnglish(bodyMatchup) : bodyMatchupLabel(bodyMatchup)} note={locale === 'en' ? `You: ${playerFrame} · Opponent: ${opponentFrame} · Height ${signedDelta(bodyMatchup.heightDelta)} cm · Reach ${signedDelta(bodyMatchup.reachDelta)} cm · Minor effect only` : `你 ${game.fighter.frame}／對手 ${opponent.frame} · 身高差 ${signedDelta(bodyMatchup.heightDelta)} cm · 臂展差 ${signedDelta(bodyMatchup.reachDelta)} cm · 只帶來小幅影響`} />
       <Metric label="賽前評估" value={forecast >= 5 ? '你略佔優勢' : forecast <= -5 ? '對手略佔優勢' : '旗鼓相當'} note={`競技評級 ${playerRating} vs ${opponentRating} · 狀態 ${signedDelta(readinessForecast)} · 情報 +${scoutingForecast} · 體格 ${signedDelta(bodyForecast)}`} />
     </div>
     <aside className="coach-note compact">
-      <span className="coach-avatar">教</span>
+      <span className="coach-avatar" aria-hidden="true" data-i18n-native>C</span>
       <div><strong>{coach?.name ?? '教練'}最後提醒</strong><p>「{prefightCoachRecommendation(game.fighter, opponent, offer.riskLabel, playerRating, opponentRating, forecast, readinessForecast, scoutingForecast, bodyMatchup)}」</p></div>
     </aside>
     <p className="memory-callout">畫面只會顯示大致勝算。傷勢、招式熟練度、場上位置和對手反應都會影響結果。</p>
@@ -911,6 +914,25 @@ function bodyMatchupLabel(body: ReturnType<typeof bodyMatchupFor>): string {
   const strongest = edges.reduce((best, edge) => Math.abs(edge.value) > Math.abs(best.value) ? edge : best)
   if (Math.abs(strongest.value) < 2) return '體格接近'
   return `${strongest.label}${strongest.value > 0 ? '略有利' : '略吃虧'}`
+}
+
+function bodyMatchupLabelEnglish(body: ReturnType<typeof bodyMatchupFor>): string {
+  const edges = [
+    { label: 'range', value: body.rangeEdge },
+    { label: 'inside', value: body.insideEdge },
+    { label: 'clinch', value: body.clinchEdge },
+  ]
+  const strongest = edges.reduce((best, edge) => Math.abs(edge.value) > Math.abs(best.value) ? edge : best)
+  if (Math.abs(strongest.value) < 2) return 'Even physical matchup'
+  return `Slight ${strongest.label} ${strongest.value > 0 ? 'advantage' : 'disadvantage'}`
+}
+
+function localizedFrameLabel(frame: string, locale: 'zh-Hant' | 'en'): string {
+  if (locale === 'zh-Hant') return frame
+  if (frame === '厚實骨架') return 'Sturdy frame'
+  if (frame === '修長骨架') return 'Slender frame'
+  if (frame === '均衡骨架') return 'Balanced frame'
+  return /[\u3400-\u9fff]/u.test(frame) ? 'Frame details unavailable' : frame
 }
 
 function bodyMatchupNote(fighter: FighterState, opponent: Opponent, body: ReturnType<typeof bodyMatchupFor>): string {
@@ -1687,7 +1709,7 @@ function StatusBar({ label, value, tone }: { label: string; value: number; tone:
 }
 
 function FighterFace({ label, name, value, measurements, body, opponent = false }: { label: string; name: string; value: number; measurements: string; body: string; opponent?: boolean }) {
-  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span>{name.slice(0, 1)}</span><small>{label}</small><strong>{name}</strong><em>身高／臂展 {measurements}</em><em>{body}</em><em>競技評級 {value}</em></div>
+  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span aria-hidden="true" data-i18n-native>{opponent ? 'B' : 'R'}</span><small>{label}</small><strong>{name}</strong><em>身高／臂展 {measurements}</em><em>{body}</em><em>競技評級 {value}</em></div>
 }
 
 function Metric({ label, value, note }: { label: string; value: string; note: string }) {

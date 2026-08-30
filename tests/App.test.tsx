@@ -321,6 +321,26 @@ describe('生涯重置', () => {
     expect(screen.getByText(/只帶來小幅影響/)).toBeInTheDocument()
   })
 
+  it('英文賽前畫面使用穩定角標且不顯示內部舊存檔 fallback', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = createNewRun({ ...input, seed: 'PREFIGHT-ENGLISH-UI' })
+    game.phase = 'prefight'
+    game.selectedOfferId = game.offers[0].id
+    game.fighter.frame = '厚實骨架'
+    const opponent = game.opponents.find((item) => item.id === game.offers[0].opponentId)!
+    opponent.frame = '修長骨架'
+    storage.loadGame.mockResolvedValue({ game })
+
+    const { container } = render(<I18nProvider><LocalizedSurface><App /></LocalizedSurface></I18nProvider>)
+
+    expect(await screen.findByRole('heading', { name: 'Before the cage door' })).toBeInTheDocument()
+    await waitFor(() => expect(container).not.toHaveTextContent('legacy career detail'))
+    expect([...container.querySelectorAll('.fighter-face > span')].map((node) => node.textContent)).toEqual(['R', 'B'])
+    expect(container).toHaveTextContent('You: Sturdy frame · Opponent: Slender frame')
+    expect(container.querySelector('.coach-avatar')).toHaveTextContent('C')
+    expect(container).toHaveTextContent(/Slight range advantage|Slight inside advantage|Slight clinch advantage|Even physical matchup/)
+  })
+
   it('邀約畫面公開說明沒有場數上限及因傷退役線', async () => {
     const game = createNewRun({ ...input, seed: 'VISIBLE-RETIREMENT-RULES' })
     game.phase = 'offer'

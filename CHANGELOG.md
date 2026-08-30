@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-31
+
+### Fixed
+
+- Replaced corrupted pre-fight avatar initials and internal legacy-fallback wording with stable red/blue corner badges, explicit English body-matchup terminology, and a concise safe fallback for obsolete prose.
+
 ## [0.4.1] - 2026-08-31
 
 ### Fixed

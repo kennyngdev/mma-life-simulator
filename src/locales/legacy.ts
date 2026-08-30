@@ -16,6 +16,13 @@ const manualOverrides: Record<string, string> = {
   '回合': 'round',
   '主效': 'Main effect',
   '擊倒成立': 'Knockdown scored',
+  '遠距略有利': 'Slight range advantage',
+  '遠距略吃虧': 'Slight range disadvantage',
+  '近身略有利': 'Slight inside advantage',
+  '近身略吃虧': 'Slight inside disadvantage',
+  '纏抱略有利': 'Slight clinch advantage',
+  '纏抱略吃虧': 'Slight clinch disadvantage',
+  '體格接近': 'Even physical matchup',
   '你減少主動交換，用步法和防守保存體力；{0}沒能有效切入，雙方仍在遠距對峙。': 'You reduce exchanges and use footwork and defense to preserve stamina; {0} cannot enter effectively, and the fight remains at range.',
 }
 const englishCorrections: Array<[RegExp, string]> = [
@@ -42,6 +49,7 @@ const englishCorrections: Array<[RegExp, string]> = [
   [/Land battle/gi, 'Ground game'],
   [/Throwing and Takedown/gi, 'Wrestling'],
   [/Balanced framework/gi, 'Balanced frame'],
+  [/\bSkeleton\b/gi, 'Frame'],
   [/Competition weight class/gi, 'Weight class'],
   [/new features/gi, 'new traits'],
   [/Each has its gains and losses/gi, 'Contested'],
@@ -115,8 +123,11 @@ function cleanResidualText(value: string, skip?: string): string {
     if (source.length === 1) translated = translated.replaceAll(source, replacement)
   }
   // Pre-i18n saves can contain prose that no longer exists in the authored
-  // catalog. Never leak an unreadable fragment into the English interface.
-  translated = translated.replace(/[\u3400-\u9fff]+/gu, 'legacy career detail')
+  // catalog. Remove unknown embedded fragments and use a concise fallback
+  // only when nothing translatable remains; never expose internal wording.
+  const hadResidualCjk = cjk.test(translated)
+  translated = translated.replace(/[\u3400-\u9fff]+/gu, ' ').replace(/\s+/g, ' ').trim()
+  if (!translated && hadResidualCjk) translated = 'Details unavailable in English'
   return translated
 }
 
