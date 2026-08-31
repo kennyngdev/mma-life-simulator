@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-31
+
 ### Added
 
 - Added authored emergency actions for all 19 combat positions, guaranteed background identity moves, semantic move threats and counters, and one localized exchange-factor ledger shared by odds, resolution, coaching, UI, and narration.
@@ -15,10 +17,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Added curated evidence-based retirement biographies, cryptographic career IDs, archive-safe same-seed replay groups, and controlled-comparison validation across setup and content/rules versions.
 - Added reproducible opponent aging, draws, non-ranking record bouts, deterministic retirements and in-place successors, plus up to three prioritized annual world-news items.
 - Added Playwright desktop and 320 px browser coverage as a required GitHub Pages deployment check.
-- Added an explicit five-player causal-retelling gate that must pass before the v0.5.0 build can be deployed to production.
 
 ### Changed
 
+- Removed the planned mandatory five-player pre-release gate; human playtesting remains encouraged but no longer blocks an owner-approved production release.
 - Reworked Grassroots into a fixed three-opponent trial: only defeating all three advances to Amateur, defeated opponents disappear from offers, and the screen shows persistent checklist progress.
 - Removed the repeated generic coach speech from every offer cycle; each contract now relies on its localized, opponent-specific risk, strength, and weakness verdict.
 - Rebalanced competitive rating to reward the two strongest skills, Fight IQ, and learned defensive coverage, keeping defensively literate specialists viable without enabling an untrained one-discipline champion.

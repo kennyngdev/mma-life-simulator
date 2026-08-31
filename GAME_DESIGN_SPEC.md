@@ -472,15 +472,6 @@ Gameplay changes should preserve or explicitly revise these tests:
 
 Balance simulations and automated tests are evidence, not substitutes for playtesting. A new activity must also prove that its choices change later state, that players can understand the consequence, and that it creates a next question worth caring about.
 
-### 12.1 v0.5.0 fresh-player production gate — Accepted
-
-Production deployment of v0.5.0 requires five fresh players. Across the group, all four motives must be represented; three careers use manual combat, two use coach-guided combat, and one pair replays the same seed. Each player completes at least six fights or voluntarily retires after fight five.
-
-At least four of the five players must be able to recount, without being shown the implementation checklist: their motive; one player-caused turning point; a defining person or rival; the unrealized path; one truthful semantic combat cause; and a distinct hypothesis for what they would try in another run. Any impossible matchup explanation, hidden essential action at 320 px, lost save, or biography overwrite blocks release immediately. If fewer than four players pass causal retelling, revise the career-memory and biography slice instead of adding more content.
-
-Automated tests, simulations, and developer playthroughs do not satisfy this human gate. Until the evidence above is recorded, the release may be implementation-complete but must not be pushed to production.
-Use [PLAYTEST_GATE_v0.5.0.md](PLAYTEST_GATE_v0.5.0.md) to record the five sessions and release decision without fabricating evidence.
-
 ## 13. Consolidated decision record
 
 This is a decision summary, not a transcript. Superseded implementation discussion is intentionally omitted.
@@ -521,3 +512,4 @@ This is a decision summary, not a transcript. Superseded implementation discussi
 | 2026-08-31 | Accepted | Show clean triangle chokes and guard armbars with a dedicated triangle-armbar-from-bottom sprite while preserving other submission poses, and make both attacking and defending submission minigames 15% more lenient through additional completion time only. |
 | 2026-08-31 | Accepted | Remove the repeated generic coach speech from contract selection. Preserve only localized, opponent-specific card verdicts that identify actual risk, strongest weapon, and exploitable branch. |
 | 2026-08-31 | Accepted | Keep color commentary visibly outside collapsed exchange detail in both combat modes. Make Grassroots a fixed three-opponent checklist: only distinct wins advance, defeated opponents disappear, losses/draws remain available, and existing ranked careers are not demoted. |
+| 2026-08-31 | Accepted | Remove the mandatory five-player pre-release gate for v0.5.0. Human playtesting remains valuable evidence, but an owner-approved release may proceed after the repository's automated verification and production build checks pass. |
