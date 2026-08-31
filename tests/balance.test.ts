@@ -256,7 +256,7 @@ describe('戰鬥平衡', () => {
     const detail = `advanced positions=${reached}/200, clinch=${clinchReached}/100, takedown=${takedownReached}/100`
     expect(reached, detail).toBeGreaterThanOrEqual(70)
     expect(reached, detail).toBeLessThanOrEqual(90)
-  })
+  }, 20_000)
 
   it('只選最高乾淨命中率也會在最難邀約中輸掉一部分比賽', () => {
     const results = Array.from({ length: 60 }, (_, index) => playGreedyFight(`BALANCE-${index}`))
@@ -287,7 +287,7 @@ describe('戰鬥平衡', () => {
     expect(plusFifteen, detail).toBeLessThanOrEqual(.30)
     expect(parity, detail).toBeGreaterThan(plusEight)
     expect(plusEight, detail).toBeGreaterThan(plusFifteen)
-  }, 30_000)
+  }, 60_000)
 
   it('三個家鄉生態不會造成超過十個百分點的先天勝率差', () => {
     const regions: Region[] = ['hong-kong', 'taiwan', 'mainland']

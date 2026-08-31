@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- Allowed the deterministic full-career and large balance simulations enough time to complete on slower CI runners without weakening their assertions.
+
 ## [0.5.0] - 2026-08-31
 
 ### Added

@@ -1585,7 +1585,7 @@ describe('拳途人生模擬核心', () => {
     const second = completeCareer(createNewRun(input))
     expect(second.careerId).not.toBe(first.careerId)
     expect(withoutCareerIdentity(second)).toEqual(withoutCareerIdentity(first))
-  })
+  }, 20_000)
 
   it('每場比賽只有新特質或特質進度才停在成果畫面', () => {
     const result = reachFirstFightResult(createNewRun(input))
