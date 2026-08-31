@@ -23,6 +23,8 @@ export interface LeagueRecord {
 export type Branch = 'boxing' | 'kicking' | 'clinch' | 'wrestling' | 'ground'
 export type StartingExperience = 'normie' | 'hobbyist' | 'semi-pro'
 export type CombatMode = 'manual' | 'coach-guided'
+export type GrowthDestination = 'prefight' | 'offer' | 'retirement' | 'injury-recovery' | 'league-decision'
+export type FightSettlementRoute = 'growth' | 'offer' | 'retirement' | 'injury-recovery' | 'league-decision'
 export type SkillLevel = 0 | 1 | 2 | 3 | 4 | 5
 export type TraitRarity = 'common' | 'uncommon' | 'rare' | 'legendary'
 export type MindStat = 'fightIQ' | 'composure'
@@ -53,6 +55,61 @@ export type OpeningKey =
   | 'high-guard' | 'tight-elbows' | 'weight-forward' | 'lead-leg-heavy' | 'expects-shot'
   | 'backed-to-cage' | 'underhook-control' | 'off-balance' | 'neck-exposed' | 'arm-isolated' | 'hips-flat'
 export type FightResultMethod = 'decision' | 'draw' | 'ko' | 'tko' | 'submission' | 'doctor'
+export type MotivePath = 'provider' | 'presence' | 'defiant' | 'disciplined' | 'loyalist' | 'builder' | 'spotlight' | 'craft'
+export type MotiveBeat = 'first' | 'reckoning'
+export type MotiveResolution = MotivePath | 'conflicted' | 'unresolved' | 'legacy-unknown'
+
+/**
+ * A persisted reference to authored copy. `fallback` is the exact Traditional
+ * Chinese text written into the save, so older clients and unknown message IDs
+ * remain readable without synthesizing a translation.
+ */
+export interface MessageReference {
+  fallback: string
+  messageId?: string
+  values?: Record<string, string | number>
+}
+
+export type CareerSetupSnapshot =
+  | {
+    kind: 'exact'
+    nameInput: string
+    latinNameInput?: string
+    region: Region
+    motive: Motive
+    startingExperience: StartingExperience
+    combatMode: CombatMode
+  }
+  | {
+    kind: 'legacy-partial'
+    displayedName: string
+    displayedAlias?: string
+    region: Region
+    motive?: Motive
+    startingExperience?: StartingExperience
+    combatMode?: CombatMode
+  }
+
+export interface MotiveOpportunity {
+  id: string
+  motive: Motive
+  beat: MotiveBeat
+  kind: 'sponsor-offer' | 'fast-track-offer' | 'headline-offer' | 'prepared-move-credit'
+    | 'family-recovery' | 'team-camp' | 'legacy-callback'
+  cyclesRemaining: number
+  createdAtFight: number
+  consumed: boolean
+  preparedMoveCredit?: number
+  personId?: string
+}
+
+export interface MotiveProgress {
+  motive: Motive
+  path?: MotivePath
+  completedBeats: Partial<Record<MotiveBeat, MotivePath>>
+  resolution: MotiveResolution
+  lastOpportunityId?: string
+}
 
 export type GamePhase =
   | 'reveal'
@@ -160,15 +217,30 @@ export interface Relationship {
   memories: string[]
 }
 
+export type HistoryFact =
+  | { kind: 'origin'; motive: Motive; startingExperience: StartingExperience; backgroundId?: string }
+  | { kind: 'fight'; opponentId: string; result: 'win' | 'loss' | 'draw'; method?: FightResultMethod; moveUses?: Array<{ moveId: string; uses: number }>; finishingMoveId?: string; titleRole?: FightOffer['titleRole']; close?: boolean }
+  | { kind: 'motive-choice'; eventId: string; optionId: string; motive: Motive; beat: MotiveBeat; path: MotivePath; relationshipId?: string }
+  | { kind: 'relationship-choice'; eventId: string; optionId: string; relationshipId: string; trustDelta?: number }
+  | { kind: 'promotion'; from: LeagueId; to: LeagueId }
+  | { kind: 'trait'; traitId: string }
+  | { kind: 'layoff'; healthPart: HealthPart; years: number }
+  | { kind: 'legacy'; eventId?: string; optionId?: string; relationshipId?: string }
+  | { kind: 'world-change'; newsId: string; opponentId?: string }
+  | { kind: 'retirement'; reason: 'voluntary' | 'age-limit' | 'injury' | 'legacy-unknown' }
+
 export interface HistoryEntry {
   id: string
   year: number
   age: number
   title: string
   summary: string
+  titleRef?: MessageReference
+  summaryRef?: MessageReference
   people: string[]
   importance: 1 | 2 | 3
   tags: string[]
+  fact?: HistoryFact
 }
 
 export interface RegionalIdentity {
@@ -181,6 +253,7 @@ export interface RegionProfile {
   circuit: string
   description: string
   opponentMix: string
+  opponentMixWeights: { home: number; neighbor: number; asianVisitor: number }
   economyLabel: string
   economyMultiplier: number
   currency: { symbol: string; displayRate: number; rounding: number }
@@ -223,13 +296,15 @@ export interface FighterState {
   /** @deprecated Use leagueStanding. Retained for old saves and callers. */
   ranking?: number
   reputation: number
-  promoterTrust: number
   wins: number
   losses: number
   draws: number
   unlockedNodes: string[]
   mastery: Record<string, MasteryState>
   evidence: CareerEvidence
+  moveUsage: Record<string, { uses: number; finishes: number }>
+  /** Fixed Grassroots checklist slots defeated by the player. */
+  grassrootsDefeatedSlots?: Array<1 | 2 | 3>
   relationships: Relationship[]
   history: HistoryEntry[]
 }
@@ -249,6 +324,8 @@ export interface Opponent {
   frame: string
   style: string
   league: LeagueId | 'grassroots'
+  /** Fixed trial slot; only the three authored Grassroots opponents receive one. */
+  grassrootsSlot?: 1 | 2 | 3
   standing: 'unranked' | 'ranked' | 'champion'
   /** Numeric only for ranked opponents; champions intentionally have no rank. */
   rank?: number
@@ -262,7 +339,29 @@ export interface Opponent {
   weakness: Branch
   relationship: number
   meetings: number
-  record: { wins: number; losses: number }
+  active: boolean
+  retirementAge: number
+  retiredYear?: number
+  successorOf?: string
+  successorId?: string
+  rivalMemory?: RivalMemory
+  record: { wins: number; losses: number; draws: number }
+}
+
+export interface RivalMemory {
+  lastResult: 'win' | 'loss' | 'draw'
+  lastMethod?: FightResultMethod
+  movePattern?: { moveId: string; uses: number }
+  branchPattern?: { branch: Branch; uses: number }
+  updatedFight: number
+}
+
+export interface PreparedMove {
+  moveId: string
+  fightOfferId: string
+  bonus: 6
+  used: boolean
+  source: 'camp-edge' | 'technique-focus' | 'loss-lesson' | 'motive'
 }
 
 export interface FightOffer {
@@ -275,6 +374,7 @@ export interface FightOffer {
     riskAdjustment: number
     shortNoticePremium: number
     titleBonus: number
+    motivePremium?: number
   }
   /** @deprecated Rank movement is resolved from league standings. */
   rankReward?: number
@@ -287,6 +387,9 @@ export interface FightOffer {
   shortNotice: boolean
   venueRegion?: Region
   opponentIsLocal?: boolean
+  motiveOpportunityId?: string
+  victoryReputationBonus?: number
+  purseMultiplierReason?: 'motive-spotlight' | 'sponsor'
 }
 
 export type RiskLabel = '低風險' | '中度風險' | '高風險' | '極高風險' | '絕望'
@@ -298,6 +401,10 @@ export interface EconomyEffects {
   readiness?: number
   health?: number
   reputation?: number
+  fightIQ?: number
+  scouting?: number
+  preparationCredits?: number
+  relationshipTrust?: Partial<Record<'coach' | 'family' | 'partner', number>>
 }
 
 export interface CampDrillPrompt {
@@ -321,6 +428,7 @@ export interface CampDrillBase {
   relaxedTiming?: boolean
   /** Challenges are optional attempts to improve on the already-bankable standard result. */
   edge?: boolean
+  focusMoveId?: string
 }
 
 export interface LegacyCampDrillChallenge extends CampDrillBase {
@@ -406,6 +514,7 @@ export interface CriticalOption {
   matchup: TacticalMatchup
   matchupReason: string
   identityTags: string[]
+  factors: ExchangeFactor[]
 }
 
 export interface ExchangeOdds {
@@ -424,6 +533,36 @@ export interface OpponentIntent {
   effectSummary: string
   exploitsOpenings: OpeningKey[]
   threatLevel: ThreatLevel
+  factors?: ExchangeFactor[]
+}
+
+export type CombatThreatTag =
+  | 'punches' | 'low-kicks' | 'committed-kicks' | 'pressure' | 'takedowns'
+  | 'clinch-entries' | 'cage-pressure' | 'ground-strikes' | 'submissions'
+  | 'position-advances' | 'escapes'
+
+export type ExchangeFactorTarget = 'chance' | 'damage' | 'stamina' | 'control' | 'finish-pressure' | 'recovery' | 'selection'
+export type ExchangeFactorSource =
+  | 'base' | 'technique' | 'mind' | 'plan' | 'move' | 'position' | 'opening'
+  | 'adaptation' | 'trait' | 'body' | 'damage' | 'stamina' | 'camp'
+  | 'prepared-move' | 'matchup' | 'readiness' | 'health' | 'scouting'
+  | 'corner' | 'rating' | 'stage'
+export type ExchangeFactorSide = 'player' | 'opponent' | 'both'
+
+export interface ExchangeFactor {
+  id: string
+  target: ExchangeFactorTarget
+  source: ExchangeFactorSource
+  /** The actor whose target value is modified, regardless of who caused it. */
+  side: ExchangeFactorSide
+  magnitude: number
+  unit: 'points' | 'percent'
+  reasonId: string
+  localizedReason: { 'zh-Hant': string; en: string }
+  /** Compatibility display text; new callers should render localizedReason. */
+  label?: string
+  detail?: string
+  threatTags?: CombatThreatTag[]
 }
 
 export interface DamageEvent {
@@ -464,6 +603,9 @@ export interface FightMoveDefinition {
   submission?: boolean
   strikeKind?: StrikeKind
   commitment?: StrikeCommitment
+  emergency?: boolean
+  threatTags: CombatThreatTag[]
+  counterTags: CombatThreatTag[]
 }
 
 export interface ExecutionVariant {
@@ -495,6 +637,7 @@ export interface NarrativeBeat {
   openingsConsumed: OpeningKey[]
   impactTags: string[]
   colorCommentary?: string
+  factors?: ExchangeFactor[]
 }
 
 export interface PositionEntry {
@@ -536,6 +679,9 @@ export interface FightBeat {
   summary: string
   narrative: NarrativeBeat
   damageEvents: DamageEvent[]
+  moveId?: string
+  opponentMoveId?: string
+  factors?: ExchangeFactor[]
   finishWindow?: FinishKind
 }
 
@@ -578,6 +724,7 @@ export interface RoundScore {
 }
 
 export interface FightState {
+  rulesVersion: string
   offer: FightOffer
   opponentId: string
   round: number
@@ -605,6 +752,7 @@ export interface FightState {
   opponentOpenings: TimedOpening[]
   opponentAdaptation: Record<string, number>
   opponentMoveHistory: Record<string, number>
+  playerMoveHistory: Record<string, number>
   playerDamageByPart: { head: number; body: number; leg: number }
   opponentDamageByPart: { head: number; body: number; leg: number }
   playerControl: number
@@ -613,6 +761,8 @@ export interface FightState {
   cornerAdjustment?: CornerAdjustment
   cornerTarget?: FightDamagePart
   techniqueTriggersThisRound: string[]
+  traitActivationsThisRound: { player: string[]; opponent: string[] }
+  exchangeFactors?: ExchangeFactor[]
   positionEntry?: PositionEntry
   /** One bounded follow-up after earning a layered advantage or a final-beat dominant position. */
   positionPayoff?: PositionPayoff
@@ -632,23 +782,35 @@ export interface FightState {
   finishingMoveId?: string
   finishingStrikeKind?: StrikeKind
   openingRoundLost?: boolean
+  settled?: boolean
 }
 
 export interface LifeEvent {
   id: string
   title: string
   description: string
+  titleRef?: MessageReference
+  descriptionRef?: MessageReference
   personId: string
   region?: Region
+  factKind?: 'motive-choice' | 'relationship-choice' | 'legacy' | 'layoff'
+  motiveOpportunity?: MotiveOpportunity
   options: Array<{
     id: string
     label: string
     detail: string
     outcome: string
+    labelRef?: MessageReference
+    detailRef?: MessageReference
+    outcomeRef?: MessageReference
     effects: EconomyEffects
     minimumMoney?: number
     historyTags?: string[]
     importance?: 1 | 2 | 3
+    motivePath?: MotivePath
+    motiveBeat?: MotiveBeat
+    relationshipId?: string
+    opportunity?: MotiveOpportunity
   }>
 }
 
@@ -657,10 +819,48 @@ export interface LifeEventResult {
   optionLabel: string
   personName: string
   story: string
+  eventTitleRef?: MessageReference
+  optionLabelRef?: MessageReference
+  storyRef?: MessageReference
   effects: EconomyEffects
+  healthPart?: HealthPart
+  preparedMoveId?: string
+}
+
+export type BiographyBeatKind = 'origin' | 'motive' | 'fight' | 'rivalry' | 'relationship' | 'trait' | 'setback' | 'legacy' | 'world' | 'ending'
+
+export interface BiographyBeat {
+  id: string
+  kind: BiographyBeatKind
+  year: number
+  age: number
+  title: string
+  summary: string
+  titleRef?: MessageReference
+  summaryRef?: MessageReference
+  people: string[]
+  sourceHistoryIds: string[]
+}
+
+export interface BiographyOutcome {
+  record: { wins: number; losses: number; draws: number }
+  retirementReason: 'voluntary' | 'age-limit' | 'injury' | 'legacy-unknown'
+  motiveResolution: MotiveResolution
+  unrealizedPath?: MotivePath
+  styleBranches: Branch[]
+  signatureMoveIds: string[]
+  traitIds: string[]
+  leagueTitles: LeagueId[]
+  reputationBandId: string
+  financialLegacy?: string
+  retirementCause: string
+  retirementCauseRef?: MessageReference
+  definingRelationshipId?: string
+  definingRivalId?: string
 }
 
 export interface Biography {
+  schemaVersion: 2
   id: string
   seed: string
   name: string
@@ -670,6 +870,8 @@ export interface Biography {
   record: string
   title: string
   summary: string
+  titleRef?: MessageReference
+  summaryRef?: MessageReference
   turningPoints: HistoryEntry[]
   unlockedNodes: string[]
   startingExperience: StartingExperience
@@ -678,8 +880,69 @@ export interface Biography {
   traits: OwnedTrait[]
   leagueTitles?: LeagueId[]
   financialLegacy?: string
+  financialLegacyRef?: MessageReference
   retiredAt: number
   createdAt: number
+  setup: CareerSetupSnapshot
+  rulesVersion: string
+  contentVersion: string
+  replayGroupId: string
+  replayOfCareerId?: string
+  curatedBeats: BiographyBeat[]
+  outcome: BiographyOutcome
+}
+
+export type WorldNewsKind = 'retirement' | 'succession' | 'title-change' | 'ranking-change' | 'comeback' | 'activity'
+
+export interface WorldNewsEntry {
+  id: string
+  year: number
+  kind: WorldNewsKind
+  opponentId?: string
+  text: string
+  textRef?: MessageReference
+}
+
+export interface CareerSnapshot {
+  stage: Stage
+  leagueStanding?: LeagueStanding
+  age: number
+  year: number
+  readiness: number
+  wins: number
+  losses: number
+  draws: number
+  money: number
+  reputation: number
+  health: Record<HealthPart, number>
+  relationshipTrust: Record<string, number>
+  traitIds: string[]
+}
+
+export interface CareerChanges {
+  route: GrowthDestination
+  before: CareerSnapshot
+  after: CareerSnapshot
+  purse: number
+  worldNews: WorldNewsEntry[]
+  relationshipMemories: Array<{ relationshipId: string; memory: string; memoryRef?: MessageReference }>
+  traitEvidence: string[]
+  /** Localized factor reasons retained for locale-correct post-fight evidence. */
+  traitEvidenceLocalized?: ExchangeFactor['localizedReason'][]
+}
+
+export interface RebuildLesson {
+  sourceFightId: string
+  sourceOpponentId: string
+  factorSource: ExchangeFactorSource
+  factorTarget: ExchangeFactorTarget
+  magnitude: number
+  reasonId: string
+  reason: string
+  /** Locale-safe reason retained alongside the Traditional-Chinese fallback. */
+  localizedReason?: ExchangeFactor['localizedReason']
+  recommendedThreatTag?: CombatThreatTag
+  recommendedMoveId?: string
 }
 
 export interface RngStreams {
@@ -696,6 +959,10 @@ export interface GameState {
   saveVersion: number
   rulesVersion: string
   contentVersion: string
+  careerId: string
+  setup: CareerSetupSnapshot
+  replayGroupId: string
+  replayOfCareerId?: string
   /** Chosen at character creation; coach-guided keeps round plans but automates legal moves. */
   combatMode: CombatMode
   seed: string
@@ -711,13 +978,23 @@ export interface GameState {
   campDrillHistory: CampDrillOutcome[]
   activeCampDrill?: CampDrillChallenge
   campDrillOutcome?: CampDrillOutcome
+  preparedMove?: PreparedMove
+  preparationCredits: number
+  lossLesson?: RebuildLesson
+  motiveProgress?: MotiveProgress
+  motiveOpportunity?: MotiveOpportunity
+  worldNews: WorldNewsEntry[]
+  careerChanges?: CareerChanges
+  settledFightRoute?: FightSettlementRoute
+  campEdgeUsed?: boolean
+  selectedTrainingBranch?: Branch
   trainingMoveChoices?: string[]
   trainingMoveSelections?: string[]
   trainingMoveRequired?: number
   trainingMoveBranch?: Branch
   lifeEvent?: LifeEvent
   lifeEventResult?: LifeEventResult
-  growthDestination?: 'prefight' | 'offer' | 'retirement' | 'injury-recovery' | 'league-decision'
+  growthDestination?: GrowthDestination
   promotionFrom?: LeagueId
   promotionTo?: LeagueId
   insightGained?: number
@@ -735,8 +1012,8 @@ export type GameCommand =
   | { type: 'SELECT_OFFER'; offerId: string }
   | { type: 'PURCHASE_OFFER_REFRESH' }
   | { type: 'DECLINE_OFFERS' }
-  | { type: 'COMPLETE_CAMP_ACTIVITY'; action: CampAction; branch?: Branch }
-  | { type: 'START_CAMP_DRILL'; action: CampAction; branch?: Branch; relaxedTiming?: boolean }
+  | { type: 'COMPLETE_CAMP_ACTIVITY'; action: CampAction; branch?: Branch; focusMoveId?: string }
+  | { type: 'START_CAMP_DRILL'; action: CampAction; branch?: Branch; focusMoveId?: string; relaxedTiming?: boolean }
   | { type: 'RESOLVE_CAMP_DRILL'; result: CampDrillResult }
   | { type: 'TOGGLE_TRAINING_MOVE'; moveId: string }
   | { type: 'CONFIRM_TRAINING_MOVES' }
@@ -770,6 +1047,9 @@ export interface NewRunInput {
   seed: string
   startingExperience?: StartingExperience
   combatMode?: CombatMode
+  careerId?: string
+  replayGroupId?: string
+  replayOfCareerId?: string
 }
 
 export interface SaveEnvelope {

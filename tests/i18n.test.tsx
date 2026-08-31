@@ -1,6 +1,9 @@
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ReactNode } from 'react'
+import { FIGHT_INTENTS } from '../src/game/fight-content'
+import { MOVE_LABELS_EN, TRAIT_PRESENTATION_EN } from '../src/game/presentation-localization'
+import { TRAITS } from '../src/game/progression'
 import { I18nProvider, resolveInitialLocale, translationCatalogs, useI18n } from '../src/i18n'
 
 describe('i18n runtime', () => {
@@ -9,8 +12,36 @@ describe('i18n runtime', () => {
     window.history.replaceState({}, '', '/')
   })
 
-  it('keeps both catalogs in exact key parity', () => {
-    expect(Object.keys(translationCatalogs.en).sort()).toEqual(Object.keys(translationCatalogs['zh-Hant']).sort())
+  it('covers every static Traditional Chinese key and limits English-only entries to authored presentation prose', () => {
+    const traditionalChineseKeys = Object.keys(translationCatalogs['zh-Hant']).sort()
+    const traditionalChineseKeySet = new Set(traditionalChineseKeys)
+    const englishKeys = Object.keys(translationCatalogs.en).sort()
+
+    expect(traditionalChineseKeys.filter((key) => !(key in translationCatalogs.en))).toEqual([])
+
+    const englishOnlyKeys = englishKeys.filter((key) => !traditionalChineseKeySet.has(key))
+    expect(englishOnlyKeys.length).toBeGreaterThan(0)
+    for (const key of englishOnlyKeys) {
+      const translation = translationCatalogs.en[key]
+      expect(key).toMatch(/^(payload|presentation)\./)
+      expect(translation.trim(), key).not.toBe('')
+      expect(translation, key).not.toBe(key)
+      expect(translation, key).toMatch(/[A-Za-z]/)
+      expect(translation, key).not.toMatch(/[\u3400-\u9fff]/)
+    }
+  })
+
+  it('authors English presentation copy for every combat move and displayed trait', () => {
+    expect(Object.keys(MOVE_LABELS_EN).sort()).toEqual(FIGHT_INTENTS.map((move) => move.id).sort())
+    expect(Object.keys(TRAIT_PRESENTATION_EN).sort()).toEqual(TRAITS.map((trait) => trait.id).sort())
+
+    for (const label of Object.values(MOVE_LABELS_EN)) {
+      expect(label).toMatch(/[A-Za-z]/)
+      expect(label).not.toMatch(/[\u3400-\u9fff]/u)
+    }
+    for (const copy of Object.values(TRAIT_PRESENTATION_EN)) {
+      expect([copy.name, copy.description, copy.condition, copy.effect, copy.tradeoff ?? ''].join(' ')).not.toMatch(/[\u3400-\u9fff]/u)
+    }
   })
 
   it('uses query override before saved and browser preferences', () => {

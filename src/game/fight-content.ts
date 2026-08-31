@@ -1,4 +1,14 @@
-import type { Branch, ExecutionVariant, FightMoveDefinition, FightStageName, OpeningKey, Position, SkillLevel } from './types'
+import type {
+  Branch,
+  CombatThreatTag,
+  ExecutionVariant,
+  FightMoveDefinition,
+  FightStageName,
+  OpeningKey,
+  Position,
+  SkillLevel,
+  TacticalMatchup,
+} from './types'
 
 export type MoveVisualFamily = 'punch' | 'kick' | 'takedown' | 'clinch' | 'ground-strike' | 'submission' | 'position' | 'escape'
 
@@ -8,6 +18,104 @@ const effects = (score: number, headDamage: number, bodyDamage: number, legDamag
 
 const STANDING_POSITIONS: Position[] = ['range', 'pocket', 'cage', 'cage-control', 'cage-defense']
 const COMMITTED_KICKS = new Set(['body-kick', 'switch-kick', 'question-mark-kick', 'head-kick', 'spinning-back-kick', 'step-knee'])
+const COMMITTED_PUNCHES = new Set(['risky-power', 'haymaker', 'head-power', 'cage-body-head'])
+const LOW_KICK_MOVE_IDS = new Set(['damage-base', 'touch-low-kick', 'calf-kick', 'inside-low-kick', 'low-kick-pocket'])
+const PRESSURE_MOVE_IDS = new Set([
+  'steady-output', 'double-jab-entry', 'cut-angle-entry', 'push-kick-pressure', 'quick-entry',
+  'quick-combination', 'risky-power', 'haymaker', 'drive-back', 'enter-clinch', 'turn-to-cage',
+  'cage-barrage', 'cage-body-head', 'cage-knee-elbow', 'cage-pressure', 'body-lock-cage-drive',
+])
+const TAKEDOWN_MOVE_IDS = new Set([
+  'shot-entry', 'single-leg-shot', 'blast-double', 'catch-kick-sweep', 'clinch-throw',
+  'wall-takedown', 'cage-single-leg', 'cage-mat-return', 'plum-outside-trip',
+  'body-lock-inside-trip', 'body-lock-outside-trip', 'body-lock-mat-return',
+])
+const CLINCH_ENTRY_MOVE_IDS = new Set([
+  'quick-entry', 'enter-clinch', 'inside-position', 'double-collar-entry', 'body-lock-control',
+  'snapdown-entry', 'turn-to-cage', 'plum-body-lock-counter', 'body-lock-pummel',
+])
+const CAGE_PRESSURE_MOVE_IDS = new Set([
+  'turn-to-cage', 'cage-barrage', 'cage-body-head', 'cage-knee-elbow', 'head-control',
+  'wall-takedown', 'cage-single-leg', 'cage-mat-return', 'cage-arm-drag', 'cage-pressure',
+  'body-lock-cage-drive',
+])
+const CONTROL_MOVE_IDS = new Set([
+  'head-control', 'cage-pressure', 'plum-control', 'body-lock-grind', 'front-headlock-snap',
+  'top-control', 'deny-stand', 'mount-control', 'secure-back', 'body-triangle',
+])
+const DEFENSIVE_GROUND_POSITIONS = new Set<Position>([
+  'bottom', 'mount-defense', 'back-defense', 'front-headlock-defense',
+])
+const DEFENSIVE_GRAPPLING_POSITIONS = new Set<Position>([
+  'cage-defense', 'thai-clinch-defense', 'body-lock-defense', 'front-headlock-defense',
+  'bottom', 'mount-defense', 'back-defense',
+])
+
+/**
+ * Authored counters are deliberately narrower than broad move categories. A
+ * low-kick check answers low kicks, for example, but does not magically beat
+ * every kind of offense.
+ */
+const MOVE_COUNTER_TAGS: Partial<Record<string, readonly CombatThreatTag[]>> = {
+  'front-kick': ['pressure', 'clinch-entries'],
+  'angle-away': ['pressure', 'punches'],
+  'long-guard': ['punches', 'committed-kicks'],
+  'check-low-kick': ['low-kicks'],
+  'catch-kick-sweep': ['committed-kicks'],
+  'sprawl-circle': ['takedowns'],
+  'check-hook': ['pressure'],
+  'counter-pressure': ['pressure', 'punches'],
+  'shell-counter': ['punches', 'pressure'],
+  'anti-shot-uppercut': ['takedowns'],
+  'frame-space': ['clinch-entries', 'pressure'],
+  'inside-position': ['clinch-entries'],
+  'head-control': ['clinch-entries', 'cage-pressure'],
+  'turn-off-cage': ['cage-pressure'],
+  'cage-underhook-escape': ['cage-pressure', 'clinch-entries'],
+  'cage-whizzer': ['takedowns', 'cage-pressure'],
+  'cage-elbow-exit': ['cage-pressure'],
+  'cover-cage': ['punches', 'pressure'],
+  'plum-posture-frame': ['clinch-entries', 'pressure'],
+  'plum-pummel-inside': ['clinch-entries'],
+  'plum-body-lock-counter': ['clinch-entries'],
+  'plum-duck-under': ['clinch-entries'],
+  'plum-knee-shield': ['clinch-entries', 'pressure'],
+  'body-lock-whizzer': ['takedowns', 'position-advances'],
+  'body-lock-hip-heist': ['takedowns', 'position-advances'],
+  'body-lock-pummel': ['clinch-entries', 'position-advances'],
+  'body-lock-switch': ['position-advances'],
+  'body-lock-peel-exit': ['position-advances'],
+  'front-headlock-handfight': ['submissions'],
+  'front-headlock-sitout': ['submissions', 'position-advances'],
+  'front-headlock-peekout': ['submissions', 'position-advances'],
+  'front-headlock-pull-guard': ['submissions'],
+  'front-headlock-roll': ['submissions', 'position-advances'],
+  'top-control': ['submissions', 'escapes'],
+  'stand-reset': ['submissions', 'escapes'],
+  'deny-stand': ['escapes'],
+  'rebuild-guard': ['ground-strikes', 'position-advances'],
+  'hip-escape': ['ground-strikes', 'position-advances'],
+  'wall-walk': ['ground-strikes', 'position-advances'],
+  'wrestle-up': ['ground-strikes', 'position-advances'],
+  'safe-bottom': ['ground-strikes', 'submissions', 'position-advances'],
+  'mount-control': ['escapes'],
+  'elbow-knee-escape': ['ground-strikes', 'submissions', 'position-advances'],
+  'bridge-roll': ['ground-strikes', 'position-advances'],
+  'trap-arm-roll': ['ground-strikes', 'position-advances'],
+  'backdoor-escape': ['ground-strikes', 'position-advances'],
+  'mount-shell': ['ground-strikes', 'submissions', 'position-advances'],
+  'granby-roll': ['takedowns', 'position-advances'],
+  'limp-leg-escape': ['takedowns'],
+  'scramble-stand': ['takedowns', 'position-advances'],
+  'base-balance': ['takedowns', 'position-advances'],
+  'secure-back': ['escapes'],
+  'body-triangle': ['escapes'],
+  'hand-fight-rnc': ['submissions'],
+  'clear-back-hooks': ['submissions', 'position-advances'],
+  'turn-into-guard': ['submissions', 'position-advances'],
+  'shoulder-to-mat': ['submissions', 'position-advances'],
+  'back-wall-escape': ['submissions', 'position-advances'],
+}
 
 /** Identity-defining techniques unlock by authored complexity, not raw damage/control thresholds alone. */
 const AUTHORED_MOVE_LEVELS: Partial<Record<string, SkillLevel>> = {
@@ -45,6 +153,91 @@ const AUTHORED_MOVE_LEVELS: Partial<Record<string, SkillLevel>> = {
   'front-headlock-anaconda': 5,
 }
 
+type SemanticMoveInput = Pick<FightMoveDefinition,
+  'id' | 'positions' | 'branch' | 'category' | 'cleanPosition' | 'defensive' | 'submission' | 'strikeKind'
+> & { emergency?: boolean }
+
+function inferredSemanticTags(move: SemanticMoveInput): Pick<FightMoveDefinition, 'threatTags' | 'counterTags'> {
+  const threatTags = new Set<CombatThreatTag>()
+  const counterTags = new Set<CombatThreatTag>(MOVE_COUNTER_TAGS[move.id] ?? [])
+  const startsStanding = move.positions.some((position) => STANDING_POSITIONS.includes(position))
+  const startsInDefensiveGround = move.positions.some((position) => DEFENSIVE_GROUND_POSITIONS.has(position))
+  const startsInDefensiveGrappling = move.positions.some((position) => DEFENSIVE_GRAPPLING_POSITIONS.has(position))
+
+  if (move.emergency) threatTags.add('escapes')
+  if (move.submission) threatTags.add('submissions')
+  if (move.strikeKind === 'punch') threatTags.add('punches')
+  if (move.strikeKind === 'kick') threatTags.add(LOW_KICK_MOVE_IDS.has(move.id) ? 'low-kicks' : 'committed-kicks')
+  if (PRESSURE_MOVE_IDS.has(move.id)) threatTags.add('pressure')
+  if (TAKEDOWN_MOVE_IDS.has(move.id)) threatTags.add('takedowns')
+  if (CLINCH_ENTRY_MOVE_IDS.has(move.id)) threatTags.add('clinch-entries')
+  if (CAGE_PRESSURE_MOVE_IDS.has(move.id)) threatTags.add('cage-pressure')
+
+  const isGroundOffense = move.category === 'offense' && !move.submission
+    && move.positions.some((position) => ['top', 'bottom', 'mount', 'back-control', 'front-headlock-control'].includes(position))
+  if (isGroundOffense) threatTags.add('ground-strikes')
+
+  const isEscape = move.emergency
+    || (move.category === 'defense' && !CONTROL_MOVE_IDS.has(move.id))
+    || (move.category === 'transition' && startsInDefensiveGrappling)
+  if (isEscape) threatTags.add('escapes')
+  if (move.category === 'transition' && !isEscape) threatTags.add('position-advances')
+  if (CONTROL_MOVE_IDS.has(move.id)) {
+    threatTags.add(move.positions.some((position) => ['cage', 'cage-control'].includes(position)) ? 'cage-pressure' : 'position-advances')
+  }
+
+  // Only moves without a narrower authored counter receive a positional
+  // defensive inference. This keeps, for example, a low-kick check from also
+  // countering punches merely because both are defenses.
+  if (!MOVE_COUNTER_TAGS[move.id] && (move.defensive || startsInDefensiveGrappling)) {
+    if (startsInDefensiveGround) {
+      counterTags.add('ground-strikes')
+      counterTags.add('submissions')
+      counterTags.add('position-advances')
+    } else if (move.positions.includes('cage-defense')) {
+      counterTags.add('cage-pressure')
+      counterTags.add('clinch-entries')
+    } else if (move.positions.includes('thai-clinch-defense')) {
+      counterTags.add('clinch-entries')
+      counterTags.add('pressure')
+    } else if (move.positions.includes('body-lock-defense')) {
+      counterTags.add('takedowns')
+      counterTags.add('position-advances')
+    } else if (move.positions.includes('scramble')) {
+      counterTags.add('takedowns')
+      counterTags.add('position-advances')
+    } else if (startsStanding) {
+      counterTags.add('pressure')
+    } else {
+      counterTags.add('clinch-entries')
+      counterTags.add('pressure')
+    }
+  }
+
+  // A standing takedown can punish a committed kick, but a positional mat
+  // return does not inherit that relationship.
+  if (TAKEDOWN_MOVE_IDS.has(move.id) && startsStanding && !MOVE_COUNTER_TAGS[move.id]) counterTags.add('committed-kicks')
+
+  if (!threatTags.size) {
+    if (move.category === 'transition') threatTags.add('position-advances')
+    else if (move.category === 'defense') threatTags.add('escapes')
+    else if (move.branch === 'ground') threatTags.add('ground-strikes')
+    else threatTags.add('pressure')
+  }
+  return { threatTags: [...threatTags], counterTags: [...counterTags] }
+}
+
+/** Compare the concrete threats and answers of two moves without category RPS. */
+export function semanticMatchupFor(
+  actor: Pick<FightMoveDefinition, 'threatTags' | 'counterTags'>,
+  opponent: Pick<FightMoveDefinition, 'threatTags' | 'counterTags'>,
+): TacticalMatchup {
+  const actorCounters = actor.counterTags.some((tag) => opponent.threatTags.includes(tag))
+  const opponentCounters = opponent.counterTags.some((tag) => actor.threatTags.includes(tag))
+  if (actorCounters === opponentCounters) return 'neutral'
+  return actorCounters ? 'favored' : 'exposed'
+}
+
 function move(
   id: string, label: string, description: string, positions: Position[], branch: Branch,
   category: FightMoveDefinition['category'], stageWeights: Record<FightStageName, number>,
@@ -54,9 +247,78 @@ function move(
   const strikeKind = extras.strikeKind ?? (category === 'offense' && standing
     ? branch === 'boxing' ? 'punch' : branch === 'kicking' ? 'kick' : undefined
     : undefined)
-  const commitment = extras.commitment ?? (strikeKind === 'punch' ? 'quick' : strikeKind === 'kick' ? (COMMITTED_KICKS.has(id) ? 'committed' : 'set') : undefined)
-  return { id, label, description, positions, branch, category, stageWeights, effects: vector, basic: true, creates: [], exploits: [], strikeKind, commitment, minimumLevel: AUTHORED_MOVE_LEVELS[id], ...extras }
+  const commitment = extras.commitment ?? (strikeKind === 'punch' ? (COMMITTED_PUNCHES.has(id) ? 'committed' : 'quick') : strikeKind === 'kick' ? (COMMITTED_KICKS.has(id) ? 'committed' : 'set') : undefined)
+  const draft = {
+    id, label, description, positions, branch, category, stageWeights, effects: vector,
+    basic: true, creates: [] as OpeningKey[], exploits: [] as OpeningKey[], strikeKind, commitment,
+    minimumLevel: AUTHORED_MOVE_LEVELS[id], ...extras,
+  }
+  const semantics = inferredSemanticTags(draft)
+  return {
+    ...draft,
+    threatTags: extras.threatTags ?? semantics.threatTags,
+    counterTags: extras.counterTags ?? semantics.counterTags,
+  }
 }
+
+function emergencyMove(
+  id: string,
+  label: string,
+  description: string,
+  position: Position,
+  branch: Branch,
+  category: 'defense' | 'transition',
+  cleanPosition: Position | undefined,
+  counterTags: CombatThreatTag[],
+): FightMoveDefinition {
+  return move(
+    id, label, description, [position], branch, category, stages(8, 8, 9, 10),
+    category === 'defense' ? effects(1, 0, 0, 0, 1, 1, 0) : effects(1, 0, 0, 0, 2, 2, 0),
+    { emergency: true, minimumLevel: 0, defensive: true, cleanPosition, threatTags: ['escapes'], counterTags },
+  )
+}
+
+/** Two deliberately weak, always-legal survival choices for every combat position. */
+export const EMERGENCY_FIGHT_INTENTS: FightMoveDefinition[] = [
+  emergencyMove('emergency-range-cover', '收架退步', '先收緊防線退半步，只求不被連續命中。', 'range', 'boxing', 'defense', 'range', ['punches', 'pressure']),
+  emergencyMove('emergency-range-circle', '橫移離線', '用短小橫步離開正面，不急著回擊。', 'range', 'boxing', 'transition', 'range', ['pressure']),
+  emergencyMove('emergency-pocket-cover', '雙手抱架', '縮緊下巴與手肘，承受近身交換。', 'pocket', 'boxing', 'defense', 'pocket', ['punches', 'pressure']),
+  emergencyMove('emergency-pocket-shove', '推肩退步', '用前臂推開肩線，勉強退回外圍。', 'pocket', 'boxing', 'transition', 'range', ['pressure', 'clinch-entries']),
+  emergencyMove('emergency-clinch-cover', '夾肘護頭', '貼緊手肘與額頭，先避免短拳短肘坐實。', 'clinch', 'clinch', 'defense', 'clinch', ['clinch-entries', 'pressure']),
+  emergencyMove('emergency-clinch-frame', '前臂撐開', '把前臂塞進肩線，勉強製造一步空間。', 'clinch', 'clinch', 'transition', 'pocket', ['clinch-entries']),
+  emergencyMove('emergency-cage-cover', '貼網收架', '背靠鐵網收緊防線，等待一個轉身空隙。', 'cage', 'boxing', 'defense', 'cage', ['punches', 'cage-pressure']),
+  emergencyMove('emergency-cage-slide', '沿網橫移', '沿鐵網小步移動，不讓自己停在正面。', 'cage', 'clinch', 'transition', 'cage-defense', ['cage-pressure']),
+  emergencyMove('emergency-cage-control-hold', '穩住頭位', '用額頭貼住下巴，先守住籠邊主動位置。', 'cage-control', 'clinch', 'defense', 'cage-control', ['escapes']),
+  emergencyMove('emergency-cage-control-exit', '安全退開', '放棄壓制換取乾淨退出，回到外圍。', 'cage-control', 'clinch', 'transition', 'range', ['escapes']),
+  emergencyMove('emergency-cage-defense-cover', '雙內勾護身', '把雙臂塞進內側，先阻止對手收緊控制。', 'cage-defense', 'clinch', 'defense', 'cage-defense', ['cage-pressure', 'clinch-entries']),
+  emergencyMove('emergency-cage-defense-slide', '沿網脫離', '貼著鐵網滑步，勉強回到中央。', 'cage-defense', 'clinch', 'transition', 'range', ['cage-pressure']),
+  emergencyMove('emergency-thai-clinch-hold', '收髖穩住', '收回髖部維持頭位，只求不被立即反轉。', 'thai-clinch', 'clinch', 'defense', 'thai-clinch', ['escapes']),
+  emergencyMove('emergency-thai-clinch-release', '安全放手', '放開頸抱並護頭退回中立纏抱。', 'thai-clinch', 'clinch', 'transition', 'clinch', ['escapes']),
+  emergencyMove('emergency-thai-defense-cover', '護頭收肘', '雙手貼頭、手肘收窄，先熬過膝肘攻勢。', 'thai-clinch-defense', 'clinch', 'defense', 'thai-clinch-defense', ['clinch-entries', 'pressure']),
+  emergencyMove('emergency-thai-defense-posture', '挺身拆手', '抓住一側手腕挺直背部，勉強回到中立纏抱。', 'thai-clinch-defense', 'clinch', 'transition', 'clinch', ['clinch-entries']),
+  emergencyMove('emergency-body-lock-hold', '貼髖穩握', '胸髖貼緊並保持鎖手，先守住抱腰位置。', 'body-lock', 'wrestling', 'defense', 'body-lock', ['escapes']),
+  emergencyMove('emergency-body-lock-release', '安全鬆鎖', '主動放開鎖握，護頭回到中立纏抱。', 'body-lock', 'wrestling', 'transition', 'clinch', ['escapes']),
+  emergencyMove('emergency-body-lock-defense-cover', '壓手護腰', '雙手壓住鎖握、髖部後撤，只求不被立即摔倒。', 'body-lock-defense', 'wrestling', 'defense', 'body-lock-defense', ['takedowns', 'position-advances']),
+  emergencyMove('emergency-body-lock-defense-turn', '轉髖拆握', '朝鎖手空隙轉髖，勉強把局面帶入混戰。', 'body-lock-defense', 'wrestling', 'transition', 'scramble', ['takedowns', 'position-advances']),
+  emergencyMove('emergency-front-headlock-hold', '胸口壓頭', '把胸口重量留在後腦，先不冒險追位。', 'front-headlock-control', 'wrestling', 'defense', 'front-headlock-control', ['escapes']),
+  emergencyMove('emergency-front-headlock-release', '安全退髖', '放開頭臂並退開髖部，回到鬆散混戰。', 'front-headlock-control', 'wrestling', 'transition', 'scramble', ['escapes']),
+  emergencyMove('emergency-front-headlock-defense-cover', '藏下巴抓手', '收緊下巴並抓住鎖臂，先保住呼吸。', 'front-headlock-defense', 'wrestling', 'defense', 'front-headlock-defense', ['submissions', 'position-advances']),
+  emergencyMove('emergency-front-headlock-defense-turn', '跪姿轉身', '沿著手臂方向轉身，勉強把危險變成混戰。', 'front-headlock-defense', 'wrestling', 'transition', 'scramble', ['submissions', 'position-advances']),
+  emergencyMove('emergency-top-cover', '收肘穩姿', '膝蓋打開、手肘收緊，避免被拉低或困臂。', 'top', 'ground', 'defense', 'top', ['submissions', 'escapes']),
+  emergencyMove('emergency-top-stand', '站起退開', '放棄地面控制，雙手護頭退回站立。', 'top', 'ground', 'transition', 'range', ['submissions', 'escapes']),
+  emergencyMove('emergency-bottom-cover', '抱頭夾膝', '夾緊雙膝抱住頭臂，先減少落下的打擊。', 'bottom', 'ground', 'defense', 'bottom', ['ground-strikes', 'submissions', 'position-advances']),
+  emergencyMove('emergency-bottom-shrimp', '側身縮髖', '轉向側面縮回髖部，只製造一點呼吸空間。', 'bottom', 'ground', 'transition', 'bottom', ['ground-strikes', 'position-advances']),
+  emergencyMove('emergency-scramble-cover', '收膝護頭', '停止亂搶位置，先把膝蓋與手臂收回身體。', 'scramble', 'wrestling', 'defense', 'scramble', ['takedowns', 'position-advances']),
+  emergencyMove('emergency-scramble-stand', '先站穩', '不追求控制，先把雙腳放回地面。', 'scramble', 'wrestling', 'transition', 'range', ['takedowns', 'position-advances']),
+  emergencyMove('emergency-mount-hold', '低髖穩住', '降低髖部跟隨橋翻，只求不立刻失位。', 'mount', 'ground', 'defense', 'mount', ['escapes']),
+  emergencyMove('emergency-mount-reset', '退回上位', '放棄騎乘壓力，退回較安全的防守架上位。', 'mount', 'ground', 'transition', 'top', ['escapes']),
+  emergencyMove('emergency-mount-defense-cover', '抱頭夾肘', '前臂護頭、手肘護肋，先承受較小代價。', 'mount-defense', 'ground', 'defense', 'mount-defense', ['ground-strikes', 'submissions', 'position-advances']),
+  emergencyMove('emergency-mount-defense-knee', '側身塞膝', '側身把膝蓋勉強塞回髖線，退回下位防守。', 'mount-defense', 'ground', 'transition', 'bottom', ['ground-strikes', 'position-advances']),
+  emergencyMove('emergency-back-hold', '安全帶穩住', '收緊安全帶抱法，只求不讓對手立刻轉身。', 'back-control', 'ground', 'defense', 'back-control', ['escapes']),
+  emergencyMove('emergency-back-reset', '轉回騎乘', '放棄背後追頸，跟著翻身回到騎乘位。', 'back-control', 'ground', 'transition', 'mount', ['escapes']),
+  emergencyMove('emergency-back-defense-cover', '雙手護頸', '兩手抓住絞臂、藏好下巴，先阻止收緊。', 'back-defense', 'ground', 'defense', 'back-defense', ['submissions', 'ground-strikes']),
+  emergencyMove('emergency-back-defense-turn', '滑髖轉身', '把髖部滑向一側，勉強轉回下位防守。', 'back-defense', 'ground', 'transition', 'bottom', ['submissions', 'position-advances']),
+]
 
 const MOVE_VISUAL_FAMILY_OVERRIDES: Partial<Record<string, MoveVisualFamily>> = {
   'double-jab-entry': 'punch', 'cut-angle-entry': 'punch', 'outside-angle-step': 'kick', 'push-kick-pressure': 'kick',
@@ -73,7 +335,8 @@ const MOVE_VISUAL_FAMILY_OVERRIDES: Partial<Record<string, MoveVisualFamily>> = 
   'rebuild-guard': 'escape', 'safe-bottom': 'escape', 'mount-shell': 'escape',
 }
 
-function visualFamilyForMove(move: Pick<FightMoveDefinition, 'id' | 'branch' | 'category' | 'positions' | 'strikeKind' | 'submission' | 'cleanPosition'>): MoveVisualFamily | undefined {
+function visualFamilyForMove(move: Pick<FightMoveDefinition, 'id' | 'branch' | 'category' | 'positions' | 'strikeKind' | 'submission' | 'cleanPosition' | 'emergency'>): MoveVisualFamily | undefined {
+  if (move.emergency) return 'escape'
   if (MOVE_VISUAL_FAMILY_OVERRIDES[move.id]) return MOVE_VISUAL_FAMILY_OVERRIDES[move.id]
   if (move.submission) return 'submission'
   if (move.strikeKind === 'punch') return 'punch'
@@ -276,6 +539,7 @@ export const FIGHT_INTENTS: FightMoveDefinition[] = [
   move('guard-hammerfists', '防守架內鎚拳', '撐高上身後以拳底連續落下；傷害更大，但過度後仰會給對手掃摔機會。', ['top'], 'ground', 'offense', stages(2, 8, 11, 14), effects(11, 14, 1, 0, 4, 11, 17), { contestedPosition: 'top', counteredPosition: 'bottom', exploits: ['hips-flat', 'high-guard'], creates: ['off-balance'] }),
   move('mount-barrage', '騎乘位爆發連砸', '放高髖部後左右連續落拳，直接追求裁判終止；如果落空，底下對手可能趁機橋翻。', ['mount'], 'ground', 'offense', stages(1, 6, 11, 16), effects(12, 18, 2, 0, 7, 14, 23), { contestedPosition: 'mount', counteredPosition: 'bottom', exploits: ['high-guard', 'hips-flat'], creates: ['off-balance', 'arm-isolated'] }),
   move('back-hammerfists', '背後鎚拳連打', '放開一側控制手連續攻擊耳側，擴大頭部傷害，但也增加對手轉身滑脫的空間。', ['back-control'], 'ground', 'offense', stages(2, 8, 11, 14), effects(11, 14, 1, 0, 6, 11, 18), { contestedPosition: 'back-control', counteredPosition: 'back-defense', exploits: ['high-guard'], creates: ['neck-exposed', 'off-balance'] }),
+  ...EMERGENCY_FIGHT_INTENTS,
 ]
 
 /** Every authored move must resolve to one action-art family; new moves should add an explicit override when inference is ambiguous. */

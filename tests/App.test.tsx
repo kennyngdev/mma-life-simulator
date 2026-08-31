@@ -1,12 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import { I18nProvider } from '../src/i18n'
+import { I18nProvider, translationCatalogs } from '../src/i18n'
 import { LocalizedSurface } from '../src/LocalizedSurface'
 import packageMeta from '../package.json'
 import { advance, createNewRun, getCompetitionWeightClass } from '../src/game/engine'
+import { BRANCH_META } from '../src/game/content'
 import { FIGHT_INTENTS, OPENING_LABELS } from '../src/game/fight-content'
-import type { CampAction, CampDrillChallenge, CriticalOption, FightBeat, FinishKind, GameState, LeagueId } from '../src/game/types'
+import type { Biography, CampAction, CampDrillChallenge, CareerChanges, CriticalOption, FightBeat, FinishKind, GameState, LeagueId } from '../src/game/types'
 
 const storage = vi.hoisted(() => ({
   archiveBiography: vi.fn(),
@@ -31,13 +32,14 @@ function gameAtFinishMinigame(kind: FinishKind, attacker: 'player' | 'opponent' 
   game.phase = 'finish-minigame'
   game.selectedOfferId = offer.id
   game.fight = {
+    rulesVersion: game.rulesVersion,
     offer, opponentId: offer.opponentId, round: 2, totalRounds: 3, position: kind === 'submission' ? 'bottom' : 'pocket',
     playerStamina: 62, opponentStamina: 48, playerDamage: 30, opponentDamage: 68,
     playerEffective: 26, opponentEffective: 18, plan: 'pressure', criticalCount: 3, sequenceStep: 3,
     initiative: 'player', momentum: 24, opponentIntent: { intentId: 'safe-bottom', executionName: '保守防守', branch: 'ground', category: 'defense', effectSummary: '正在掙扎求生', exploitsOpenings: [], threatLevel: 'watch' }, stageName: 'turn',
-    playerOpenings: [], opponentOpenings: [], opponentAdaptation: {}, opponentMoveHistory: {},
+    playerOpenings: [], opponentOpenings: [], opponentAdaptation: {}, opponentMoveHistory: {}, playerMoveHistory: {},
     playerDamageByPart: { head: 12, body: 10, leg: 8 }, opponentDamageByPart: { head: 30, body: 24, leg: 14 },
-    playerControl: 8, opponentControl: 3, finishPressure: 36, beatHistory: [], finishWindowsUsed: 1, techniqueTriggersThisRound: [],
+    playerControl: 8, opponentControl: 3, finishPressure: 36, beatHistory: [], finishWindowsUsed: 1, techniqueTriggersThisRound: [], traitActivationsThisRound: { player: [], opponent: [] },
     activeFinishWindow: {
       attacker, kind, opportunity: 72, threat: '明顯機會', sourceAction: kind === 'submission' ? '十字架控制' : '重擺拳', sourceStep: 3,
       sourcePosition: kind === 'submission' ? 'bottom' : 'pocket',
@@ -63,6 +65,45 @@ function gameAtFightResult(method: 'ko' | 'tko' | 'submission' | 'decision', fin
   return game
 }
 
+function biographyFixture(id: string, name: string, seed: string, boxing: 2 | 3): Biography {
+  return {
+    schemaVersion: 2,
+    id,
+    seed,
+    name,
+    region: 'taiwan',
+    hometown: '台北',
+    record: boxing === 3 ? '12-3-0' : '8-5-1',
+    title: boxing === 3 ? '精準的拳擊冠軍' : '從敗戰重建的老將',
+    summary: `${name}留下了一段可比較的測試生涯。`,
+    turningPoints: [{ id: `${id}-turn`, year: 2030, age: 22, title: '第一次主賽', summary: '他在壓力下做出了自己的選擇。', people: [], importance: 2, tags: ['比賽'] }],
+    unlockedNodes: [],
+    startingExperience: 'hobbyist',
+    finalSkills: { boxing, kicking: 1, clinch: 1, wrestling: 2, ground: 1 },
+    learnedMoves: ['jab', 'shot-entry'],
+    traits: [],
+    leagueTitles: boxing === 3 ? ['amateur'] : [],
+    retiredAt: boxing === 3 ? 37 : 40,
+    createdAt: 1,
+    setup: { kind: 'exact', nameInput: name, region: 'taiwan', motive: 'prove', startingExperience: 'hobbyist', combatMode: 'manual' },
+    rulesVersion: 'test-rules',
+    contentVersion: 'test-content',
+    replayGroupId: `${id}-replays`,
+    curatedBeats: [{ id: `${id}-highlight`, kind: 'fight', year: 2030, age: 22, title: '守住主賽', summary: '第四回合的調整定義了這段生涯。', people: [], sourceHistoryIds: [`${id}-turn`] }],
+    outcome: {
+      record: boxing === 3 ? { wins: 12, losses: 3, draws: 0 } : { wins: 8, losses: 5, draws: 1 },
+      retirementReason: 'voluntary',
+      motiveResolution: 'disciplined',
+      styleBranches: ['boxing', 'wrestling'],
+      signatureMoveIds: ['jab'],
+      traitIds: [],
+      leagueTitles: boxing === 3 ? ['amateur'] : [],
+      reputationBandId: 'respected',
+      retirementCause: '在自己選定的時刻退役。',
+    },
+  }
+}
+
 function gameAtBackControl(): GameState {
   const game = gameAtFinishMinigame('submission')
   const option = (id: string, label: string, category: CriticalOption['category'], executionName: string): CriticalOption => ({
@@ -71,7 +112,7 @@ function gameAtBackControl(): GameState {
     executionId: `base-${id}`, executionName, branch: 'ground', category,
     effectSummary: label === '裸絞（RNC）' || label.includes('十字固') ? '主效：建立降服終結壓力 · 代價：體力 10' : '主效：頭部傷害 · 代價：體力 7',
     finishRoute: label === '裸絞（RNC）' || label.includes('十字固') ? '降服路線：位置、控制與破綻會開啟終結窗口' : undefined,
-    odds: { clean: 42, contested: 35, countered: 23 }, matchup: 'neutral', matchupReason: '雙方戰術沒有直接克制', identityTags: [],
+    odds: { clean: 42, contested: 35, countered: 23 }, matchup: 'neutral', matchupReason: '雙方戰術沒有直接克制', identityTags: [], factors: [],
   })
   const rnc = option('rear-naked-choke', '裸絞（RNC）', 'offense', '裸絞')
   const armbar = option('back-armbar', '背後十字固', 'offense', '背後十字固')
@@ -130,12 +171,15 @@ function gameAtCampDrill(kind: CampAction): GameState {
   return game
 }
 
-function gameAtGeneratedCampDrill(kind: CampAction, branch: 'boxing' = 'boxing'): GameState {
+function gameAtGeneratedCampDrill(kind: CampAction, requestedBranch?: 'boxing' | 'kicking' | 'clinch' | 'wrestling' | 'ground'): GameState {
   const game = createNewRun(input)
+  const learnedMove = FIGHT_INTENTS.find((move) => game.fighter.learnedMoves.includes(move.id) && (!requestedBranch || move.branch === requestedBranch))
+  const branch = requestedBranch ?? learnedMove?.branch ?? game.selectedTrainingBranch ?? 'boxing'
+  const focusMoveId = FIGHT_INTENTS.find((move) => move.branch === branch && game.fighter.learnedMoves.includes(move.id))?.id
   if (kind === 'technique') game.fighter.skills[branch].xp = 340
   game.phase = 'camp'
   game.selectedOfferId = game.offers[0].id
-  return advance(game, { type: 'START_CAMP_DRILL', action: kind, branch: kind === 'technique' ? branch : undefined }).state
+  return advance(game, { type: 'START_CAMP_DRILL', action: kind, branch: kind === 'technique' ? branch : undefined, focusMoveId: kind === 'technique' ? focusMoveId : undefined }).state
 }
 
 describe('生涯重置', () => {
@@ -149,6 +193,7 @@ describe('生涯重置', () => {
     window.history.replaceState({}, '', '/')
     storage.loadGame.mockResolvedValue({ game: createNewRun(input) })
     storage.listBiographies.mockResolvedValue([])
+    storage.archiveBiography.mockResolvedValue(undefined)
     storage.saveGame.mockResolvedValue(undefined)
     storage.clearActiveGame.mockResolvedValue(undefined)
   })
@@ -192,9 +237,34 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({})
     render(<App />)
 
-    expect(await screen.findByRole('button', { name: /香港.*國際門戶/ })).toHaveTextContent('高收入／高成本')
-    expect(screen.getByRole('button', { name: /台灣.*拳館網絡/ })).toHaveTextContent('65% 台灣')
-    expect(screen.getByRole('button', { name: /中國大陸.*深度賽事/ })).toHaveTextContent('低收入／低成本')
+    expect((await screen.findByRole('radio', { name: /香港.*國際門戶/ })).closest('label')).toHaveTextContent('高收入／高成本')
+    expect(screen.getByRole('radio', { name: /台灣.*拳館網絡/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /台灣.*拳館網絡/ }).closest('label')).toHaveTextContent('65% 台灣')
+    expect(screen.getByRole('radio', { name: /中國大陸.*深度賽事/ }).closest('label')).toHaveTextContent('低收入／低成本')
+  })
+
+  it('建立拳手的預設選擇具有原生單選語意並同步摘要', async () => {
+    storage.loadGame.mockResolvedValue({})
+    render(<App />)
+
+    const taiwan = await screen.findByRole('radio', { name: /台灣.*拳館網絡/ })
+    const hongKong = screen.getByRole('radio', { name: /香港.*國際門戶/ })
+    expect(taiwan).toBeChecked()
+    expect(screen.getByRole('radio', { name: /證明自己/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /業餘愛好者/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /戰術操作/ })).toBeChecked()
+    fireEvent.click(hongKong)
+    expect(hongKong).toBeChecked()
+    expect(screen.getByLabelText('目前選定的生涯設定')).toHaveTextContent('香港 · 證明自己 · 業餘愛好者 · 戰術操作')
+  })
+
+  it('獨立 PWA 模式不重複顯示安裝提示', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({ matches: query === '(display-mode: standalone)', addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+    storage.loadGame.mockResolvedValue({})
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: '拳途人生 Cage Life' })).toBeInTheDocument()
+    expect(screen.queryByRole('note', { name: '以 App 模式踏進鐵籠' })).not.toBeInTheDocument()
   })
 
   it('英文建立頁不留下未翻譯介面文字', async () => {
@@ -209,7 +279,7 @@ describe('生涯重置', () => {
       expect(surface.textContent).not.toMatch(/[\u3400-\u9fff]/)
     })
     expect(screen.getByRole('button', { name: 'Traditional Chinese' })).toHaveTextContent('繁中')
-    expect(screen.getByRole('button', { name: /Hong Kong.*International gateway/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Hong Kong.*International gateway/ })).toBeInTheDocument()
   })
 
   it('從英文切回繁中時立即還原完整建立頁', async () => {
@@ -221,7 +291,7 @@ describe('生涯重置', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Traditional Chinese' }))
 
     expect(await screen.findByLabelText('拳手姓名（選填）')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /香港.*國際門戶/ })).toHaveTextContent('高收入／高成本')
+    expect(screen.getByRole('radio', { name: /香港.*國際門戶/ }).closest('label')).toHaveTextContent('高收入／高成本')
     expect(screen.queryByText('Home region')).not.toBeInTheDocument()
     expect(document.documentElement.lang).toBe('zh-Hant')
   })
@@ -235,6 +305,8 @@ describe('生涯重置', () => {
 
     expect(await screen.findByRole('heading', { name: /Back control/i })).toBeInTheDocument()
     expect(screen.getByText('Rear Short Punch')).toBeInTheDocument()
+    const combatSurface = document.querySelector('.game-screen') ?? document.body
+    expect(combatSurface.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     expect(game).toEqual(original)
   })
 
@@ -260,6 +332,169 @@ describe('生涯重置', () => {
 
     expect(await screen.findByRole('heading', { name: '拳途人生 Cage Life' })).toBeInTheDocument()
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('生涯殿堂可比較精選傳記，並以原 Seed 與建立設定重玩', async () => {
+    const first = biographyFixture('career-one', '林一心', 'REPLAY-ONE', 3)
+    const second = biographyFixture('career-two', '周再起', 'REPLAY-TWO', 2)
+    storage.loadGame.mockResolvedValue({})
+    storage.listBiographies.mockResolvedValue([first, second])
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '生涯殿堂 · 2' }))
+    const compare = screen.getAllByRole('button', { name: '比較' })
+    fireEvent.click(compare[0])
+    expect(screen.getByRole('status')).toHaveTextContent('再選一名退役拳手')
+    fireEvent.click(compare[1])
+    const comparison = screen.getByRole('region', { name: '比較兩段人生' })
+    expect(comparison).toHaveTextContent('林一心')
+    expect(comparison).toHaveTextContent('周再起')
+    expect(comparison).toHaveTextContent('招牌招式')
+    expect(comparison).toHaveTextContent('非受控對照')
+
+    fireEvent.click(screen.getAllByText('查看精選片段')[0])
+    expect(screen.getAllByText('第四回合的調整定義了這段生涯。').length).toBeGreaterThan(0)
+    fireEvent.click(screen.getAllByRole('button', { name: '同設定重玩' })[0])
+    expect(screen.getByRole('status')).toHaveTextContent('正在準備同 Seed 重玩')
+    expect(screen.getByLabelText('世界 Seed')).toHaveValue(first.seed)
+    fireEvent.click(screen.getByRole('button', { name: /開始拳手生涯/ }))
+    expect(await screen.findByRole('heading', { name: '命運揭曉' })).toBeInTheDocument()
+    await waitFor(() => {
+      const replay = storage.saveGame.mock.calls.at(-1)?.[0] as GameState
+      expect(replay.seed).toBe(first.seed)
+      expect(replay.replayGroupId).toBe(first.replayGroupId)
+      expect(replay.replayOfCareerId).toBe(first.id)
+      expect(replay.careerId).not.toBe(first.id)
+    })
+  })
+
+  it('退役畫面顯示全部八個精選片段與每項結構化生涯結果', async () => {
+    const biography = biographyFixture('complete-retirement', '完整傳記', 'EIGHT-BEATS', 3)
+    biography.curatedBeats = Array.from({ length: 8 }, (_, index) => ({
+      id: `beat-${index + 1}`,
+      kind: index === 0 ? 'origin' : index === 7 ? 'ending' : 'fight',
+      year: 2026 + index,
+      age: 18 + index,
+      title: index === 7 ? '在自己選定的時刻退役' : `生涯片段 ${index + 1}`,
+      summary: index === 7 ? '最後的決定也屬於這段生涯。' : `可驗證片段 ${index + 1}`,
+      people: index === 4 ? ['林教練'] : index === 5 ? ['宿敵甲'] : [],
+      sourceHistoryIds: [`history-${index + 1}`],
+    }))
+    biography.outcome = {
+      ...biography.outcome,
+      motiveResolution: 'conflicted',
+      unrealizedPath: undefined,
+      styleBranches: ['boxing', 'wrestling'],
+      signatureMoveIds: ['jab-cross', 'shot-entry'],
+      traitIds: ['heavy-hands'],
+      leagueTitles: ['amateur'],
+      definingRelationshipId: 'coach',
+      definingRivalId: 'rival-a',
+      reputationBandId: 'noted-contender',
+      financialLegacy: '替家鄉拳館留下了一套新護具。',
+      retirementCause: '在自己選定的時刻退役。',
+    }
+    biography.turningPoints = [
+      { id: 'coach-choice', year: 2029, age: 21, title: '與教練共同決定', summary: '一起調整計畫。', people: ['林教練'], importance: 3, tags: [], fact: { kind: 'relationship-choice', relationshipId: 'coach', eventId: 'coach-event', optionId: 'repair', trustDelta: 6 } },
+      { id: 'rival-fight', year: 2030, age: 22, title: '再次交手', summary: '宿敵再度出現。', people: ['宿敵甲'], importance: 3, tags: [], fact: { kind: 'fight', opponentId: 'rival-a', result: 'win', method: 'decision', titleRole: 'ordinary', close: true } },
+    ]
+    const game = createNewRun(input)
+    game.phase = 'retirement'
+    game.biography = biography
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    expect(await screen.findByText('最後的決定也屬於這段生涯。')).toBeInTheDocument()
+    expect(document.querySelectorAll('.biography-highlights:not(.compact) li')).toHaveLength(8)
+    const outcome = screen.getByRole('region', { name: '這段生涯最後留下什麼' })
+    expect(outcome).toHaveTextContent('矛盾而細膩')
+    expect(outcome).toHaveTextContent('若始終一致地走完其中一條道路')
+    expect(outcome).toHaveTextContent('拳擊 · 摔投')
+    expect(outcome).toHaveTextContent('刺拳接直拳')
+    expect(outcome).toHaveTextContent('抱摔切入')
+    expect(outcome).toHaveTextContent('重手')
+    expect(outcome).toHaveTextContent('業餘聯盟')
+    expect(outcome).toHaveTextContent('林教練')
+    expect(outcome).toHaveTextContent('宿敵甲')
+    expect(outcome).toHaveTextContent('知名競爭者')
+    expect(outcome).toHaveTextContent('替家鄉拳館留下了一套新護具')
+    expect(outcome).toHaveTextContent('在自己選定的時刻退役')
+  })
+
+  it('舊版部分設定傳記可審閱安全預設後以新 ID 加入同一重玩群組', async () => {
+    const source = biographyFixture('legacy-source', '舊拳手', 'LEGACY-REVIEW', 3)
+    source.replayGroupId = 'legacy-replay-group'
+    source.setup = { kind: 'legacy-partial', displayedName: '舊拳手', displayedAlias: 'Legacy Fighter', region: 'hong-kong' }
+    storage.loadGame.mockResolvedValue({})
+    storage.listBiographies.mockResolvedValue([source])
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '生涯殿堂 · 1' }))
+    const replay = screen.getByRole('button', { name: '同設定重玩' })
+    expect(replay).toBeEnabled()
+    fireEvent.click(replay)
+
+    const notice = screen.getByRole('status')
+    expect(notice).toHaveTextContent('正在審閱舊版生涯設定')
+    expect(notice).toHaveTextContent('永遠不能標示為受控比較')
+    expect(screen.getByLabelText('拳手姓名（選填）')).toHaveValue('舊拳手')
+    expect(screen.getByLabelText('英文／羅馬字姓名（選填）')).toHaveValue('Legacy Fighter')
+    expect(screen.getByRole('radio', { name: /香港.*國際門戶/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /證明自己/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /業餘愛好者/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /戰術操作/ })).toBeChecked()
+    expect(screen.getByLabelText('世界 Seed')).toHaveValue('LEGACY-REVIEW')
+
+    fireEvent.click(screen.getByRole('button', { name: /開始拳手生涯/ }))
+    await waitFor(() => {
+      const next = storage.saveGame.mock.calls.at(-1)?.[0] as GameState
+      expect(next.replayGroupId).toBe('legacy-replay-group')
+      expect(next.replayOfCareerId).toBe(source.id)
+      expect(next.careerId).not.toBe(source.id)
+      expect(next.setup).toMatchObject({ kind: 'exact', region: 'hong-kong', motive: 'prove', startingExperience: 'hobbyist', combatMode: 'manual' })
+    })
+  })
+
+  it('只有 Seed、完整建立設定與內容規則版本完全相同時才標示受控比較', async () => {
+    const first = biographyFixture('controlled-one', '同一設定', 'CONTROLLED-SEED', 3)
+    const second = biographyFixture('controlled-two', '同一設定', 'CONTROLLED-SEED', 2)
+    second.setup = structuredClone(first.setup)
+    second.rulesVersion = first.rulesVersion
+    second.contentVersion = first.contentVersion
+    second.replayGroupId = first.replayGroupId
+    storage.loadGame.mockResolvedValue({})
+    storage.listBiographies.mockResolvedValue([first, second])
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '生涯殿堂 · 2' }))
+    const compare = screen.getAllByRole('button', { name: '比較' })
+    fireEvent.click(compare[0])
+    fireEvent.click(compare[1])
+
+    expect(screen.getByRole('region', { name: '比較兩段人生' })).toHaveTextContent('受控同 Seed 對照')
+  })
+
+  it('同 Seed 重玩保留空白姓名輸入並建立新的生涯 ID', async () => {
+    const source = biographyFixture('generated-name-source', '種子生成姓名', 'EMPTY-NAME-SEED', 3)
+    if (source.setup.kind !== 'exact') throw new Error('fixture must use an exact setup')
+    source.setup = { ...source.setup, nameInput: '' }
+    storage.loadGame.mockResolvedValue({})
+    storage.listBiographies.mockResolvedValue([source])
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '生涯殿堂 · 1' }))
+    fireEvent.click(screen.getByRole('button', { name: '同設定重玩' }))
+    expect(screen.getByLabelText('拳手姓名（選填）')).toHaveValue('')
+    fireEvent.click(screen.getByRole('button', { name: /開始拳手生涯/ }))
+
+    await waitFor(() => {
+      const replay = storage.saveGame.mock.calls.at(-1)?.[0] as GameState
+      expect(replay.setup.kind).toBe('exact')
+      if (replay.setup.kind === 'exact') expect(replay.setup.nameInput).toBe('')
+      expect(replay.careerId).not.toBe(source.id)
+      expect(replay.replayGroupId).toBe(source.replayGroupId)
+    })
   })
 
   it('香港生成拳手會在揭曉顯示粵語姓名、家鄉與地方生態', async () => {
@@ -339,6 +574,208 @@ describe('生涯重置', () => {
     expect(container).toHaveTextContent('You: Sturdy frame · Opponent: Slender frame')
     expect(container.querySelector('.coach-avatar')).toHaveTextContent('C')
     expect(container).toHaveTextContent(/Slight range advantage|Slight inside advantage|Slight clinch advantage|Even physical matchup/)
+  })
+
+  it('英文邀約與聯盟介面不依賴 DOM 翻譯層', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = createNewRun({ ...input, seed: 'EXPLICIT-OFFER-I18N' })
+    game.phase = 'offer'
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<I18nProvider><App /></I18nProvider>)
+
+    expect(await screen.findByRole('heading', { name: 'Next fight' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Sign this fight' })).toHaveLength(game.offers.length)
+    expect(screen.getByRole('heading', { name: 'Spend savings to wait for new offers' })).toBeInTheDocument()
+    expect(screen.getAllByLabelText('Purse calculation')).toHaveLength(game.offers.length)
+    expect(screen.getByLabelText('Current league standing')).toBeInTheDocument()
+  })
+
+  it('英文營隊預檢與冠軍抉擇直接使用訊息 ID', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const drillGame = gameAtCampDrill('film')
+    storage.loadGame.mockResolvedValue({ game: drillGame })
+
+    const view = render(<I18nProvider><App /></I18nProvider>)
+    expect(await screen.findByRole('heading', { name: 'Challenge for a bonus' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Start when you are ready' })).toBeInTheDocument()
+    expect(screen.getByText('Standard reward floor')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ready — start challenge' })).toBeInTheDocument()
+
+    view.unmount()
+    const leagueGame = createNewRun({ ...input, seed: 'EXPLICIT-LEAGUE-I18N' })
+    leagueGame.phase = 'league-decision'
+    leagueGame.promotionFrom = 'amateur'
+    leagueGame.promotionTo = 'regional'
+    leagueGame.fighter.leagueStanding = { league: 'amateur', status: 'champion', defenses: 0 }
+    storage.loadGame.mockResolvedValue({ game: leagueGame })
+    render(<I18nProvider><App /></I18nProvider>)
+
+    expect(await screen.findByRole('heading', { name: 'After the championship' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Join Regional League/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Stay and defend Amateur League/ })).toBeInTheDocument()
+  })
+
+  it('英文訓練教學與選擇挑戰控制直接使用訊息 ID', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const comboGame = gameAtGeneratedCampDrill('technique')
+    storage.loadGame.mockResolvedValue({ game: comboGame })
+    const view = render(<I18nProvider><App /></I18nProvider>)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Ready — start challenge' }))
+    expect(await screen.findByRole('region', { name: 'Training instructions' })).toHaveTextContent('Remember three beats')
+    expect(screen.getByRole('button', { name: 'Understood — start training' })).toBeInTheDocument()
+
+    view.unmount()
+    const choiceGame = gameAtCampDrill('technique')
+    storage.loadGame.mockResolvedValue({ game: choiceGame })
+    render(<I18nProvider><App /></I18nProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Ready — start challenge' }))
+    expect(await screen.findByLabelText('Technique challenge')).toHaveTextContent('Read 0/3')
+    expect(screen.getByText('3 clips remaining')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Boxing' })).toBeInTheDocument()
+    expect(screen.getByText(/Complete the moves in the correct order/)).toBeInTheDocument()
+  })
+
+  it('英文手動回合位置落點、場景與傷勢條直接使用訊息 ID', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = gameAtCounteredTakedownEntry()
+    storage.loadGame.mockResolvedValue({ game })
+    render(<I18nProvider><App /></I18nProvider>)
+
+    const dialog = await screen.findByRole('dialog', { name: 'How did you reach this position?' })
+    expect(dialog).toHaveTextContent('Round 1 · Tactical landing point')
+    expect(dialog).toHaveTextContent('Your tactic')
+    expect(dialog).toHaveTextContent('Look for takedowns')
+    expect(dialog).toHaveTextContent('Bottom guard')
+    expect(dialog).toHaveTextContent('The opponent claims the first advantageous position')
+    expect(screen.getByRole('button', { name: 'Understood — begin the exchange' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /Current position: Bottom guard/ })).toBeInTheDocument()
+    expect(screen.getByLabelText(/Your damage: head/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Opponent damage: head/)).toBeInTheDocument()
+  })
+
+  it('英文回合休息選項直接使用訊息 ID', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = gameAtBackControl()
+    game.phase = 'round-result'
+    game.fight!.round = 1
+    game.fight!.totalRounds = 3
+    game.fight!.cornerAdjustment = 'rest'
+    game.fight!.scores = [{ round: 1, player: 10, opponent: 9, note: 'Test score' }]
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<I18nProvider><App /></I18nProvider>)
+
+    const rest = await screen.findByRole('button', { name: /Just rest.*Restore 14 stamina; no additional cost/ })
+    expect(rest).not.toHaveTextContent('體力回復')
+  })
+
+  it('英文分享文字明確標示戰績與 Seed，並使用英文分隔符', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const biography = biographyFixture('share-copy', 'Test Fighter', 'SHARE-SEED', 3)
+    biography.hometown = 'Taipei'
+    biography.title = 'A precise champion'
+    biography.summary = 'A career shaped by deliberate choices.'
+    const game = createNewRun(input)
+    game.phase = 'retirement'
+    game.biography = biography
+    const share = vi.fn().mockResolvedValue(undefined)
+    const browserNavigator = navigator
+    vi.stubGlobal('navigator', { language: browserNavigator.language, languages: browserNavigator.languages, share })
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<I18nProvider><App /></I18nProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Share this life' }))
+
+    await waitFor(() => expect(share).toHaveBeenCalledOnce())
+    const payload = share.mock.calls[0][0] as { title: string; text: string }
+    expect(payload.title).toBe('Cage Life | Test Fighter')
+    expect(payload.text).toContain('Taiwan · Taipei | Record 12-3-0')
+    expect(payload.text).toContain('Seed: SHARE-SEED')
+    expect(payload.text).not.toMatch(/戰績|Seed：/)
+  })
+
+  it('英文完整生涯時間線使用本地化年齡與人物分隔符', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = createNewRun(input)
+    game.fighter.history = [{
+      ...game.fighter.history[0],
+      id: 'localized-history-row', year: 2035, age: 27,
+      title: 'A shared decision', summary: 'The team chose a path together.',
+      people: ['Coach Lin', 'Partner Wu'],
+    }]
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<I18nProvider><App /></I18nProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Career history' }))
+
+    expect(screen.getByText('Age 27')).toBeInTheDocument()
+    expect(screen.getByText('Coach Lin, Partner Wu')).toBeInTheDocument()
+    expect(screen.queryByText('Coach Lin、Partner Wu')).not.toBeInTheDocument()
+  })
+
+  it('英文人生事件解析儲存的訊息參照，未知 ID 保留繁中 fallback', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = createNewRun({ ...input, seed: 'AUTHORED-PAYLOAD-I18N' })
+    game.phase = 'life'
+    game.lifeEvent = {
+      id: 'localized-life-test', personId: 'coach',
+      title: '被看輕時怎麼回答',
+      titleRef: { messageId: 'payload.life.motive.prove.first.title', fallback: '被看輕時怎麼回答' },
+      description: '一段質疑正在流傳。',
+      descriptionRef: { messageId: 'payload.life.motive.prove.first.description', fallback: '一段質疑正在流傳。' },
+      options: [{
+        id: 'legacy-option', label: '舊存檔選項', detail: '只有原始文字。', outcome: '原始結果。', effects: {},
+        labelRef: { messageId: 'payload.missing.legacy-option', fallback: '舊存檔選項' },
+      }],
+    }
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<I18nProvider><App /></I18nProvider>)
+
+    expect(await screen.findByRole('heading', { name: 'How to answer being underestimated' })).toBeInTheDocument()
+    expect(screen.getByText(/public comment is questioning your ability/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /舊存檔選項/ })).toBeInTheDocument()
+  })
+
+  it('後勤、傳承與三地區事件具有完整英文標題、說明、選項與結果目錄', () => {
+    const eventOptions: Record<string, string[]> = {
+      'payload.life.logistics.short': ['professional', 'team-help', 'standard'],
+      'payload.life.logistics.first': ['professional', 'team-help', 'standard'],
+      'payload.life.legacy': ['fund-gym', 'mentor', 'security'],
+      'payload.life.regional.hong-kong': ['sponsor', 'training'],
+      'payload.life.regional.taiwan': ['community', 'recover'],
+      'payload.life.regional.mainland': ['travel-camp', 'stay-home'],
+    }
+    for (const [prefix, optionIds] of Object.entries(eventOptions)) {
+      for (const id of [`${prefix}.title`, `${prefix}.description`, ...optionIds.flatMap((optionId) => [
+        `${prefix}.option.${optionId}.label`, `${prefix}.option.${optionId}.detail`, `${prefix}.option.${optionId}.outcome`,
+      ])]) {
+        expect(translationCatalogs.en[id], id).toBeTruthy()
+        expect(translationCatalogs.en[id], id).not.toMatch(/[\u3400-\u9fff]/)
+      }
+    }
+  })
+
+  it('戰鬥選項直接使用交換因子的當前語系原因', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = gameAtBackControl()
+    const option = game.fight!.prompt!.options[0]
+    option.identityTags = ['中文舊角標']
+    option.matchupReason = '中文舊原因'
+    option.factors = [
+      { id: 'ui-test', target: 'selection', source: 'move', side: 'player', magnitude: 0, unit: 'points', reasonId: 'combat.uiTag.test', localizedReason: { 'zh-Hant': '繁中因子角標', en: 'English factor tag' } },
+      { id: 'matchup-test', target: 'chance', source: 'matchup', side: 'player', magnitude: 12, unit: 'points', reasonId: 'combat.semanticMatchup', localizedReason: { 'zh-Hant': '繁中克制原因', en: 'English semantic matchup reason' } },
+    ]
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<I18nProvider><App /></I18nProvider>)
+
+    expect(await screen.findByText('English factor tag')).toBeInTheDocument()
+    expect(screen.getByText('English semantic matchup reason')).toBeInTheDocument()
+    expect(screen.queryByText('中文舊角標')).not.toBeInTheDocument()
+    expect(screen.queryByText('中文舊原因')).not.toBeInTheDocument()
   })
 
   it('邀約畫面公開說明沒有場數上限及因傷退役線', async () => {
@@ -545,6 +982,7 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({ game: gameAtCampDrill(kind) })
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: '準備好，開始挑戰' }))
     expect(await screen.findByLabelText(label)).toBeInTheDocument()
     for (let index = 0; index < 3; index += 1) fireEvent.click(screen.getByRole('button', { name: answer }))
     expect(await screen.findByRole('heading', { name: nextScreen })).toBeInTheDocument()
@@ -552,6 +990,7 @@ describe('生涯重置', () => {
 
   it('靶訓組合會示範三拍並接受實際招式輸入', async () => {
     localStorage.setItem('cage-life:training-tutorial:combo-v1', 'true')
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)', addEventListener: vi.fn(), removeEventListener: vi.fn() })))
     const game = gameAtGeneratedCampDrill('technique')
     const challenge = game.activeCampDrill!
     expect(challenge.mode).toBe('combo')
@@ -560,7 +999,9 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: '準備好，開始挑戰' }))
     expect(await screen.findByText('教練示範')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '記住了，開始三拍' }))
     for (const step of challenge.steps) {
       const label = FIGHT_INTENTS.find((move) => move.id === step.moveId)!.label
       fireEvent.click(await screen.findByRole('button', { name: label }))
@@ -579,6 +1020,7 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: '準備好，開始挑戰' }))
     expect(await screen.findByText('對手影片')).toBeInTheDocument()
     expect(screen.getAllByText(FIGHT_INTENTS.find((move) => move.id === challenge.sequenceMoveIds[0])!.label)).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: '看完了，開始分析' }))
@@ -591,10 +1033,34 @@ describe('生涯重置', () => {
     storage.loadGame.mockResolvedValue({ game: gameAtCampDrill('recovery') })
     render(<App />)
 
+    fireEvent.click(await screen.findByRole('button', { name: '準備好，開始挑戰' }))
     const control = await screen.findByRole('button', { name: '按住，穩定呼吸' })
     for (let index = 0; index < 3; index += 1) {
       fireEvent.pointerDown(control, { pointerId: index + 1 })
       fireEvent.pointerUp(control, { pointerId: index + 1 })
+    }
+    expect(await screen.findByRole('heading', { name: '訓練營' })).toBeInTheDocument()
+  })
+
+  it('營隊挑戰在玩家明確開始前不掛載計時操作', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtCampDrill('recovery') })
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: '準備好，開始挑戰' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '按住，穩定呼吸' })).not.toBeInTheDocument()
+    expect(screen.getByText(/計時尚未開始/)).toBeInTheDocument()
+  })
+
+  it('恢復訓練提供與指標操作等價的鍵盤按住與放開', async () => {
+    storage.loadGame.mockResolvedValue({ game: gameAtCampDrill('recovery') })
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '準備好，開始挑戰' }))
+    const control = screen.getByRole('button', { name: '按住，穩定呼吸' })
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.keyDown(control, { key: ' ' })
+      expect(control).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.keyUp(control, { key: ' ' })
     }
     expect(await screen.findByRole('heading', { name: '訓練營' })).toBeInTheDocument()
   })
@@ -612,11 +1078,27 @@ describe('生涯重置', () => {
     expect(screen.getByText(/最高獎勵不變/)).toBeInTheDocument()
   })
 
+  it('訓練營從引擎焦點起步，並可用方向鍵切換技術分支', async () => {
+    const game = createNewRun(input)
+    game.phase = 'camp'
+    game.selectedTrainingBranch = 'wrestling'
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const wrestling = await screen.findByRole('radio', { name: /摔.*摔投/ })
+    expect(wrestling).toHaveAttribute('aria-checked', 'true')
+    fireEvent.keyDown(wrestling, { key: 'ArrowRight' })
+    const ground = screen.getByRole('radio', { name: /地.*地戰/ })
+    expect(ground).toHaveAttribute('aria-checked', 'true')
+    expect(ground).toHaveFocus()
+  })
+
   it('訓練營以緊湊提示列預告目前的關係影響', async () => {
     const game = createNewRun(input)
     game.phase = 'camp'
     game.fighter.relationships.find((item) => item.role === 'coach')!.trust = 75
     game.fighter.relationships.find((item) => item.role === 'family')!.trust = 35
+    game.fighter.relationships.find((item) => item.role === 'partner')!.trust = 75
     storage.loadGame.mockResolvedValue({ game })
 
     render(<App />)
@@ -624,9 +1106,10 @@ describe('生涯重置', () => {
     const support = await screen.findByRole('region', { name: '本次營隊的關係影響' })
     expect(support).toHaveTextContent('招式熟練度更容易達到上限')
     expect(support).toHaveTextContent('家庭壓力會讓這次休養打些折扣')
-    expect(support).not.toHaveTextContent('陪練')
+    expect(support).toHaveTextContent('陪練能深入模擬對手，本次影片研究情報 ×1.1')
     expect(screen.getByText('技術訓練').closest('.camp-activity')).toHaveTextContent('深厚信任')
     expect(screen.getByText('休養治療').closest('.camp-activity')).toHaveTextContent('關係緊張')
+    expect(screen.getByText('影片研究').closest('.camp-activity')).toHaveTextContent('深厚信任')
   })
 
   it('訓練營在關係穩定時不佔用提示列空間', async () => {
@@ -638,6 +1121,19 @@ describe('生涯重置', () => {
 
     await screen.findByRole('heading', { name: '訓練營' })
     expect(screen.queryByRole('region', { name: '本次營隊的關係影響' })).not.toBeInTheDocument()
+  })
+
+  it('一次額外挑戰後，營隊內所有挑戰入口都明確鎖定', async () => {
+    const game = createNewRun(input)
+    game.phase = 'camp'
+    game.campEdgeUsed = true
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    const edgeButtons = await screen.findAllByRole('button', { name: '本次營隊已挑戰過' })
+    expect(edgeButtons).toHaveLength(3)
+    edgeButtons.forEach((button) => expect(button).toBeDisabled())
   })
 
   it('人生事件選擇後顯示故事與效果結果彈窗', async () => {
@@ -663,17 +1159,77 @@ describe('生涯重置', () => {
     expect(screen.getByRole('heading', { name: '籠門之前' })).toBeInTheDocument()
   })
 
-  it('用教練口吻交代每名邀約對手的強項與弱點', async () => {
+  it('人生事件在確認前顯示封頂後的精確狀態投影', async () => {
+    const game = createNewRun(input)
+    game.phase = 'life'
+    game.selectedOfferId = game.offers[0].id
+    game.fighter.readiness = 99
+    game.fighter.fatigue = 97
+    game.fighter.reputation = 98
+    game.fighter.health = { head: 98, hands: 100, knees: 100, torso: 100 }
+    game.lifeEvent = {
+      id: 'projection-life', title: '是否接受密集營隊', description: '這個選擇會碰到多個上限。', personId: 'coach',
+      options: [{ id: 'accept', label: '接受營隊', detail: '先看清楚所有代價。', outcome: '你完成了營隊。', effects: { money: -1000, readiness: 5, fatigue: 8, health: 9, reputation: 6 } }],
+    }
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const choice = await screen.findByRole('button', { name: /接受營隊/ })
+    expect(screen.getByRole('region', { name: '做決定前的目前狀態' })).toBeInTheDocument()
+    expect(choice).toHaveTextContent('資金 NT$ 8,000 → NT$ 7,000（-NT$ 1,000）')
+    expect(choice).toHaveTextContent('準備度 99 → 100（+1）')
+    expect(choice).toHaveTextContent('疲勞 97 → 100（+3）')
+    expect(choice).toHaveTextContent('頭部健康 98 → 100（+2） · 已達上限')
+    expect(choice).toHaveTextContent('名聲提升，仍為「時代代表」')
+  })
+
+  it('人生事件逐一投影多段關係、情報、戰術智商與準備點數', async () => {
+    const game = createNewRun(input)
+    game.phase = 'life'
+    game.selectedOfferId = game.offers[0].id
+    game.scouting = 95
+    game.fighter.mind.fightIQ = 99
+    const coach = game.fighter.relationships.find((relationship) => relationship.id === 'coach')!
+    const partner = game.fighter.relationships.find((relationship) => relationship.id === 'partner')!
+    game.lifeEvent = {
+      id: 'multi-cause-life', title: '共同拆解對手', description: '這個選擇同時影響兩段關係與備戰。', personId: 'coach',
+      options: [{
+        id: 'collaborate', label: '一起完成計畫', detail: '所有影響都應在決定前看見。', outcome: '你們把計畫寫成能執行的細節。',
+        effects: { relationshipTrust: { coach: 7, partner: -5 }, scouting: 10, fightIQ: 2, preparationCredits: 1 },
+      }],
+    }
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const choice = await screen.findByRole('button', { name: /一起完成計畫/ })
+    expect(choice).toHaveTextContent(`${coach.name}信任 ${coach.trust} → ${coach.trust + 7}（+7）`)
+    expect(choice).toHaveTextContent(`${partner.name}信任 ${partner.trust} → ${partner.trust - 5}（-5）`)
+    expect(choice).toHaveTextContent('情報 95 → 100（+5）')
+    expect(choice).toHaveTextContent('戰術智商 99 → 100（+1）')
+    expect(choice).toHaveTextContent('準備招式點數 0 → 1（+1）')
+  })
+
+  it('移除重複邀約總評，只保留每名對手的具體教練判讀', async () => {
     const game = createNewRun(input)
     game.phase = 'offer'
     storage.loadGame.mockResolvedValue({ game })
 
     render(<App />)
 
-    expect(await screen.findByText(/教練的話$/)).toBeInTheDocument()
+    await screen.findByRole('heading', { name: game.opponents.find((opponent) => opponent.id === game.offers[0].opponentId)!.name })
+    expect(screen.queryByText(/教練的話$/)).not.toBeInTheDocument()
     expect(screen.getAllByText('他最擅長')).toHaveLength(4)
     expect(screen.getAllByText('可以針對')).toHaveLength(4)
     expect(screen.getAllByLabelText(/的賽前情報$/)).toHaveLength(4)
+    for (const offer of game.offers) {
+      const opponent = game.opponents.find((candidate) => candidate.id === offer.opponentId)!
+      const strongest = (Object.keys(opponent.technique) as Array<keyof typeof opponent.technique>).reduce((best, branch) =>
+        opponent.technique[branch] > opponent.technique[best] ? branch : best)
+      const card = screen.getByRole('heading', { name: opponent.name }).closest('.offer-card')!
+      const verdict = card.querySelector('.coach-verdict')!
+      expect(verdict).toHaveTextContent(`別在${BRANCH_META[strongest].name}跟他硬碰`)
+      expect(verdict).toHaveTextContent(`把戰局帶向${BRANCH_META[opponent.weakness].name}`)
+    }
   })
 
   it('在擊倒窗口顯示單指拖曳瞄準與時機操作', async () => {
@@ -780,8 +1336,10 @@ describe('生涯重置', () => {
     expect(screen.getByText(new RegExp(`剛建立${label}`))).toBeInTheDocument()
   })
 
-  it('在戰鬥中選擇招式後將內容捲回頂部', async () => {
-    storage.loadGame.mockResolvedValue({ game: gameAtBackControl() })
+  it('在戰鬥中選擇招式後將焦點與畫面帶回鐵籠，而不是跳過招式結果', async () => {
+    const game = gameAtBackControl()
+    game.fight!.finishWindowsUsed = 4
+    storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
     const move = await screen.findByRole('button', { name: /背後短拳/ })
@@ -791,7 +1349,9 @@ describe('生涯重置', () => {
     fireEvent.click(move)
 
     await waitFor(() => {
-      expect(gameScroll.scrollTop).toBe(0)
+      const anchor = document.querySelector<HTMLElement>('[data-combat-arena-anchor]')
+      expect(anchor).toHaveFocus()
+      expect(document.querySelector('.previous-exchange')).not.toHaveAttribute('open')
     })
   })
 
@@ -823,6 +1383,40 @@ describe('生涯重置', () => {
     render(<App />)
 
     expect(await screen.findAllByText('這段攻防不應在場景下方重複。')).toHaveLength(1)
+    expect(screen.getByText('漂亮的轉位。').closest('.color-call')).toBeVisible()
+    expect(document.querySelector('.previous-exchange')).not.toHaveAttribute('open')
+  })
+
+  it('教練帶領在最新攻防中直接顯示賽評', async () => {
+    const game = gameAtBackControl()
+    game.combatMode = 'coach-guided'
+    game.fight!.beatHistory = [{
+      step: 1, outcome: 'clean', action: '背後短拳', opponentAction: '護頭', damageEvents: [],
+      narrative: {
+        executionId: 'base-back-strikes', executionName: '背後短拳', outcome: 'clean', paragraph: '你從背後打出短拳。',
+        positionBefore: 'back-control', positionAfter: 'back-control', openingsCreated: [], openingsConsumed: [], impactTags: [], colorCommentary: '賽評仍在現場。',
+      },
+      summary: '你維持背後控制。',
+    } as unknown as FightBeat]
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByText('賽評仍在現場。')).toBeVisible()
+  })
+
+  it('草根邀約隱藏已擊敗對手並顯示固定三人進度', async () => {
+    const game = createNewRun({ ...input, startingExperience: 'normie', seed: 'GRASSROOTS-OFFER-UI' })
+    game.phase = 'offer'
+    const defeatedOffer = game.offers[0]
+    const defeatedOpponent = game.opponents.find((opponent) => opponent.id === defeatedOffer.opponentId)!
+    game.fighter.grassrootsDefeatedSlots = [defeatedOpponent.grassrootsSlot!]
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    expect(await screen.findByText('已擊敗 1/3')).toBeVisible()
+    expect(screen.queryByRole('heading', { name: defeatedOpponent.name })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '簽下這場比賽' })).toHaveLength(2)
+    expect(screen.queryByRole('heading', { name: '用積蓄等待另一組邀約' })).not.toBeInTheDocument()
   })
 
   it('籠邊壓制把你標在壓制者角色上，對手貼近鐵網', async () => {
@@ -830,10 +1424,10 @@ describe('生涯重置', () => {
     render(<App />)
 
     const scene = await screen.findByRole('img', { name: '目前位置：籠邊壓制' })
-    expect(scene.querySelector('image')).toHaveAttribute('href', '/assets/combat-arena-pixel.png')
+    expect(scene.querySelector('image')).toHaveAttribute('href', '/assets/combat-arena-pixel.webp')
     expect(within(scene).getByText('你')).toHaveClass('player-name')
     expect(within(scene).getByText('對手')).toHaveClass('opponent-name')
-    expect(scene.querySelector('.position-sprite')).toHaveAttribute('href', '/assets/fighters-cage-control-pixel.png')
+    expect(scene.querySelector('.position-sprite')).toHaveAttribute('href', '/assets/fighters-cage-control-pixel.webp')
   })
 
   it('背靠籠網時你朝向對手，對手朝向鐵網', async () => {
@@ -841,7 +1435,7 @@ describe('生涯重置', () => {
     render(<App />)
 
     const scene = await screen.findByRole('img', { name: '目前位置：背靠籠網' })
-    expect(scene.querySelector('.position-sprite')).toHaveAttribute('href', '/assets/fighters-cage-defense-pixel.png')
+    expect(scene.querySelector('.position-sprite')).toHaveAttribute('href', '/assets/fighters-cage-defense-pixel.webp')
   })
 
   it('乾淨奏效後顯示對應動作圖，並保留目前位置作為語意背景', async () => {
@@ -855,8 +1449,39 @@ describe('生涯重置', () => {
     render(<App />)
 
     const scene = await screen.findByRole('img', { name: /上一招背後短拳奏效/ })
-    expect(scene.querySelector('.action-result-sprite')).toHaveAttribute('href', '/assets/action-ground-strike-clean-pixel.png')
+    const actionSprite = scene.querySelector('.action-result-sprite')
+    expect(actionSprite).toHaveAttribute('href', '/assets/action-ground-strike-clean-pixel.webp')
+    expect(actionSprite).toHaveAttribute('width', '45')
+    expect(actionSprite).toHaveAttribute('height', '30')
     expect(scene.querySelector('.position-sprite')).toBeNull()
+  })
+
+  it('下位三角絞使用專屬三角十字固圖，其他降服保留正確動作家族圖', async () => {
+    const triangle = gameAtBackControl()
+    triangle.fight!.position = 'bottom'
+    triangle.fight!.beatHistory = [{
+      outcome: 'clean',
+      narrative: { executionId: 'base-bottom-sub', positionBefore: 'bottom' },
+      damageEvents: [],
+    } as unknown as FightBeat]
+    storage.loadGame.mockResolvedValue({ game: triangle })
+    render(<App />)
+
+    const triangleScene = await screen.findByRole('img', { name: /上一招三角絞奏效/ })
+    expect(triangleScene.querySelector('.action-result-sprite')).toHaveAttribute('href', '/assets/action-bottom-submission-clean-pixel.webp')
+
+    cleanup()
+    const rearChoke = gameAtBackControl()
+    rearChoke.fight!.beatHistory = [{
+      outcome: 'clean',
+      narrative: { executionId: 'base-rnc', positionBefore: 'back-control' },
+      damageEvents: [],
+    } as unknown as FightBeat]
+    storage.loadGame.mockResolvedValue({ game: rearChoke })
+    render(<App />)
+
+    const rearChokeScene = await screen.findByRole('img', { name: /上一招裸絞.*奏效/ })
+    expect(rearChokeScene.querySelector('.action-result-sprite')).toHaveAttribute('href', '/assets/action-submission-clean-pixel.webp')
   })
 
   it('遭到反制後顯示失敗動作圖，互有得失則回到位置圖', async () => {
@@ -866,7 +1491,7 @@ describe('生涯重置', () => {
     render(<App />)
 
     const counteredScene = await screen.findByRole('img', { name: /上一招抱摔切入遭到反制/ })
-    expect(counteredScene.querySelector('.action-result-sprite')).toHaveAttribute('href', '/assets/action-takedown-countered-pixel.png')
+    expect(counteredScene.querySelector('.action-result-sprite')).toHaveAttribute('href', '/assets/action-takedown-countered-pixel.webp')
     expect(counteredScene.querySelector('.position-sprite')).toBeNull()
 
     cleanup()
@@ -880,10 +1505,10 @@ describe('生涯重置', () => {
   })
 
   it.each([
-    ['amateur', '/assets/combat-arena-amateur-pixel.png'],
-    ['regional', '/assets/combat-arena-regional-pixel.png'],
-    ['asia', '/assets/combat-arena-asia-pixel.png'],
-    ['world', '/assets/combat-arena-world-pixel.png'],
+    ['amateur', '/assets/combat-arena-amateur-pixel.webp'],
+    ['regional', '/assets/combat-arena-regional-pixel.webp'],
+    ['asia', '/assets/combat-arena-asia-pixel.webp'],
+    ['world', '/assets/combat-arena-world-pixel.webp'],
   ] as const)('%s 聯盟使用專屬且固定鏡位的戰鬥場館', async (league, backdrop) => {
     storage.loadGame.mockResolvedValue({ game: gameAtCagePosition('cage-control', league) })
     render(<App />)
@@ -909,6 +1534,8 @@ describe('生涯重置', () => {
   it('教練帶領以可閱讀的即時賽況取代招式選單與落點對話框', async () => {
     const game = gameAtCounteredTakedownEntry()
     game.combatMode = 'coach-guided'
+    game.fight!.finishWindowsUsed = 4
+    game.fight!.prompt!.allOptions = [...game.fight!.prompt!.allOptions].sort((option) => option.id === 'back-strikes' ? -1 : 1)
     storage.loadGame.mockResolvedValue({ game })
     render(<App />)
 
@@ -917,9 +1544,51 @@ describe('生涯重置', () => {
     expect(screen.getByText(/後撤髖部避開切入/)).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: '你怎麼來到這個位置？' })).not.toBeInTheDocument()
     expect(screen.queryByText('關鍵選擇')).not.toBeInTheDocument()
-    const advanceButton = screen.getByRole('button', { name: '下一步' })
+    const advanceButton = screen.getByRole('button', { name: '開始攻防 1/4' })
     expect(document.querySelectorAll('.coach-fight-feed .feed-entry')).toHaveLength(1)
     fireEvent.click(advanceButton)
+  })
+
+  it('教練帶領保留逐次確認，並在雙擊尾端鎖住第二次派發', async () => {
+    const game = gameAtCounteredTakedownEntry()
+    game.combatMode = 'coach-guided'
+    game.fight!.finishWindowsUsed = 4
+    game.fight!.prompt!.allOptions = [...game.fight!.prompt!.allOptions].sort((option) => option.id === 'back-strikes' ? -1 : 1)
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const button = await screen.findByRole('button', { name: '開始攻防 1/4' })
+    await Promise.resolve()
+    fireEvent.click(button)
+    const busyButton = screen.getByRole('button', { name: '教練正在判斷…' })
+    expect(busyButton).toBeDisabled()
+    fireEvent.click(busyButton)
+    expect(screen.getByRole('button', { name: '教練正在判斷…' })).toBeDisabled()
+  })
+
+  it('教練帶領在終結窗口中斷後使用恢復攻防標籤', async () => {
+    const game = gameAtBackControl()
+    game.combatMode = 'coach-guided'
+    game.fight!.activeFinishWindow = undefined
+    game.fight!.sequenceStep = 3
+    game.fight!.beatHistory = [{
+      step: 2,
+      action: '重擺拳',
+      opponentAction: '封架防守',
+      outcome: 'clean',
+      summary: '你打開了終結窗口，但對手撐了過去。',
+      finishWindow: 'strike',
+      damageEvents: [],
+      narrative: {
+        executionId: 'base-haymaker', executionName: '重擺拳', outcome: 'clean',
+        positionBefore: 'pocket', positionAfter: 'pocket', paragraph: '對手撐過這次攻勢。', impactTags: [],
+      },
+    } as unknown as FightBeat]
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: '終結中斷後進入攻防 3/4' })).toBeInTheDocument()
   })
 
   it.each([
@@ -951,6 +1620,87 @@ describe('生涯重置', () => {
     expect(await screen.findByRole('heading', { name: '你贏了' })).toBeInTheDocument()
     expect(screen.queryByLabelText('終結勝利')).not.toBeInTheDocument()
     expect(screen.getByText('W').closest('.verdict')).toBeInTheDocument()
+  })
+
+  it('賽果使用結算資料列出精確的生涯前後變化與下一站', async () => {
+    const game = gameAtFightResult('decision')
+    const relationshipId = game.fighter.relationships[0].id
+    const before: CareerChanges['before'] = {
+      stage: game.stage, age: 18, year: game.fighter.year, readiness: 72, wins: 0, losses: 0, draws: 0, money: 8000, reputation: 10,
+      health: { head: 100, hands: 100, knees: 100, torso: 100 },
+      relationshipTrust: { [relationshipId]: 50 }, traitIds: [],
+    }
+    game.careerChanges = {
+      route: 'offer', before,
+      after: { ...before, wins: 1, money: 12500, reputation: 14, health: { ...before.health, head: 96 }, relationshipTrust: { [relationshipId]: 54 } },
+      purse: 4500,
+      worldNews: [{ id: 'news-1', year: game.fighter.year, kind: 'ranking-change', text: '聯盟排名出現新的挑戰者。' }],
+      relationshipMemories: [{ relationshipId, memory: '教練記得你守住了戰術。' }],
+      traitEvidence: ['沉著判讀 +1'],
+    }
+    storage.loadGame.mockResolvedValue({ game })
+    render(<App />)
+
+    const changes = await screen.findByRole('region', { name: '賽後生涯變化' })
+    expect(changes).toHaveTextContent('回到邀約')
+    expect(changes).toHaveTextContent('本場出場費：NT$ 4,500')
+    expect(changes).toHaveTextContent('NT$ 8,000→NT$ 12,500+NT$ 4,500')
+    expect(changes).toHaveTextContent('0-0-0→1-0-0')
+    expect(changes).toHaveTextContent('頭部健康100→96-4')
+    expect(changes).toHaveTextContent('沉著判讀 +1')
+    expect(changes).toHaveTextContent('關係留下的記憶')
+    expect(changes).toHaveTextContent('教練記得你守住了戰術。')
+    fireEvent.click(within(changes).getByText('賽後世界動態 · 1'))
+    expect(changes).toHaveTextContent('聯盟排名出現新的挑戰者。')
+  })
+
+  it('英文賽後結果使用結構化關係記憶與特質證據的當前語系文字', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const game = gameAtFightResult('decision')
+    const relationshipId = game.fighter.relationships[0].id
+    const snapshot: CareerChanges['before'] = {
+      stage: game.stage, age: 18, year: game.fighter.year, readiness: 72, wins: 0, losses: 0, draws: 0, money: 8000, reputation: 10,
+      health: { head: 100, hands: 100, knees: 100, torso: 100 }, relationshipTrust: { [relationshipId]: 50 }, traitIds: [],
+    }
+    game.careerChanges = {
+      route: 'offer', before: snapshot, after: { ...snapshot, wins: 1 }, purse: 1000, worldNews: [],
+      relationshipMemories: [{
+        relationshipId,
+        memory: '中文關係記憶',
+        memoryRef: { messageId: 'payload.fightResult.relationshipMemory.coach', fallback: '中文關係記憶', values: { title: 'Decision win' } },
+      }],
+      traitEvidence: ['中文特質證據'],
+      traitEvidenceLocalized: [{ 'zh-Hant': '中文特質證據', en: 'English trait evidence' }],
+    }
+    storage.loadGame.mockResolvedValue({ game })
+    render(<I18nProvider><App /></I18nProvider>)
+
+    const changes = await screen.findByRole('region', { name: 'Post-fight career changes' })
+    expect(changes).toHaveTextContent('English trait evidence')
+    expect(changes).toHaveTextContent('The coach shared this result with you at cageside')
+    expect(changes).not.toHaveTextContent('中文特質證據')
+    expect(changes).not.toHaveTextContent('中文關係記憶')
+  })
+
+  it('英文營隊與成長畫面使用失利教訓的當前語系原因', async () => {
+    localStorage.setItem('cage-life:locale:v1', 'en')
+    const camp = createNewRun(input)
+    camp.phase = 'camp'
+    camp.lossLesson = {
+      sourceFightId: 'fight-1', sourceOpponentId: camp.opponents[0].id, factorSource: 'matchup', factorTarget: 'chance', magnitude: -14,
+      reasonId: 'combat.semanticMatchup', reason: '中文失利原因', localizedReason: { 'zh-Hant': '中文失利原因', en: 'English rebuild cause' },
+    }
+    storage.loadGame.mockResolvedValue({ game: camp })
+    const view = render(<I18nProvider><App /></I18nProvider>)
+    expect(await screen.findByRole('region', { name: 'Rebuild direction from the previous loss' })).toHaveTextContent('English rebuild cause')
+
+    view.unmount()
+    const growth = structuredClone(camp)
+    growth.phase = 'growth'
+    growth.growthDestination = 'offer'
+    storage.loadGame.mockResolvedValue({ game: growth })
+    render(<I18nProvider><App /></I18nProvider>)
+    expect(await screen.findByRole('region', { name: 'Rebuild direction from the previous loss' })).toHaveTextContent('English rebuild cause')
   })
 
   it('缺少終結招式資料時使用自然的稱讚 fallback', async () => {

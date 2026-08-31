@@ -1,15 +1,49 @@
 import { describe, expect, it } from 'vitest'
 import { BACKGROUNDS, formatRegionalMoney, REGION_PROFILES, TECHNIQUE_NODES } from '../src/game/content'
 import { FIGHT_INTENTS, MOVE_VISUAL_FAMILY_BY_INTENT, TECHNIQUE_COMBAT_RULES, variantsForIntent } from '../src/game/fight-content'
-import { advance, bodyMatchupFor, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, competitiveRatingForTechnique, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, generateOffers, getAnthropometrics, getTechniqueAffinity, leagueRankingAfterWin, mirrorPosition, offerRefreshCost, opponentBodyFor, rankingAfterWin, riskLabelForGap, typicalPurseForFighter } from '../src/game/engine'
+import { advance, bodyMatchupFor, bodyStaminaPenalty, branchSkill, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, damageSkillPenalty, finishDifficultyFor, finishOpportunity, generateOffers, getAnthropometrics, getTechniqueAffinity, leagueRankingAfterWin, mirrorPosition, offerRefreshCost, opponentBodyFor, rankingAfterWin, riskLabelForGap, submissionDurationFor, typicalPurseForFighter } from '../src/game/engine'
 import { migrateBodyMatchupStats, migrateCareerEndings, migrateCoachGuidedCombat, migrateCompetitiveRatingBreadth, migrateFastTrackMatchmaking, migrateLeagueRankings, migrateMatchmakingCredibility, migrateMoveLearningPacing, migratePostFoundationMoveMilestones, migrateRankingCredibility, migrateRemovedSideControl, migrateTechniqueTrainingPacing, migrateVersion10, migrateVersion11, migrateVersion12, migrateVersion13, migrateVersion8, migrateXpBasedMoveUnlocks, removeLegacyPhysicalStats, removeRetiredSparring, repairTitleCredibility, restoreBackgroundStartingMoves } from '../src/game/storage'
 import { EARNED_TRAITS, FOUNDATION_MOVE_IDS, NORMIE_DEFAULT_MOVE_IDS, SKILL_XP_THRESHOLDS, availableMoves, awardEarnedTraits, minimumMoveLevel, moveUnlockCount, movesForBranch, nextMoveThreshold, skillLevel, skillStrengthLabel, startingMoves, traitModifier } from '../src/game/progression'
-import type { CampAction, CampDrillChallenge, CampDrillResult, GameCommand, GameState, OpeningKey, Position } from '../src/game/types'
+import type { CampAction, CampDrillChallenge, CampDrillResult, CriticalOption, GameCommand, GameState, OpeningKey, Position } from '../src/game/types'
 
 const input = { name: '林致遠', region: 'taiwan' as const, motive: 'prove' as const, seed: 'TESTCAGE01' }
 
 function apply(state: GameState, command: GameCommand): GameState {
   return advance(state, command).state
+}
+
+function withoutCareerIdentity(state: GameState): GameState {
+  const normalized = structuredClone(state)
+  normalized.careerId = '<career-id>'
+  normalized.replayGroupId = '<replay-group-id>'
+  if (normalized.biography) {
+    normalized.biography.id = '<career-id>'
+    normalized.biography.replayGroupId = '<replay-group-id>'
+  }
+  return normalized
+}
+
+function ensureLearnedTechniqueMove(state: GameState, branch: keyof typeof FOUNDATION_MOVE_IDS): void {
+  const moveId = FOUNDATION_MOVE_IDS[branch][0]
+  if (!state.fighter.learnedMoves.includes(moveId)) state.fighter.learnedMoves.push(moveId)
+}
+
+function startTechniqueEdge(state: GameState, branch: keyof typeof FOUNDATION_MOVE_IDS, relaxedTiming = false): GameState {
+  ensureLearnedTechniqueMove(state, branch)
+  return apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch, relaxedTiming, focusMoveId: FOUNDATION_MOVE_IDS[branch][0] })
+}
+
+function forceOptionChance(option: CriticalOption, min: number, max = min): void {
+  option.chance = { min, max }
+  const midpoint = (min + max) / 2
+  if (midpoint >= 100) option.odds = { clean: 100, contested: 0, countered: 0 }
+  else if (midpoint <= 0) option.odds = { clean: 0, contested: 0, countered: 100 }
+  else {
+    const bounded = (value: number, lower: number, upper: number) => Math.max(lower, Math.min(upper, Math.round(value)))
+    const clean = bounded(midpoint * .64, 1, 90)
+    const contestedCeiling = bounded(Math.min(97, midpoint + 20), clean, 98)
+    option.odds = { clean, contested: contestedCeiling - clean, countered: 100 - contestedCeiling }
+  }
 }
 
 function grantAllMoves(state: GameState): GameState {
@@ -116,6 +150,42 @@ function reachFirstFightResult(initial: GameState): GameState {
   }
   expect(guard).toBeLessThan(100)
   return state
+}
+
+function reachFirstFinalRoundResult(initial: GameState): GameState {
+  let state = grantAllMoves(initial)
+  let guard = 0
+  while (!(state.phase === 'round-result' && state.fight?.round === state.fight?.totalRounds) && guard < 100) {
+    guard += 1
+    if (state.phase === 'reveal') state = apply(state, { type: 'ACK_REVEAL' })
+    else if (state.phase === 'offer') state = apply(state, { type: 'SELECT_OFFER', offerId: state.offers[0].id })
+    else if (state.phase === 'camp') state = completeCampDrill(state, state.campActions.length === 0 ? 'film' : state.campActions.length === 1 ? 'technique' : 'recovery', 'boxing')
+    else if (state.phase === 'training-reward') state = chooseTrainingMoves(state)
+    else if (state.phase === 'life') state = apply(state, { type: 'RESOLVE_LIFE', optionId: state.lifeEvent!.options[0].id })
+    else if (state.phase === 'growth') state = apply(state, { type: 'CONTINUE_GROWTH' })
+    else if (state.phase === 'prefight') state = apply(state, { type: 'START_FIGHT' })
+    else if (state.phase === 'round-plan') state = apply(state, { type: 'SET_ROUND_PLAN', plan: 'distance' })
+    else if (state.phase === 'critical') {
+      state.fight!.finishWindowsUsed = 4
+      state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: safestMove(state).id })
+    } else if (state.phase === 'round-result') {
+      state = apply(state, { type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })
+      state = apply(state, { type: 'CONTINUE_ROUND' })
+    }
+  }
+  expect(guard).toBeLessThan(100)
+  return state
+}
+
+function settleDecision(state: GameState, winner: 'player' | 'opponent' | 'draw'): GameState {
+  const fight = state.fight!
+  fight.scores = Array.from({ length: fight.totalRounds }, (_, index) => ({
+    round: index + 1,
+    player: winner === 'player' ? 10 : winner === 'opponent' ? 9 : 10,
+    opponent: winner === 'opponent' ? 10 : winner === 'player' ? 9 : 10,
+    note: '驗收測試固定判定結果',
+  }))
+  return apply(state, { type: 'CONTINUE_ROUND' })
 }
 
 function reachFirstRoundPlan(initial: GameState): GameState {
@@ -270,7 +340,9 @@ describe('拳途人生模擬核心', () => {
   it('相同 Seed 產生完全相同的開局與世界', () => {
     const first = createNewRun(input)
     const second = createNewRun(input)
-    expect(first).toEqual(second)
+    expect(first.careerId).not.toBe(second.careerId)
+    expect(first.replayGroupId).not.toBe(second.replayGroupId)
+    expect(withoutCareerIdentity(first)).toEqual(withoutCareerIdentity(second))
     expect(first.fighter.heightCm).toBeGreaterThanOrEqual(164)
     expect(first.fighter.reachCm).toBeGreaterThanOrEqual(160)
     expect(first.opponents.every((opponent) => opponent.heightCm > 0 && opponent.reachCm > 0)).toBe(true)
@@ -379,12 +451,15 @@ describe('拳途人生模擬核心', () => {
     expect(migrated.fighter).not.toHaveProperty('weightLimit')
   })
 
-  it('競技評級保留專精優勢但也計入其餘三項技能', () => {
-    const technique = { boxing: 80, kicking: 70, clinch: 20, wrestling: 20, ground: 20 }
-    expect(competitiveRatingForTechnique(technique, 40)).toBe(58)
-    expect(competitiveRatingForTechnique({ boxing: 84, kicking: 84, clinch: 10, wrestling: 10, ground: 10 }, 40)).toBe(60)
+  it('競技評級保留專精優勢，並以真實技能與已學防守素養評估完整性', () => {
     const state = createNewRun(input)
-    const mirrored = { ...state.opponents[0], technique: state.fighter.technique, composure: state.fighter.mind.fightIQ }
+    const mirrored = {
+      ...state.opponents[0],
+      technique: state.fighter.technique,
+      composure: state.fighter.mind.fightIQ,
+      skills: state.fighter.skills,
+      learnedMoves: state.fighter.learnedMoves,
+    }
     expect(competitiveRatingForFighter(state.fighter)).toBe(competitiveRatingForOpponent(mirrored))
     expect(state.opponents.every((opponent) => opponent.learnedMoves.length > 0 && opponent.traits.length >= 1 && opponent.traits.length <= 3)).toBe(true)
   })
@@ -401,10 +476,13 @@ describe('拳途人生模擬核心', () => {
     const migrated = migrateCompetitiveRatingBreadth(camp)
 
     expect(migrated.rulesVersion).toBe('0.14.0')
-    expect(competitiveRatingForFighter(migrated.fighter)).toBe(60)
+    expect(competitiveRatingForFighter(migrated.fighter)).toBe(65)
     expect(migrated.selectedOfferId).toBe(offer.id)
     expect(migrated.offers.find((item) => item.id === offer.id)?.opponentId).toBe(offer.opponentId)
-    expect(migrated.opponents.every((opponent) => opponent.rating === competitiveRatingForOpponent(opponent))).toBe(true)
+    const opponent = migrated.opponents[0]
+    const runtimeRating = competitiveRatingForOpponent(opponent)
+    opponent.rating = runtimeRating === 0 ? 100 : 0
+    expect(competitiveRatingForOpponent(opponent)).toBe(runtimeRating)
   })
 
   it('八個全技術訓練營仍不會讓普通人直接成為大師', () => {
@@ -529,7 +607,7 @@ describe('拳途人生模擬核心', () => {
     expect(Math.abs(ordinaryAverage - rating)).toBeLessThanOrEqual(5)
   })
 
-  it('現有未簽約的聯盟邀約會更新快速晉級卡與新的冠軍戰資格', () => {
+  it('現有未簽約的聯盟邀約在升級時不會被重抽', () => {
     const legacy = createNewRun({ ...input, seed: 'FAST-TRACK-MIGRATION', startingExperience: 'semi-pro' })
     legacy.rulesVersion = '0.17.0'
     legacy.phase = 'offer'
@@ -537,54 +615,71 @@ describe('拳途人生模擬核心', () => {
     legacy.fighter.technique = { boxing: 84, kicking: 84, clinch: 68, wrestling: 68, ground: 50 }
     legacy.fighter.mind.fightIQ = 68
 
+    const beforeOffers = structuredClone(legacy.offers)
+    const beforeRng = structuredClone(legacy.rng)
     const migrated = migrateFastTrackMatchmaking(legacy)
     expect(migrated.rulesVersion).toBe('0.24.0')
-    expect(migrated.offers.some((offer) => offer.titleRole === 'challenge')).toBe(true)
+    expect(migrated.offers).toEqual(beforeOffers)
+    expect(migrated.rng).toEqual(beforeRng)
   })
 
   it('挑戰冠軍成功後不帶數字排名，並進入晉級選擇', () => {
-    let result = reachFirstFightResult(createNewRun({ ...input, seed: 'AMATEUR-TITLE-WIN' }))
-    result.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 2 }
-    const incumbent = result.opponents.find((item) => item.league === 'amateur' && item.standing === 'champion')!
-    result.fight!.opponentId = incumbent.id; result.fight!.offer.opponentId = incumbent.id
-    result.fight!.offer.titleRole = 'challenge'; result.fight!.offer.titleFight = true; result.fight!.winner = 'player'
+    const beforeSettlement = reachFirstFinalRoundResult(createNewRun({ ...input, seed: 'AMATEUR-TITLE-WIN' }))
+    beforeSettlement.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 2 }
+    const incumbent = beforeSettlement.opponents.find((item) => item.league === 'amateur' && item.standing === 'champion')!
+    beforeSettlement.fight!.opponentId = incumbent.id; beforeSettlement.fight!.offer.opponentId = incumbent.id
+    beforeSettlement.fight!.offer.titleRole = 'challenge'; beforeSettlement.fight!.offer.titleFight = true
 
-    result = apply(result, { type: 'ACK_FIGHT_RESULT' })
+    const result = settleDecision(beforeSettlement, 'player')
+    expect(result.phase).toBe('fight-result')
+    expect(result.fight?.settled).toBe(true)
     expect(result.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'champion', defenses: 0 })
     expect(result.fighter.ranking).toBeUndefined()
     expect(result.fighter.leagueRecords.amateur.titles).toBe(1)
-    expect(result.growthDestination).toBe('league-decision')
+    expect(result.careerChanges?.route).toBe('league-decision')
     expect(result.promotionFrom).toBe('amateur')
     expect(result.promotionTo).toBe('regional')
     expect(result.fighter.history.at(-1)?.summary).not.toContain('#0')
     expect(result.opponents.filter((item) => item.league === 'amateur' && item.standing === 'champion')).toHaveLength(0)
     expect(result.opponents.filter((item) => item.league === 'amateur' && item.standing === 'ranked' && item.rank !== undefined).every((item) => item.rank! >= 1 && item.rank! <= 15)).toBe(true)
+    const acknowledged = apply(result, { type: 'ACK_FIGHT_RESULT' })
+    expect(acknowledged.phase).toBe('growth')
+    expect(acknowledged.growthDestination).toBe('league-decision')
+    expect(apply(acknowledged, { type: 'CONTINUE_GROWTH' }).phase).toBe('league-decision')
   })
 
   it('留在聯盟衛冕成功會累計衛冕並再次開啟晉級選擇', () => {
-    let state = reachFirstFightResult(createNewRun({ ...input, seed: 'DEFENSE-WIN' }))
+    const state = reachFirstFinalRoundResult(createNewRun({ ...input, seed: 'DEFENSE-WIN' }))
     state.fighter.leagueStanding = { league: 'amateur', status: 'champion', defenses: 0 }
     state.fighter.leagueRecords.amateur.titles = 1
-    state.fight!.offer.titleRole = 'defense'; state.fight!.offer.titleFight = true; state.fight!.winner = 'player'
-    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    state.fight!.offer.titleRole = 'defense'; state.fight!.offer.titleFight = true
+    const settled = settleDecision(state, 'player')
     expect(settled.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'champion', defenses: 1 })
     expect(settled.fighter.leagueRecords.amateur.defenses).toBe(1)
-    expect(settled.growthDestination).toBe('league-decision')
+    expect(settled.careerChanges?.route).toBe('league-decision')
+    const acknowledged = apply(settled, { type: 'ACK_FIGHT_RESULT' })
+    expect(acknowledged.phase).toBe('growth')
+    expect(acknowledged.growthDestination).toBe('league-decision')
+    expect(apply(acknowledged, { type: 'CONTINUE_GROWTH' }).phase).toBe('league-decision')
   })
 
   it('衛冕失敗由挑戰者接掌冠軍，前冠軍落到第一名', () => {
-    let state = reachFirstFightResult(createNewRun({ ...input, seed: 'DEFENSE-LOSS' }))
+    const state = reachFirstFinalRoundResult(createNewRun({ ...input, seed: 'DEFENSE-LOSS' }))
     state.fighter.leagueStanding = { league: 'amateur', status: 'champion', defenses: 2 }
     const challenger = state.opponents.find((item) => item.id === state.fight!.opponentId)!
     const incumbent = state.opponents.find((item) => item.league === 'amateur' && item.standing === 'champion')!
     incumbent.standing = 'ranked'; incumbent.isChampion = false; incumbent.rank = 1
     challenger.league = 'amateur'; challenger.standing = 'ranked'; challenger.rank = 3; challenger.isChampion = false
-    state.fight!.offer.titleRole = 'defense'; state.fight!.offer.titleFight = true; state.fight!.winner = 'opponent'
-    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    state.fight!.offer.titleRole = 'defense'; state.fight!.offer.titleFight = true
+    const settled = settleDecision(state, 'opponent')
     expect(settled.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'ranked', rank: 1 })
     expect(settled.fighter.ranking).toBe(1)
     expect(settled.opponents.find((item) => item.id === challenger.id)).toMatchObject({ standing: 'champion', rank: undefined, isChampion: true })
-    expect(settled.growthDestination).toBe('offer')
+    expect(settled.careerChanges?.route).toBe('offer')
+    const acknowledged = apply(settled, { type: 'ACK_FIGHT_RESULT' })
+    expect(acknowledged.phase).toBe('growth')
+    expect(acknowledged.growthDestination).toBe('offer')
+    expect(apply(acknowledged, { type: 'CONTINUE_GROWTH' }).phase).toBe('offer')
   })
 
   it('晉級會離開舊腰帶並在下一聯盟從未排名開始', () => {
@@ -691,16 +786,15 @@ describe('拳途人生模擬核心', () => {
   })
 
   it('賽後結算依聯盟對手位置移動，不使用舊合約排名獎勵', () => {
-    const result = reachFirstFightResult(createNewRun({ ...input, seed: 'UPSET-SETTLEMENT' }))
-    const opponent = result.opponents.find((item) => item.id === result.fight!.opponentId)!
-    result.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 12 }
+    const beforeSettlement = reachFirstFinalRoundResult(createNewRun({ ...input, seed: 'UPSET-SETTLEMENT' }))
+    const opponent = beforeSettlement.opponents.find((item) => item.id === beforeSettlement.fight!.opponentId)!
+    beforeSettlement.fighter.leagueStanding = { league: 'amateur', status: 'ranked', rank: 12 }
     opponent.rank = 9
     opponent.standing = 'ranked'
     opponent.league = 'amateur'
-    result.fight!.winner = 'player'
-    result.fight!.offer.rankReward = 6
+    beforeSettlement.fight!.offer.rankReward = 6
 
-    const settled = apply(result, { type: 'ACK_FIGHT_RESULT' })
+    const settled = settleDecision(beforeSettlement, 'player')
     expect(settled.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'ranked', rank: 9 })
     expect(settled.fighter.history.at(-1)?.summary).toContain('排名從 #12 升至 #9')
   })
@@ -723,7 +817,7 @@ describe('拳途人生模擬核心', () => {
 
   it('訓練挑戰可安全續作，並且只有引擎接受的原始輸入才會消耗時段', () => {
     let state = enterCamp('DRILL-RESUME')
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
+    state = startTechniqueEdge(state, 'boxing')
     const resumed = structuredClone(state)
     expect(resumed.activeCampDrill).toEqual(state.activeCampDrill)
     const rejected = apply(resumed, { type: 'RESOLVE_CAMP_DRILL', result: { kind: 'technique', answers: ['not-a-choice'], elapsedMs: 0 } })
@@ -741,11 +835,10 @@ describe('拳途人生模擬核心', () => {
     technique.fighter.traits = []
     technique.fighter.relationships.find((relationship) => relationship.role === 'coach')!.trust = 50
     const beforeTechnique = technique.fighter.skills.boxing.xp
-    technique = apply(technique, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
+    technique = startTechniqueEdge(technique, 'boxing')
     technique = resolvePerfectDrill(technique)
     expect(technique.fighter.skills.boxing.xp - beforeTechnique).toBeGreaterThanOrEqual(70)
-    technique = apply(technique, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
-    technique = resolvePerfectDrill(technique)
+    technique = apply(technique, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'boxing' })
     expect(technique.trainingMoveChoices).toBeUndefined()
     expect(technique.fighter.learnedMoves).toEqual(expect.arrayContaining(['jab-cross', 'check-hook', 'double-jab-entry']))
 
@@ -769,10 +862,9 @@ describe('拳途人生模擬核心', () => {
     untrained.fighter.skills.ground.aptitude = 1
     untrained.fighter.traits = []
     untrained.fighter.relationships.find((relationship) => relationship.role === 'coach')!.trust = 50
-    untrained = apply(untrained, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'ground' })
+    untrained = startTechniqueEdge(untrained, 'ground')
     untrained = resolvePerfectDrill(untrained)
-    untrained = apply(untrained, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'ground' })
-    untrained = resolvePerfectDrill(untrained)
+    untrained = apply(untrained, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'ground' })
     expect(skillLevel(untrained.fighter.skills.ground.xp)).toBe(1)
     expect(untrained.trainingMoveChoices).toBeUndefined()
     expect(untrained.fighter.learnedMoves).toEqual(expect.arrayContaining(['ground-strikes', 'rebuild-guard', 'hip-escape']))
@@ -798,10 +890,9 @@ describe('拳途人生模擬核心', () => {
       state.fighter.skills[branch].aptitude = 1
       state.fighter.traits = []
       state.fighter.relationships.find((relationship) => relationship.role === 'coach')!.trust = 50
-      state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch })
+      state = startTechniqueEdge(state, branch)
       state = resolvePerfectDrill(state)
-      state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch })
-      state = resolvePerfectDrill(state)
+      state = apply(state, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch })
       expect(state.trainingMoveChoices).toBeUndefined()
       expect(state.fighter.learnedMoves).toEqual(expect.arrayContaining([...expected]))
     }
@@ -821,7 +912,7 @@ describe('拳途人生模擬核心', () => {
   it('每個技術分支都有真實招式組合', () => {
     for (const branch of ['boxing', 'kicking', 'clinch', 'wrestling', 'ground'] as const) {
       let technique = enterCamp(`COMBO-${branch}`)
-      technique = apply(technique, { type: 'START_CAMP_DRILL', action: 'technique', branch })
+      technique = startTechniqueEdge(technique, branch)
       expect(technique.activeCampDrill?.mode).toBe('combo')
       if (technique.activeCampDrill?.mode === 'combo') {
         expect(technique.activeCampDrill.steps).toHaveLength(3)
@@ -848,14 +939,14 @@ describe('拳途人生模擬核心', () => {
     base.fighter.skills.boxing.xp = 300
     let low = structuredClone(base)
     const before = low.fighter.skills.boxing.xp
-    low = apply(low, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
+    low = startTechniqueEdge(low, 'boxing')
     low = apply(low, { type: 'RESOLVE_CAMP_DRILL', result: { kind: 'technique', mode: 'combo', inputs: [], elapsedMs: low.activeCampDrill!.durationMs } })
     expect(low.fighter.skills.boxing.xp).toBeGreaterThan(before)
     expect(low.campDrillHistory.at(-1)).toMatchObject({ source: 'edge', label: '穩定完成', score: .7 })
 
     let high = structuredClone(base)
     const highBefore = high.fighter.skills.boxing.xp
-    high = apply(high, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
+    high = startTechniqueEdge(high, 'boxing')
     high = resolvePerfectDrill(high)
     expect(high.fighter.skills.boxing.xp - highBefore).toBeGreaterThan(low.fighter.skills.boxing.xp - before)
     expect(high.campDrillHistory.at(-1)).toMatchObject({ source: 'edge', label: '完美節奏' })
@@ -881,7 +972,7 @@ describe('拳途人生模擬核心', () => {
     let state = enterCamp('DRILL-PARTIAL-EXPIRED')
     state.fighter.skills.boxing.xp = 300
     const before = state.fighter.skills.boxing.xp
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing', relaxedTiming: true })
+    state = startTechniqueEdge(state, 'boxing', true)
     const challenge = state.activeCampDrill
     expect(challenge?.mode).toBe('combo')
     if (challenge?.mode !== 'combo') return
@@ -957,7 +1048,9 @@ describe('拳途人生模擬核心', () => {
     const range = apply(rangeAdvantage, { type: 'SET_ROUND_PLAN', plan: 'distance' })
     const rangeOption = (state: GameState) => state.fight!.prompt!.allOptions.find((option) => option.intentId === 'front-kick')!
     expect(range.fight!.momentum).toBeGreaterThan(neutralRange.fight!.momentum)
-    expect(rangeOption(range).chance.min).toBeGreaterThan(rangeOption(neutralRange).chance.min)
+    expect(rangeOption(range).factors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'body:matchup', magnitude: 8 }),
+    ]))
 
     const neutralPressure = apply(structuredClone(base), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
     const pressureAdvantage = structuredClone(base)
@@ -1003,23 +1096,28 @@ describe('拳途人生模擬核心', () => {
     const initial = createNewRun({ ...input, startingExperience: 'normie', seed: 'NO-FIGHT-LIMIT' })
     expect(initial.fighter).not.toHaveProperty('careerFightTarget')
 
-    let state = reachFirstFightResult(initial)
+    const state = reachFirstFinalRoundResult(initial)
     state.fighter.evidence.fights = 19
     state.fighter.age = 27
     state.fighter.health = { head: 100, hands: 100, knees: 100, torso: 100 }
     state.fight!.playerDamage = 0
-    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    state.fight!.playerDamageByPart = { head: 0, body: 0, leg: 0 }
+    const settled = settleDecision(state, 'player')
 
     expect(settled.fighter.evidence.fights).toBe(20)
-    expect(['growth', 'offer']).toContain(settled.phase)
-    if (settled.phase === 'growth') expect(settled.growthDestination).toBe('offer')
+    expect(settled.phase).toBe('fight-result')
+    expect(settled.careerChanges?.route).toBe('offer')
+    expect(['growth', 'offer']).toContain(apply(settled, { type: 'ACK_FIGHT_RESULT' }).phase)
   })
 
   it('賽後健康落在療傷線時可選擇停賽或退役，硬性退役線才強制結束生涯', () => {
-    let state = reachFirstFightResult(createNewRun({ ...input, seed: 'INJURY-RETIREMENT' }))
+    const state = reachFirstFinalRoundResult(createNewRun({ ...input, seed: 'INJURY-RETIREMENT' }))
     state.fighter.health.head = 25
     state.fight!.playerDamage = 0
-    const settled = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    state.fight!.playerDamageByPart = { head: 0, body: 0, leg: 0 }
+    const result = settleDecision(state, 'player')
+    expect(result.careerChanges?.route).toBe('injury-recovery')
+    const settled = apply(result, { type: 'ACK_FIGHT_RESULT' })
     expect(settled.growthDestination).toBe('injury-recovery')
 
     const voluntaryRetirement = apply(settled, { type: 'RETIRE' })
@@ -1028,12 +1126,18 @@ describe('拳途人生模擬核心', () => {
     const recovered = apply(settled, { type: 'CONTINUE_GROWTH' })
     expect(recovered.phase).toBe('offer')
     expect(recovered.fighter.health.head).toBe(43)
-    expect(recovered.fighter.history.at(-1)?.tags).toContain('療養')
+    // A one-year layoff can now append annual world news after the medical
+    // entry, so assert the semantic history exists rather than assuming it is
+    // always the final timeline row.
+    expect(recovered.fighter.history.some((entry) => entry.tags.includes('療養'))).toBe(true)
 
-    let critical = reachFirstFightResult(createNewRun({ ...input, seed: 'HARD-INJURY-RETIREMENT' }))
+    const critical = reachFirstFinalRoundResult(createNewRun({ ...input, seed: 'HARD-INJURY-RETIREMENT' }))
     critical.fighter.health.head = 10
     critical.fight!.playerDamage = 0
-    const criticalSettled = apply(critical, { type: 'ACK_FIGHT_RESULT' })
+    critical.fight!.playerDamageByPart = { head: 0, body: 0, leg: 0 }
+    const criticalResult = settleDecision(critical, 'player')
+    expect(criticalResult.careerChanges?.route).toBe('retirement')
+    const criticalSettled = apply(criticalResult, { type: 'ACK_FIGHT_RESULT' })
     expect(criticalSettled.growthDestination).toBe('retirement')
 
     const retired = apply(criticalSettled, { type: 'CONTINUE_GROWTH' })
@@ -1078,6 +1182,35 @@ describe('拳途人生模擬核心', () => {
       expect(roster.filter((opponent) => opponent.standing === 'ranked').map((opponent) => opponent.rank).sort((a, b) => (a ?? 99) - (b ?? 99))).toEqual(Array.from({ length: 15 }, (_, index) => index + 1))
     }
     expect(first.opponents.filter((opponent) => opponent.league === 'grassroots')).toHaveLength(5)
+    expect(first.opponents.filter((opponent) => opponent.league === 'grassroots').map((opponent) => opponent.grassrootsSlot)).toEqual([1, 2, 3, undefined, undefined])
+  })
+
+  it('草根試煉只在擊敗三名不同固定對手後前進，敗戰不會移除對手', () => {
+    let state = createNewRun({ ...input, startingExperience: 'normie', seed: 'GRASSROOTS-THREE-WINS' })
+    expect(state.offers).toHaveLength(3)
+    const firstOpponentId = state.offers[0].opponentId
+
+    for (let loss = 1; loss <= 2; loss += 1) {
+      state = settleDecision(reachFirstFinalRoundResult(state), 'opponent')
+      expect(state.stage).toBe('grassroots')
+      expect(state.fighter.grassrootsDefeatedSlots).toEqual([])
+      expect(state.offers.some((offer) => offer.opponentId === firstOpponentId)).toBe(true)
+      state = apply(state, { type: 'ACK_FIGHT_RESULT' })
+    }
+    for (let defeated = 1; defeated <= 3; defeated += 1) {
+      const opponentId = state.offers[0].opponentId
+      state = settleDecision(reachFirstFinalRoundResult(state), 'player')
+      expect(state.fighter.grassrootsDefeatedSlots).toHaveLength(defeated)
+      expect(state.offers.some((offer) => offer.opponentId === opponentId)).toBe(false)
+      if (defeated < 3) {
+        expect(state.stage).toBe('grassroots')
+        expect(state.offers).toHaveLength(3 - defeated)
+        state = apply(state, { type: 'ACK_FIGHT_RESULT' })
+      }
+    }
+    expect(state.stage).toBe('amateur')
+    expect(state.fighter.leagueStanding).toEqual({ league: 'amateur', status: 'unranked' })
+    expect(state.offers.every((offer) => state.opponents.find((opponent) => opponent.id === offer.opponentId)?.league === 'amateur')).toBe(true)
   })
 
   it('地方收入與治療費使用同一經濟倍率，貨幣顯示依出身地改變', () => {
@@ -1183,6 +1316,10 @@ describe('拳途人生模擬核心', () => {
     state.stage = 'legacy'
     state.fighter.evidence.fights = 13
     state.fighter.money = 1_000_000
+    state.motiveProgress = {
+      motive: 'prove', path: 'defiant', resolution: 'defiant',
+      completedBeats: { first: 'defiant', reckoning: 'defiant' },
+    }
     const techniqueBefore = structuredClone(state.fighter.technique)
     state = completeCampDrill(state, 'recovery')
     state = completeCampDrill(state, 'recovery')
@@ -1203,20 +1340,42 @@ describe('拳途人生模擬核心', () => {
     expect(retired.biography).toBeDefined()
   })
 
-  it('每第二個早期營隊會出現家鄉事件，選擇結果會留下地區記憶', () => {
-    let state = createNewRun({ ...input, region: 'taiwan', seed: 'REGIONAL-EVENT' })
-    state.phase = 'camp'
-    state.stage = 'amateur'
-    state.fighter.evidence.fights = 1
-    state = completeCampDrill(state, 'recovery')
-    state = completeCampDrill(state, 'recovery')
-    state = completeCampDrill(state, 'recovery')
-    expect(state.phase).toBe('life')
-    expect(state.lifeEvent?.region).toBe('taiwan')
-    expect(state.lifeEvent?.title).toBe('地方拳館交流日')
-    state = apply(state, { type: 'RESOLVE_LIFE', optionId: 'community' })
-    expect(state.fighter.history.at(-1)?.tags).toContain('家鄉')
-    expect(state.fighter.history.at(-1)?.summary.length).toBeGreaterThan(20)
+  it('脈絡事件依優先順序出現，地區回訪只出現一次，也可直接進入賽前', () => {
+    let relationshipFirst = createNewRun({ ...input, region: 'taiwan', seed: 'EVENT-PRIORITY' })
+    relationshipFirst.phase = 'camp'
+    relationshipFirst.stage = 'amateur'
+    relationshipFirst.fighter.evidence.fights = 1
+    relationshipFirst = completeCampDrill(relationshipFirst, 'recovery')
+    relationshipFirst = completeCampDrill(relationshipFirst, 'recovery')
+    relationshipFirst = completeCampDrill(relationshipFirst, 'recovery')
+    expect(relationshipFirst.lifeEvent?.title).toBe('比賽計畫出現分歧')
+    expect(relationshipFirst.lifeEvent?.region).toBeUndefined()
+
+    let regional = createNewRun({ ...input, region: 'taiwan', seed: 'REGIONAL-EVENT' })
+    regional.phase = 'camp'
+    regional.stage = 'amateur'
+    regional.fighter.evidence.fights = 0
+    regional = completeCampDrill(regional, 'recovery')
+    regional = completeCampDrill(regional, 'recovery')
+    regional = completeCampDrill(regional, 'recovery')
+    expect(regional.lifeEvent?.region).toBe('taiwan')
+    expect(regional.lifeEvent?.title).toBe('地方拳館交流日')
+    regional = apply(regional, { type: 'RESOLVE_LIFE', optionId: 'community' })
+    expect(regional.fighter.history.at(-1)?.tags).toContain('家鄉')
+
+    let noEvent = createNewRun({ ...input, region: 'taiwan', seed: 'NO-MANDATORY-EVENT' })
+    noEvent.phase = 'camp'
+    noEvent.stage = 'amateur'
+    noEvent.fighter.evidence.fights = 0
+    noEvent.fighter.history.push({
+      id: 'region-already-seen', year: noEvent.fighter.year, age: noEvent.fighter.age,
+      title: '已完成地區回訪', summary: '這段地區經歷已經發生。', people: [], importance: 1, tags: ['家鄉'],
+    })
+    noEvent = completeCampDrill(noEvent, 'recovery')
+    noEvent = completeCampDrill(noEvent, 'recovery')
+    noEvent = completeCampDrill(noEvent, 'recovery')
+    expect(noEvent.phase).toBe('prefight')
+    expect(noEvent.lifeEvent).toBeUndefined()
   })
 
   it('第十版生涯會補上家鄉與賽事欄位，不改寫既有姓名', () => {
@@ -1308,7 +1467,9 @@ describe('拳途人生模擬核心', () => {
       return state
     }
     const complete = (state: GameState, action: CampAction) => {
-      const started = apply(state, { type: 'START_CAMP_DRILL', action, branch: 'boxing' })
+      const started = action === 'technique'
+        ? startTechniqueEdge(state, 'boxing')
+        : apply(state, { type: 'START_CAMP_DRILL', action, branch: 'boxing' })
       return resolvePerfectDrill(started)
     }
 
@@ -1333,14 +1494,13 @@ describe('拳途人生模擬核心', () => {
     state.fighter.skills.boxing.aptitude = 1
     state.fighter.traits = []
     state.fighter.relationships.find((relationship) => relationship.role === 'coach')!.trust = 50
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
+    state = startTechniqueEdge(state, 'boxing')
     state = resolvePerfectDrill(state)
     expect(state.phase).toBe('camp')
     expect(state.fighter.skills.boxing.xp).toBe(70)
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
-    state = resolvePerfectDrill(state)
+    state = apply(state, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'boxing' })
     expect(state.phase).toBe('camp')
-    expect(state.fighter.skills.boxing.xp).toBe(130)
+    expect(state.fighter.skills.boxing.xp).toBe(124)
     expect(state.fighter.learnedMoves).toEqual(expect.arrayContaining(['jab-cross', 'check-hook', 'double-jab-entry']))
     expect(state.trainingMoveChoices).toBeUndefined()
   })
@@ -1352,27 +1512,24 @@ describe('拳途人生模擬核心', () => {
     state.fighter.skills.boxing.aptitude = 1
     state.fighter.traits = []
     state.fighter.relationships.find((relationship) => relationship.role === 'coach')!.trust = 50
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
+    state = startTechniqueEdge(state, 'boxing')
     state = resolvePerfectDrill(state)
     expect(state.phase).toBe('camp')
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
-    state = resolvePerfectDrill(state)
+    state = apply(state, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'boxing' })
     expect(state.phase).toBe('camp')
     const learnedAfterFoundation = state.fighter.learnedMoves.length
 
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
-    state = resolvePerfectDrill(state)
-    expect(state.phase).toBe('life')
+    state = apply(state, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'boxing' })
+    expect(['life', 'prefight']).toContain(state.phase)
     expect(state.trainingMoveChoices).toBeUndefined()
     expect(state.fighter.learnedMoves).toHaveLength(learnedAfterFoundation)
     expect(state.campDrillHistory.at(-1)?.effects.some((effect) => effect.includes('尚未累積到下一次選招的'))).toBe(true)
 
-    state = { ...state, phase: 'camp', campActions: [] }
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
+    state = { ...state, phase: 'camp', campActions: [], campDrillHistory: [], campEdgeUsed: false }
+    state = startTechniqueEdge(state, 'boxing')
     state = resolvePerfectDrill(state)
     expect(state.phase).toBe('camp')
-    state = apply(state, { type: 'START_CAMP_DRILL', action: 'technique', branch: 'boxing' })
-    state = resolvePerfectDrill(state)
+    state = apply(state, { type: 'COMPLETE_CAMP_ACTIVITY', action: 'technique', branch: 'boxing' })
     expect(state.phase).toBe('training-reward')
     expect(state.trainingMoveChoices).toHaveLength(4)
     expect(state.trainingMoveRequired).toBe(1)
@@ -1426,7 +1583,8 @@ describe('拳途人生模擬核心', () => {
   it('同一命令策略會重現相同完整人生', () => {
     const first = completeCareer(createNewRun(input))
     const second = completeCareer(createNewRun(input))
-    expect(second).toEqual(first)
+    expect(second.careerId).not.toBe(first.careerId)
+    expect(withoutCareerIdentity(second)).toEqual(withoutCareerIdentity(first))
   })
 
   it('每場比賽只有新特質或特質進度才停在成果畫面', () => {
@@ -1539,7 +1697,7 @@ describe('拳途人生模擬核心', () => {
       const doubleLeg = state.fight!.prompt!.allOptions.find((option) => option.actionKey === 'shot-entry')
       if (!doubleLeg) continue
 
-      doubleLeg.chance = { min: 100, max: 100 }
+      forceOptionChance(doubleLeg, 100)
       state.fight!.finishWindowsUsed = 4
       const takedownsBefore = state.fighter.evidence.takedowns
       const resolved = apply(state, { type: 'RESOLVE_CRITICAL', optionId: doubleLeg.id })
@@ -1671,7 +1829,7 @@ describe('拳途人生模擬核心', () => {
       clean = apply(clean, { type: 'SET_ROUND_PLAN', plan: 'distance' })
       clean.fight!.finishWindowsUsed = 4
       const cleanOption = clean.fight!.prompt!.allOptions.find((option) => option.intentId === move.id)!
-      cleanOption.chance = { min: 140, max: 140 }
+      forceOptionChance(cleanOption, 140)
       const takedownsBefore = clean.fighter.evidence.takedowns
       clean = apply(clean, { type: 'RESOLVE_CRITICAL', optionId: cleanOption.id })
       expect(clean.fight!.beatHistory.at(-1)?.outcome).toBe('clean')
@@ -1694,7 +1852,7 @@ describe('拳途人生模擬核心', () => {
           effectSummary: '維持外圍', exploitsOpenings: [], threatLevel: 'watch',
         }
         const option = contested.fight!.prompt!.allOptions.find((item) => item.intentId === move.id)!
-        option.chance = { min: 70, max: 70 }
+        forceOptionChance(option, 70)
         const before = contested.fighter.evidence.takedowns
         contested = apply(contested, { type: 'RESOLVE_CRITICAL', optionId: option.id })
         if (contested.fight!.beatHistory.at(-1)?.outcome !== 'contested') continue
@@ -1717,7 +1875,7 @@ describe('拳途人生模擬核心', () => {
         effectSummary: '搶先打斷進場', exploitsOpenings: [], threatLevel: 'watch',
       }
       const counteredOption = countered.fight!.prompt!.allOptions.find((item) => item.intentId === move.id)!
-      counteredOption.chance = { min: -40, max: -40 }
+      forceOptionChance(counteredOption, -40)
       const counteredTakedownsBefore = countered.fighter.evidence.takedowns
       countered = apply(countered, { type: 'RESOLVE_CRITICAL', optionId: counteredOption.id })
       expect(countered.fight!.beatHistory.at(-1)?.outcome).toBe('countered')
@@ -1733,7 +1891,7 @@ describe('拳途人生模擬核心', () => {
       if (currentPosition(state) !== 'clinch') continue
       const takedown = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'clinch-throw')
       if (!takedown) continue
-      takedown.chance = { min: 140, max: 140 }
+      forceOptionChance(takedown, 140)
       state.fight!.finishWindowsUsed = 4
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: takedown.id })
       if (state.phase !== 'critical' || currentPosition(state) !== 'top') continue
@@ -1741,7 +1899,7 @@ describe('拳途人生模擬核心', () => {
       const backTake = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'take-back')
       expect(backTake).toBeDefined()
       expect(backTake!.finishRoute).toBeUndefined()
-      backTake!.chance = { min: 140, max: 140 }
+      forceOptionChance(backTake!, 140)
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: backTake!.id })
       if (state.phase !== 'critical' || currentPosition(state) !== 'back-control') continue
 
@@ -1755,7 +1913,7 @@ describe('拳途人生模擬核心', () => {
       expect(armbar.label).toContain('十字固')
       expect(armbar.finishRoute).toContain('降服路線')
 
-      rnc.chance = { min: 140, max: 140 }
+      forceOptionChance(rnc, 140)
       Object.assign(state.fight!, { playerStamina: 100, opponentStamina: 10, opponentDamage: 70, momentum: 40, finishPressure: 100, playerControl: 60, opponentControl: 0, initiative: 'player', finishWindowsUsed: 0 })
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: rnc.id })
       if (state.phase !== 'finish-minigame') continue
@@ -1824,7 +1982,7 @@ describe('拳途人生模擬核心', () => {
     expect(thai).toBeDefined()
     let thaiState = thai!
     const collar = thaiState.fight!.prompt!.allOptions.find((option) => option.intentId === 'double-collar-entry')!
-    collar.chance = { min: 140, max: 140 }
+    forceOptionChance(collar, 140)
     thaiState.fight!.finishWindowsUsed = 4
     thaiState = apply(thaiState, { type: 'RESOLVE_CRITICAL', optionId: collar.id })
     expect(thaiState.fight!.position).toBe('thai-clinch')
@@ -1834,7 +1992,7 @@ describe('拳途人生模擬核心', () => {
       'plum-body-knees', 'plum-head-knee', 'plum-slicing-elbow', 'plum-outside-trip', 'plum-release-elbow', 'plum-control',
     ]))
     const plumControl = thaiState.fight!.prompt!.allOptions.find((option) => option.intentId === 'plum-control')!
-    plumControl.chance = { min: 140, max: 140 }
+    forceOptionChance(plumControl, 140)
     thaiState = apply(thaiState, { type: 'RESOLVE_CRITICAL', optionId: plumControl.id })
     expect(thaiState.fight!.positionPayoff).toBeUndefined()
     expect(thaiState.fight!.sequenceStep).toBe(2)
@@ -1853,7 +2011,7 @@ describe('拳途人生模擬核心', () => {
     expect(front).toBeDefined()
     let frontState = front!
     const snapdown = frontState.fight!.prompt!.allOptions.find((option) => option.intentId === 'snapdown-entry')!
-    snapdown.chance = { min: 140, max: 140 }
+    forceOptionChance(snapdown, 140)
     frontState.fight!.finishWindowsUsed = 4
     frontState = apply(frontState, { type: 'RESOLVE_CRITICAL', optionId: snapdown.id })
     expect(frontState.fight!.position).toBe('front-headlock-control')
@@ -1878,12 +2036,12 @@ describe('拳途人生模擬核心', () => {
         state = apply(state, { type: 'SET_ROUND_PLAN', plan })
         const setup = state.fight!.prompt!.allOptions.find((option) => option.intentId === setupId)
         if (!setup) continue
-        setup.chance = { min: 140, max: 140 }
+        forceOptionChance(setup, 140)
         state.fight!.finishWindowsUsed = 4
         state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: setup.id })
         const transition = state.fight!.prompt!.allOptions.find((option) => option.intentId === transitionId)
         if (!transition) continue
-        transition.chance = { min: 60, max: 60 }
+        forceOptionChance(transition, 60)
         const withoutSetup = structuredClone(state)
         withoutSetup.fight!.opponentOpenings = withoutSetup.fight!.opponentOpenings.filter((opening) => opening.key !== setupOpening)
         const prepared = apply(state, { type: 'RESOLVE_CRITICAL', optionId: transition.id })
@@ -1931,13 +2089,13 @@ describe('拳途人生模擬核心', () => {
     state.fight!.sequenceStep = 4
     state.fight!.finishWindowsUsed = 4
     const pass = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'pass-guard')!
-    pass.chance = { min: 140, max: 140 }
+    forceOptionChance(pass, 140)
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: pass.id })
     expect(state.fight!.position).toBe('mount')
     expect(state.fight!.positionPayoff).toEqual({ position: 'mount', sourceStep: 4 })
     expect(state.phase).toBe('critical')
     const control = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'mount-control')!
-    control.chance = { min: 140, max: 140 }
+    forceOptionChance(control, 140)
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: control.id })
     expect(state.fight!.positionPayoff).toBeUndefined()
     expect(state.phase).toBe('round-result')
@@ -1952,7 +2110,7 @@ describe('拳途人生模擬核心', () => {
       effectSummary: '成功後把你帶到防守架下位', exploitsOpenings: [], threatLevel: 'danger',
     }
     const sprawl = defense.fight!.prompt!.allOptions.find((option) => option.intentId === 'sprawl-circle')!
-    sprawl.chance = { min: 140, max: 140 }
+    forceOptionChance(sprawl, 140)
     defense = apply(defense, { type: 'RESOLVE_CRITICAL', optionId: sprawl.id })
     expect(defense.fight!.position).toBe('front-headlock-control')
     expect(defense.fight!.positionPayoff?.position).toBe('front-headlock-control')
@@ -1964,7 +2122,7 @@ describe('拳途人生模擬核心', () => {
       effectSummary: '拆解抱摔並控制頭頸', exploitsOpenings: [], threatLevel: 'danger',
     }
     const shotEntry = shot.fight!.prompt!.allOptions.find((option) => option.intentId === 'shot-entry')!
-    shotEntry.chance = { min: 0, max: 0 }
+    forceOptionChance(shotEntry, 0)
     shot = apply(shot, { type: 'RESOLVE_CRITICAL', optionId: shotEntry.id })
     expect(shot.fight!.position).toBe('front-headlock-defense')
     expect(shot.fight!.positionPayoff?.position).toBe('front-headlock-defense')
@@ -1976,7 +2134,7 @@ describe('拳途人生模擬核心', () => {
       let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `BODY-LOCK-CHAIN-${index}` })), { type: 'SET_ROUND_PLAN', plan: 'cage' })
       if (state.fight!.position !== 'cage-control') continue
       const bodyLock = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'body-lock-control')!
-      bodyLock.chance = { min: 140, max: 140 }
+      forceOptionChance(bodyLock, 140)
       state.fight!.finishWindowsUsed = 4
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: bodyLock.id })
       expect(state.fight!.position).toBe('body-lock')
@@ -2053,7 +2211,7 @@ describe('拳途人生模擬核心', () => {
     expect(state.fight!.position).toBe('pocket')
     state.fight!.finishWindowsUsed = 4
     const first = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'quick-combination')!
-    first.chance = { min: 140, max: 140 }
+    forceOptionChance(first, 140)
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: first.id })
     const chained = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'lead-hook')!
     const repeated = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'quick-combination')!
@@ -2076,7 +2234,7 @@ describe('拳途人生模擬核心', () => {
     const headKick = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'head-kick')!
     expect(headKick.identityTags).toEqual(expect.arrayContaining(['高承諾', '頭部終結']))
     expect(headKick.negatives.join('、')).toContain('被接住可能進入防守架下位')
-    headKick.chance = { min: -100, max: -100 }
+    forceOptionChance(headKick, -100)
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: headKick.id })
     expect(state.fight!.beatHistory.at(-1)?.outcome).toBe('countered')
     expect(state.fight!.position).toBe('bottom')
@@ -2125,7 +2283,7 @@ describe('拳途人生模擬核心', () => {
     state.fighter.background = '業餘拳擊手'
     state = apply(reachFirstRoundPlan(state), { type: 'SET_ROUND_PLAN', plan: 'distance' })
     const probe = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'probe-range')!
-    probe.chance = { min: 100, max: 100 }
+    forceOptionChance(probe, 100)
     state.fight!.finishWindowsUsed = 4
     const executionId = probe.executionId
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: probe.id })
@@ -2150,7 +2308,7 @@ describe('拳途人生模擬核心', () => {
       state.fight!.finishWindowsUsed = 4
       if (intentId === 'attack-body') state.fight!.opponentDamageByPart.body = 9
       const option = state.fight!.prompt!.allOptions.find((item) => item.intentId === intentId)!
-      option.chance = { min: 100, max: 100 }
+      forceOptionChance(option, 100)
       const staminaBefore = state.fight!.opponentStamina
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: option.id })
       return { drain: staminaBefore - state.fight!.opponentStamina, state }
@@ -2174,13 +2332,15 @@ describe('拳途人生模擬核心', () => {
       titles.push(state.fight!.prompt!.title.split('｜')[0])
       state.fight!.finishWindowsUsed = 4
       const choice = state.fight!.prompt!.allOptions.find((option) => option.intentId === 'probe-range') ?? safestMove(state)
-      choice.chance = { min: 100, max: 100 }
+      forceOptionChance(choice, 100)
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: choice.id })
     }
     expect(titles).toEqual(['接觸', '交鋒', '轉折', '收尾'])
-    expect(state.fight!.opponentAdaptation['probe-range']).toBe(4)
-    expect(state.fight!.opponentAdaptation['category:offense']).toBeGreaterThanOrEqual(4)
-    expect(state.fight!.opponentAdaptation['branch:boxing']).toBeGreaterThanOrEqual(4)
+    const probeUses = state.fight!.beatHistory.filter((beat) => beat.moveId === 'probe-range').length
+    expect(probeUses).toBeGreaterThanOrEqual(3)
+    expect(state.fight!.opponentAdaptation['probe-range']).toBe(probeUses)
+    expect(state.fight!.opponentAdaptation['category:offense']).toBeGreaterThanOrEqual(probeUses)
+    expect(state.fight!.opponentAdaptation['branch:boxing']).toBeGreaterThanOrEqual(probeUses)
   })
 
   it('對手會跨招式讀取重複的攻防類型與技術分支，使綠色克制不再是永久答案', () => {
@@ -2196,7 +2356,8 @@ describe('拳途人生模擬核心', () => {
     const fresh = freshRound.fight!.prompt!.allOptions.find((option) => option.intentId === 'angle-away')!
     const read = readRound.fight!.prompt!.allOptions.find((option) => option.intentId === 'angle-away')!
 
-    expect(read.chance.min).toBeLessThanOrEqual(fresh.chance.min - 18)
+    expect(read.chance.min).toBeLessThan(fresh.chance.min)
+    expect(read.factors.find((factor) => factor.id === 'adaptation:pattern')?.magnitude).toBe(-20)
     expect(read.negatives.join('、')).toContain('防守節奏已曝光 2 次')
     expect(read.negatives.join('、')).toContain('拳擊路線已被追蹤')
   })
@@ -2207,7 +2368,9 @@ describe('拳途人生模擬核心', () => {
       let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: `OUTCOME-${index}` })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
       state.fight!.finishWindowsUsed = 4
       const option = state.fight!.prompt!.featuredOptions[0]
-      option.chance = index % 3 === 0 ? { min: 100, max: 100 } : index % 3 === 1 ? { min: 0, max: 0 } : { min: 45, max: 55 }
+      if (index % 3 === 0) forceOptionChance(option, 100)
+      else if (index % 3 === 1) forceOptionChance(option, 0)
+      else forceOptionChance(option, 45, 55)
       state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: option.id })
       const beat = state.fight!.beatHistory[0]
       outcomes.add(beat.outcome)
@@ -2223,7 +2386,7 @@ describe('拳途人生模擬核心', () => {
     let state = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'LIVE-CALL-HEAVY-HIT' })), { type: 'SET_ROUND_PLAN', plan: 'distance' })
     state.fight!.finishWindowsUsed = 4
     const haymaker = state.fight!.prompt!.allOptions.find((option) => option.actionKey === 'haymaker')!
-    haymaker.chance = { min: 100, max: 100 }
+    forceOptionChance(haymaker, 100)
 
     state = apply(state, { type: 'RESOLVE_CRITICAL', optionId: haymaker.id })
 
@@ -2261,7 +2424,8 @@ describe('拳途人生模擬核心', () => {
     state = apply(state, { type: 'CONTINUE_ROUND' })
     expect(state.phase).toBe('round-plan')
     expect(state.fight!.round).toBe(2)
-    expect(state.fight!.beatHistory).toHaveLength(0)
+    expect(state.fight!.beatHistory).toHaveLength(4)
+    expect(state.fight!.beatHistory.map((beat) => beat.step)).toEqual([1, 2, 3, 4])
     expect(state.fight!.roundCommentaryStart).toBe(firstRoundCommentary.length)
     expect(state.fight!.commentary).toEqual(expect.arrayContaining(firstRoundCommentary))
   })
@@ -2279,6 +2443,13 @@ describe('拳途人生模擬核心', () => {
     expect(great.submissionStart).toBeGreaterThan(poor.submissionStart)
     expect(great.submissionResistance).toBeLessThan(poor.submissionResistance)
     expect(great.submissionDurationMs).toBeGreaterThan(poor.submissionDurationMs)
+  })
+
+  it('降服小遊戲為進攻與防守提供比原基準多 15% 的完成時間', () => {
+    expect(submissionDurationFor(0, 'player')).toBe(3220)
+    expect(submissionDurationFor(100, 'player')).toBe(4600)
+    expect(submissionDurationFor(0, 'opponent')).toBe(4600)
+    expect(submissionDurationFor(100, 'opponent')).toBe(3220)
   })
 
   it('擊倒小遊戲成功後直接終結，不再進行隱藏亂數', () => {
@@ -2414,7 +2585,7 @@ describe('拳途人生模擬核心', () => {
       effectSummary: '主要威脅：頭部傷害', exploitsOpenings: [], threatLevel: 'danger',
     }
     const option = state.fight!.prompt!.allOptions.find((item) => !FIGHT_INTENTS.find((intent) => intent.id === item.actionKey)?.submission)!
-    option.chance = { min: 100, max: 100 }
+    forceOptionChance(option, 100)
     const unprotected = apply(structuredClone(state), { type: 'RESOLVE_CRITICAL', optionId: option.id })
     state.fight!.cornerAdjustment = 'protect'
     state.fight!.cornerTarget = 'head'
@@ -2461,7 +2632,7 @@ describe('拳途人生模擬核心', () => {
   it('充分建立的打擊與降服優勢會真正進入相應終結階段', () => {
     let strikeState = apply(reachFirstRoundPlan(createNewRun({ ...input, seed: 'TKO-WINDOW' })), { type: 'SET_ROUND_PLAN', plan: 'pressure' })
     const strikeOption = strikeState.fight!.prompt!.allOptions.find((option) => !option.conservative && option.category === 'offense')!
-    strikeOption.chance = { min: 100, max: 100 }
+    forceOptionChance(strikeOption, 100)
     Object.assign(strikeState.fight!, { playerStamina: 100, opponentStamina: 10, opponentDamage: 90, momentum: 40, finishPressure: 100, initiative: 'player', finishWindowsUsed: 0 })
     strikeState.fight!.opponentDamageByPart.head = 80
     strikeState = apply(strikeState, { type: 'RESOLVE_CRITICAL', optionId: strikeOption.id })

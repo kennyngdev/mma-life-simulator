@@ -3,14 +3,17 @@ import packageMeta from '../package.json'
 import { BRANCH_META, formatRegionalMoney, MOTIVES, REGION_LABELS, REGION_PROFILES } from './game/content'
 import { FIGHT_INTENTS, intentForExecutionId, MOVE_VISUAL_FAMILY_BY_INTENT, OPENING_LABELS } from './game/fight-content'
 import type { MoveVisualFamily } from './game/fight-content'
-import { advance, bodyMatchupFor, CAREER_HEALTH_RECOVERY_THRESHOLD, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, fighterStandingLabel, getOpponent, getRelationshipBenefit, LEAGUE_LABELS, LEAGUE_TITLE_RATING_FLOORS, offerRefreshCost, relationshipTier, STAGE_LABELS } from './game/engine'
+import { advance, bodyMatchupFor, CAREER_HEALTH_RECOVERY_THRESHOLD, CAREER_HEALTH_RETIREMENT_THRESHOLD, careerRunwayLabel, competitiveRatingForFighter, competitiveRatingForOpponent, createNewRun, damageSeverity, fighterStandingLabel, getOpponent, getRelationshipBenefit, GRASSROOTS_REQUIRED_OPPONENTS, LEAGUE_TITLE_RATING_FLOORS, offerRefreshCost, relationshipTier, reputationBand, STAGE_LABELS } from './game/engine'
 import { aptitudeLabel, minimumMoveLevel, nextMoveThreshold, nextSkillThreshold, POST_FOUNDATION_MOVE_XP, skillLevel, skillRating, skillStrengthLabel, traitDefinition } from './game/progression'
+import { campEffectReference, campOutcomeLabelReference, campOutcomeSummaryReference, moveLabelReference, MOVE_LABELS_EN, OPENING_LABELS_EN, traitPresentationReferences } from './game/presentation-localization'
 import { playBeatCue, playThreatCue, unlockAudio } from './game/audio'
 import { randomSeed } from './game/rng'
 import { archiveBiography, clearActiveGame, deleteBiography, listBiographies, loadGame, saveGame } from './game/storage'
 import type {
   Biography,
   Branch,
+  CareerChanges,
+  CareerSetupSnapshot,
   CampAction,
   CampDrillChallenge,
   CampDrillResult,
@@ -35,11 +38,115 @@ import type {
   RoundPlan,
   StartingExperience,
   LeagueId,
+  MessageReference,
+  WorldNewsEntry,
 } from './game/types'
-import { useI18n } from './i18n'
+import { useI18n, type Locale, type TranslationKey } from './i18n'
 
 const BRANCHES: Branch[] = ['boxing', 'kicking', 'clinch', 'wrestling', 'ground']
 const minigameTutorialKey = (kind: 'strike' | 'submission') => `cage-life:minigame-tutorial-seen-v2:${kind}`
+
+type MessageFormatter = (reference: MessageReference | undefined, fallback?: string) => string
+type Translator = (id: TranslationKey, values?: Record<string, string | number>) => string
+
+function localizedMoveName(id: string | undefined, fallback: string, message: MessageFormatter): string {
+  return message(moveLabelReference(id, fallback), fallback)
+}
+
+function localizedMoveFromAuthoredLabel(label: string, message: MessageFormatter): string {
+  const move = FIGHT_INTENTS.find((candidate) => candidate.label === label)
+  return localizedMoveName(move?.id, label, message)
+}
+
+function localizedOpeningLabel(key: string, locale: Locale): string {
+  if (locale === 'zh-Hant') return OPENING_LABELS[key as keyof typeof OPENING_LABELS] ?? key
+  return OPENING_LABELS_EN[key] ?? `legacy opening (${key})`
+}
+
+function localizedTraitCopy(trait: NonNullable<ReturnType<typeof traitDefinition>>, message: MessageFormatter) {
+  const refs = traitPresentationReferences(trait.id, trait)
+  return {
+    name: message(refs.name, trait.name),
+    description: message(refs.description, trait.description),
+    condition: message(refs.condition, trait.condition),
+    effect: message(refs.effect, trait.effect),
+    tradeoff: refs.tradeoff ? message(refs.tradeoff, trait.tradeoff) : undefined,
+  }
+}
+
+function localizedBiographyRecord(biography: Biography, t: Translator): string {
+  const record = biography.outcome?.record
+  return record
+    ? t('biography.recordValue', { wins: record.wins, losses: record.losses, draws: record.draws })
+    : biography.record
+}
+
+function localizedFightDamagePart(part: FightDamagePart, t: Translator): string {
+  return part === 'head' ? t('health.head') : part === 'body' ? t('health.torso') : t('health.knees')
+}
+
+function safeFactorReason(factor: NonNullable<FightBeat['factors']>[number], locale: Locale, t: Translator): string {
+  const reason = factor.localizedReason?.[locale]
+  if (!reason || (locale === 'en' && /[\u3400-\u9fff]/u.test(reason))) return t('combat.presentation.legacyText')
+  return reason
+}
+
+function localizedBeatPresentation(beat: FightBeat, locale: Locale, t: Translator, message: MessageFormatter) {
+  const playerMove = localizedMoveName(beat.moveId ?? beat.narrative.executionId, beat.action || beat.narrative.executionName, message)
+  const opponentMove = localizedMoveName(
+    beat.opponentMoveId ?? beat.opponentIntent?.intentId,
+    beat.opponentAction || beat.opponentIntent?.executionName || t('combat.presentation.opponentAction'),
+    message,
+  )
+  if (locale === 'zh-Hant') return {
+    playerMove,
+    opponentMove,
+    summary: beat.summary,
+    story: beat.narrative.paragraph,
+    commentary: beat.narrative.colorCommentary,
+    tags: beat.narrative.impactTags,
+  }
+  const damageEvents = beat.damageEvents ?? []
+  const damage = damageEvents.length
+    ? damageEvents.map((event) => t('combat.presentation.damageEvent', {
+      side: t(event.side === 'player' ? 'damage.player' : 'damage.opponent'),
+      part: localizedFightDamagePart(event.part, t),
+      amount: event.amount,
+    })).join(' ')
+    : t('combat.presentation.noDamage')
+  const summary = t(`combat.presentation.beat.${beat.outcome}` as TranslationKey, {
+    step: beat.step,
+    playerMove,
+    opponentMove,
+    from: positionLabel(beat.narrative.positionBefore, t),
+    to: positionLabel(beat.narrative.positionAfter, t),
+    damage,
+  })
+  const tags = [
+    t(`combat.presentation.impact.${beat.outcome}` as TranslationKey),
+    ...(beat.narrative.positionBefore !== beat.narrative.positionAfter
+      ? [t('combat.presentation.impact.position', { position: positionLabel(beat.narrative.positionAfter, t) })]
+      : []),
+    ...damageEvents.map((event) => t('combat.presentation.impact.damage', {
+      side: t(event.side === 'player' ? 'damage.player' : 'damage.opponent'),
+      part: localizedFightDamagePart(event.part, t),
+      amount: event.amount,
+    })),
+    ...(beat.factors ?? beat.narrative.factors ?? [])
+      .filter((factor) => factor.magnitude !== 0)
+      .sort((a, b) => Math.abs(b.magnitude) - Math.abs(a.magnitude))
+      .slice(0, 2)
+      .map((factor) => safeFactorReason(factor, locale, t)),
+  ]
+  return {
+    playerMove,
+    opponentMove,
+    summary,
+    story: summary,
+    commentary: t(`combat.presentation.commentary.${beat.outcome}` as TranslationKey),
+    tags: [...new Set(tags)],
+  }
+}
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -66,6 +173,7 @@ export default function App() {
   const saveQueue = useRef<Promise<void>>(Promise.resolve())
   const playedCue = useRef<string | undefined>(undefined)
   const gameScroll = useRef<HTMLDivElement>(null)
+  const previousPhase = useRef<GameState['phase'] | undefined>(undefined)
 
   useEffect(() => {
     Promise.all([loadGame(), listBiographies()]).then(([saved, archived]) => {
@@ -96,11 +204,31 @@ export default function App() {
   }, [game, sfxEnabled])
 
   useLayoutEffect(() => {
-    if (game?.combatMode === 'coach-guided' && game.phase === 'critical') return
-    if (gameScroll.current) {
-      gameScroll.current.scrollTop = 0
-      gameScroll.current.scrollLeft = 0
+    const container = gameScroll.current
+    if (!container || !game) return
+    const sameCriticalScreen = previousPhase.current === 'critical' && game.phase === 'critical'
+    previousPhase.current = game.phase
+
+    if (sameCriticalScreen) {
+      if (game.combatMode === 'manual') {
+        const anchor = container.querySelector<HTMLElement>('[data-combat-arena-anchor]')
+        if (anchor) {
+          const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+          const containerTop = container.getBoundingClientRect().top
+          const anchorTop = anchor.getBoundingClientRect().top
+          const targetTop = container.scrollTop + anchorTop - containerTop - 12
+          container.scrollTo?.({ top: Math.max(0, targetTop), behavior: reduceMotion ? 'auto' : 'smooth' })
+          anchor.focus({ preventScroll: true })
+        }
+      }
+      return
     }
+
+    container.scrollTop = 0
+    container.scrollLeft = 0
+    const preferredFocus = container.querySelector<HTMLElement>('[data-initial-focus], [autofocus]')
+      ?? container.querySelector<HTMLElement>('.screen-title h1')
+    preferredFocus?.focus({ preventScroll: true })
   }, [game, loading])
 
   const dispatch = (command: GameCommand) => {
@@ -145,7 +273,7 @@ export default function App() {
   return (
     <main className={`game-shell ${finishMode ? 'finish-mode' : ''}`}>
       {!finishMode && <GameHeader game={game} onOverlay={setOverlay} onReset={() => setShowResetConfirmation(true)} sfxEnabled={sfxEnabled} onToggleSfx={toggleSfx} relaxedDrills={relaxedDrills} onToggleRelaxedDrills={toggleRelaxedDrills} />}
-      <div ref={gameScroll} className={`game-scroll ${finishMode ? 'finish-mode' : ''}`} aria-live="polite">
+      <div ref={gameScroll} className={`game-scroll ${finishMode ? 'finish-mode' : ''}`}>
         <GameView game={game} dispatch={dispatch} onNew={resetRun} relaxedDrills={relaxedDrills} />
       </div>
       {overlay && <InfoOverlay game={game} type={overlay} dispatch={dispatch} onClose={() => setOverlay(undefined)} />}
@@ -165,6 +293,7 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
   const [combatMode, setCombatMode] = useState<CombatMode>('manual')
   const [seed, setSeed] = useState(randomSeed())
   const [showHall, setShowHall] = useState(false)
+  const [replaySource, setReplaySource] = useState<Biography>()
   const [standalonePwa, setStandalonePwa] = useState(isStandalonePwa)
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent>()
 
@@ -192,6 +321,31 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
     await installPrompt.userChoice
     setInstallPrompt(undefined)
   }
+
+  const replayBiography = (biography: Biography) => {
+    const setup = biography.setup
+    setName(setup.kind === 'exact' ? setup.nameInput : setup.displayedName)
+    setLatinName(setup.kind === 'exact' ? setup.latinNameInput ?? '' : setup.displayedAlias ?? '')
+    setRegion(setup.region)
+    setMotive(setup.kind === 'exact' ? setup.motive : setup.motive ?? 'prove')
+    setSeed(biography.seed)
+    setStartingExperience(setup.kind === 'exact' ? setup.startingExperience : setup.startingExperience ?? biography.startingExperience ?? 'hobbyist')
+    setCombatMode(setup.kind === 'exact' ? setup.combatMode : setup.combatMode ?? 'manual')
+    setReplaySource(biography)
+    setShowHall(false)
+  }
+
+  const beginCareer = () => onStart(createNewRun({
+    name,
+    latinName,
+    region,
+    motive,
+    seed,
+    startingExperience,
+    combatMode,
+    replayGroupId: replaySource?.replayGroupId,
+    replayOfCareerId: replaySource?.id,
+  }))
 
   return (
     <main className="start-shell">
@@ -228,9 +382,12 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
           <div className="region-profile-grid">
             {(Object.keys(REGION_LABELS) as Region[]).map((value) => {
               const prefix = `region.${value}` as const
-              return <button key={value} type="button" className={`region-choice ${region === value ? 'selected' : ''}`} onClick={() => setRegion(value)}>
+              const selected = region === value
+              return <label key={value} className={`region-choice ${selected ? 'selected' : ''}`}>
+                <input type="radio" name="region" value={value} checked={selected} onChange={() => setRegion(value)} />
                 <span>{t(`${prefix}.label`)}</span><strong>{t(`${prefix}.circuit`)}</strong><p>{t(`${prefix}.description`)}</p><small>{t(`${prefix}.mix`)}</small><em>{t(`${prefix}.economy`)}</em>
-              </button>
+                <i className="selection-indicator" aria-hidden="true">✓</i>
+              </label>
             })}
           </div>
         </fieldset>
@@ -238,11 +395,14 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
         <fieldset>
           <legend>{t('start.motive')}</legend>
           <div className="choice-list compact">
-            {(Object.keys(MOTIVES) as Motive[]).map((value) => (
-              <button key={value} type="button" className={`choice-row ${motive === value ? 'selected' : ''}`} onClick={() => setMotive(value)}>
+            {(Object.keys(MOTIVES) as Motive[]).map((value) => {
+              const selected = motive === value
+              return <label key={value} className={`choice-row setup-radio-card ${selected ? 'selected' : ''}`}>
+                <input type="radio" name="motive" value={value} checked={selected} onChange={() => setMotive(value)} />
                 <strong>{t(`motive.${value}.name`)}</strong><span>{t(`motive.${value}.description`)}</span>
-              </button>
-            ))}
+                <i className="selection-indicator" aria-hidden="true">✓</i>
+              </label>
+            })}
           </div>
         </fieldset>
 
@@ -253,9 +413,14 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
               ['normie', t('experience.normie.name'), t('experience.normie.description')],
               ['hobbyist', t('experience.hobbyist.name'), t('experience.hobbyist.description')],
               ['semi-pro', t('experience.semi-pro.name'), t('experience.semi-pro.description')],
-            ] as Array<[StartingExperience, string, string]>).map(([value, label, detail]) => <button key={value} type="button" className={`choice-row ${startingExperience === value ? 'selected' : ''}`} onClick={() => setStartingExperience(value)}>
-              <strong>{label}</strong><span>{detail}</span>
-            </button>)}
+            ] as Array<[StartingExperience, string, string]>).map(([value, label, detail]) => {
+              const selected = startingExperience === value
+              return <label key={value} className={`choice-row setup-radio-card ${selected ? 'selected' : ''}`}>
+                <input type="radio" name="starting-experience" value={value} checked={selected} onChange={() => setStartingExperience(value)} />
+                <strong>{label}</strong><span>{detail}</span>
+                <i className="selection-indicator" aria-hidden="true">✓</i>
+              </label>
+            })}
           </div>
         </fieldset>
 
@@ -265,9 +430,14 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
             {([
               ['manual', t('combat.manual.name'), t('combat.manual.description')],
               ['coach-guided', t('combat.coach.name'), t('combat.coach.description')],
-            ] as Array<[CombatMode, string, string]>).map(([value, label, detail]) => <button key={value} type="button" className={`choice-row ${combatMode === value ? 'selected' : ''}`} onClick={() => setCombatMode(value)}>
-              <strong>{label}</strong><span>{detail}</span>
-            </button>)}
+            ] as Array<[CombatMode, string, string]>).map(([value, label, detail]) => {
+              const selected = combatMode === value
+              return <label key={value} className={`choice-row setup-radio-card ${selected ? 'selected' : ''}`}>
+                <input type="radio" name="combat-mode" value={value} checked={selected} onChange={() => setCombatMode(value)} />
+                <strong>{label}</strong><span>{detail}</span>
+                <i className="selection-indicator" aria-hidden="true">✓</i>
+              </label>
+            })}
           </div>
           <small className="mode-choice-note">{t('start.modeLocked')}</small>
         </fieldset>
@@ -278,13 +448,19 @@ function StartScreen({ biographies, onStart, onDelete }: { biographies: Biograph
           <small>{t('start.seedHelp')}</small>
         </div>
 
-        <button className="primary-action" disabled={!seed.trim()} onClick={() => onStart(createNewRun({ name: name.trim(), latinName: latinName.trim(), region, motive, seed, startingExperience, combatMode }))}>
+        <aside className="start-selection-summary" aria-label={t('start.summaryLabel')}>
+          <span>{t('start.summaryTitle')}</span>
+          <strong>{t(`region.${region}.label`)} · {t(`motive.${motive}.name`)} · {t(`experience.${startingExperience}.name`)} · {combatMode === 'manual' ? t('combat.manual.name') : t('combat.coach.name')}</strong>
+          <small>{t('start.summaryHelp')}</small>
+        </aside>
+        {replaySource && <aside className={`replay-setup-notice${replaySource.setup.kind === 'legacy-partial' ? ' warning' : ''}`} role="status"><strong>{t(replaySource.setup.kind === 'legacy-partial' ? 'start.legacyReplayTitle' : 'start.replayTitle')}</strong><span>{t(replaySource.setup.kind === 'legacy-partial' ? 'start.legacyReplayBody' : 'start.replayBody')}</span></aside>}
+        <button className="primary-action" disabled={!seed.trim()} onClick={beginCareer}>
           <span>{t('start.begin')}</span><small>{t('start.beginHelp')}</small>
         </button>
         <button type="button" className="text-button" onClick={() => setShowHall((value) => !value)}>{t('start.hall', { count: biographies.length })}</button>
       </section>
 
-      {showHall && <HallOfFame biographies={biographies} onDelete={onDelete} />}
+      {showHall && <HallOfFame biographies={biographies} onDelete={onDelete} onReplay={replayBiography} />}
       <footer className="source-note">{t('start.disclaimer')}</footer>
     </main>
   )
@@ -301,11 +477,11 @@ function GameHeader({ game, onOverlay, onReset, sfxEnabled, onToggleSfx, relaxed
         <small>{fighter.age} 歲 · {fighter.weightClass} · {fighter.wins}-{fighter.losses}-{fighter.draws}</small>
       </div>
       <div className="header-actions">
-        <button type="button" onClick={onToggleRelaxedDrills} aria-label={relaxedDrills ? '關閉寬鬆訓練節奏' : '開啟寬鬆訓練節奏'} title="訓練操作節奏">{relaxedDrills ? '寬鬆' : '節奏'}</button>
-        <button type="button" onClick={onToggleSfx} aria-label={sfxEnabled ? '關閉音效' : '開啟音效'} title={sfxEnabled ? '音效開啟' : '音效關閉'}>{sfxEnabled ? '聲效' : '靜音'}</button>
-        <button type="button" onClick={() => onOverlay('status')} aria-label={t('nav.status')}>狀態</button>
-        <button type="button" onClick={() => onOverlay('history')} aria-label={t('nav.history')}>歷程</button>
-        <button type="button" className="reset-button" onClick={onReset}>重置</button>
+        <button type="button" onClick={onToggleRelaxedDrills} aria-label={relaxedDrills ? t('header.relaxedOff') : t('header.relaxedOn')} title={t('header.trainingPace')}>{relaxedDrills ? t('header.relaxedShort') : t('header.paceShort')}</button>
+        <button type="button" onClick={onToggleSfx} aria-label={sfxEnabled ? t('header.sfxOff') : t('header.sfxOn')} title={sfxEnabled ? t('header.sfxEnabled') : t('header.sfxDisabled')}>{sfxEnabled ? t('header.soundShort') : t('header.muteShort')}</button>
+        <button type="button" onClick={() => onOverlay('status')} aria-label={t('nav.status')}>{t('header.statusShort')}</button>
+        <button type="button" onClick={() => onOverlay('history')} aria-label={t('nav.history')}>{t('header.historyShort')}</button>
+        <button type="button" className="reset-button" onClick={onReset}>{t('header.resetShort')}</button>
       </div>
     </header>
   )
@@ -374,55 +550,69 @@ function RevealView({ game, dispatch }: ViewProps) {
 }
 
 function OfferView({ game, dispatch }: ViewProps) {
-  const coach = game.fighter.relationships.find((relationship) => relationship.role === 'coach')
+  const { t, message } = useI18n()
   const refreshCost = offerRefreshCost(game.fighter)
   const canRefresh = !game.offerRefreshUsed && game.fighter.money >= refreshCost
   const weakestHealth = weakestHealthEntry(game.fighter)
+  const grassrootsDefeated = new Set(game.fighter.grassrootsDefeatedSlots ?? [])
+  const grassroots = game.stage === 'grassroots'
+  const visibleOffers = grassroots
+    ? game.offers.filter((offer) => {
+      const opponent = game.opponents.find((candidate) => candidate.id === offer.opponentId)
+      return opponent?.grassrootsSlot !== undefined && !grassrootsDefeated.has(opponent.grassrootsSlot)
+    })
+    : game.offers
   return (
-    <Screen title="下一場戰鬥" kicker={`${game.fighter.year} · ${fighterStandingLabel(game.fighter, game.stage)}`}>
+    <Screen title={t('offer.title')} kicker={`${game.fighter.year} · ${fighterStandingLabel(game.fighter, game.stage)}`}>
       <ContextStrip fighter={game.fighter} />
+      {game.worldNews.length > 0 && <WorldNewsFeed entries={game.worldNews.slice(-3).reverse()} />}
       <LeagueStatusCard game={game} />
-      <aside className="coach-note">
-        <span className="coach-avatar">教</span>
-        <div><strong>{coach?.name ?? '教練'}的話</strong><p>「我替你看過這三份邀約。先看清楚對方靠什麼吃飯、哪裡會露出破口，再決定這一步要走多快。」</p></div>
-      </aside>
+      {grassroots && <aside className="memory-callout" aria-label={t('offer.grassrootsProgressLabel')}><strong>{t('offer.grassrootsProgress', { defeated: grassrootsDefeated.size, total: GRASSROOTS_REQUIRED_OPPONENTS })}</strong> {t('offer.grassrootsProgressBody', { remaining: GRASSROOTS_REQUIRED_OPPONENTS - grassrootsDefeated.size })}</aside>}
       <div className="offer-list">
-        {game.offers.map((offer) => {
+        {visibleOffers.map((offer) => {
           const opponent = game.opponents.find((item) => item.id === offer.opponentId)!
           const strength = strongestBranch(opponent)
           const titleRole = offer.titleRole ?? (offer.titleFight ? 'challenge' : 'ordinary')
           return <article className={`offer-card risk-${riskTone(offer.riskLabel)}`} key={offer.id}>
-            <div className="offer-top"><span>{offer.fastTrack ? '快速晉級卡' : offer.promotion}</span><b>{titleRole === 'challenge' ? '挑戰冠軍' : titleRole === 'defense' ? '衛冕戰' : offer.fastTrack ? '跨級挑戰' : offer.riskLabel}</b></div>
+            <div className="offer-top"><span>{offer.fastTrack ? t('offer.fastTrackCard') : offer.promotion}</span><b>{titleRole === 'challenge' ? t('offer.challengeChampion') : titleRole === 'defense' ? t('offer.titleDefense') : offer.fastTrack ? t('offer.crossRankChallenge') : localizedRiskLabel(offer.riskLabel, t)}</b></div>
             <h2>{opponent.name}</h2>
             {opponent.alias && <span className="opponent-alias">{opponent.alias}</span>}
-            <p>{opponent.hometown ? `${opponent.hometown} · ` : ''}{opponent.nationality ?? opponent.region} · {opponent.style} · 戰績 {opponent.record.wins}-{opponent.record.losses} · {opponent.standing === 'champion' ? `${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍` : opponent.rank !== undefined ? `排名 #${opponent.rank}` : '未排名'} · 競技評級 {competitiveRatingForOpponent(opponent)}</p>
-            <div className="scout-grid" aria-label={`${opponent.name}的賽前情報`}>
-              <div><span>他最擅長</span><strong>{BRANCH_META[strength].name}</strong></div>
-              <div><span>可以針對</span><strong>{BRANCH_META[opponent.weakness].name}</strong></div>
+            <p>{opponent.hometown ? `${opponent.hometown} · ` : ''}{opponent.nationality ?? opponent.region} · {opponent.style} · {t('offer.record', { record: `${opponent.record.wins}-${opponent.record.losses}-${opponent.record.draws}` })} · {opponent.standing === 'champion' ? t('offer.champion', { league: localizedLeagueLabel(opponent.league as LeagueId, t) }) : opponent.rank !== undefined ? t('offer.rank', { rank: opponent.rank }) : t('offer.unranked')} · {t('offer.rating', { rating: competitiveRatingForOpponent(opponent) })}</p>
+            <div className="scout-grid" aria-label={t('offer.scoutingLabel', { name: opponent.name })}>
+              <div><span>{t('offer.strength')}</span><strong>{t(`branch.${strength}`)}</strong></div>
+              <div><span>{t('offer.target')}</span><strong>{t(`branch.${opponent.weakness}`)}</strong></div>
             </div>
-            <div className="opponent-traits"><span>已知特質</span>{opponent.traits.map((owned) => {
+            <div className="opponent-traits"><span>{t('offer.knownTraits')}</span>{opponent.traits.map((owned) => {
               const trait = traitDefinition(owned.id)
-              return trait ? <small className={`rarity-${trait.rarity}`} key={owned.id}><b>{trait.name}</b> · {trait.condition}：{trait.effect}</small> : null
+              if (!trait) return null
+              const copy = localizedTraitCopy(trait, message)
+              return <small className={`rarity-${trait.rarity}`} key={owned.id}><b>{copy.name}</b> · {copy.condition}: {copy.effect}</small>
             })}</div>
-            <p className="coach-verdict">「{coachVerdict(opponent, offer.riskLabel)}」</p>
-            {offer.fastTrack && <p className="fast-track-callout">擊敗比常規邀約更高排名的對手，會依該對手的席位直接大幅上升排名；代價是面對更高的排名門檻。</p>}
-            <div className="offer-meta"><span>出場費 {formatRegionalMoney(offer.purse, game.fighter.region)}</span><span>{offer.shortNotice ? '短期代打' : '完整備戰'}</span>{offer.venueRegion && <span>{offer.opponentIsLocal ? '同鄉對決' : '客場挑戰者'}</span>}</div>
+            <p className="coach-verdict">「{coachVerdict(opponent, offer.riskLabel, t)}」</p>
+            {offer.fastTrack && <p className="fast-track-callout">{t('offer.fastTrackHelp')}</p>}
+            <div className="offer-meta"><span>{t('offer.purse', { purse: formatRegionalMoney(offer.purse, game.fighter.region) })}</span><span>{offer.shortNotice ? t('offer.shortNotice') : t('offer.fullCamp')}</span>{offer.venueRegion && <span>{offer.opponentIsLocal ? t('offer.localMatchup') : t('offer.awayChallenger')}</span>}</div>
             <PurseBreakdown offer={offer} region={game.fighter.region} />
-            {opponent.meetings > 0 && <p className="memory-callout">你們已經交手 {opponent.meetings} 次，彼此都很清楚上次發生了什麼。</p>}
-            <button className="choice-confirm" onClick={() => dispatch({ type: 'SELECT_OFFER', offerId: offer.id })}>簽下這場比賽</button>
+            <MotiveOfferCallout offer={offer} opponent={opponent} />
+            {opponent.meetings > 0 && <p className="memory-callout">{rivalMemorySummary(opponent, t)}</p>}
+            <button className="choice-confirm" onClick={() => dispatch({ type: 'SELECT_OFFER', offerId: offer.id })}>{t('offer.sign')}</button>
           </article>
         })}
       </div>
-      <section className="contract-freedom" aria-labelledby="contract-freedom-title">
-        <span>選擇權</span><h3 id="contract-freedom-title">用積蓄等待另一組邀約</h3>
-        <p>支付 {formatRegionalMoney(refreshCost, game.fighter.region)} 處理合約與營隊空窗，不讓年齡前進；聯盟信任會小幅下降。本輪只能使用一次。</p>
-        <button type="button" className="choice-confirm" disabled={!canRefresh} onClick={() => dispatch({ type: 'PURCHASE_OFFER_REFRESH' })}>{game.offerRefreshUsed ? '本輪已經換過邀約' : game.fighter.money < refreshCost ? `資金不足，還差 ${formatRegionalMoney(refreshCost - game.fighter.money, game.fighter.region)}` : '支付費用，查看新邀約'}</button>
-      </section>
-      <p className={`memory-callout${weakestHealth[1] <= 40 ? ' danger-callout' : ''}`}>生涯沒有比賽場數上限。賽後健康降至 {CAREER_HEALTH_RECOVERY_THRESHOLD} 或以下必須停賽一年療傷；降至 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下才會因傷退役。目前最弱的是{healthPartLabel(weakestHealth[0])} {weakestHealth[1]}。{game.fighter.age >= 34 ? '到了三十八歲也必須退役。' : ''}</p>
-      <button className="secondary-action" onClick={() => dispatch({ type: 'DECLINE_OFFERS' })}>{game.fighter.age >= 37 ? '拒絕邀約，結束職業生涯' : '拒絕邀約，讓時間前進一年'}</button>
-      {(game.fighter.evidence.fights >= 5 || game.fighter.age >= 34) && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>現在退役</button>}
+      {!grassroots && <section className="contract-freedom" aria-labelledby="contract-freedom-title">
+        <span>{t('offer.freedomKicker')}</span><h3 id="contract-freedom-title">{t('offer.freedomTitle')}</h3>
+        <p>{t('offer.refreshBody', { cost: formatRegionalMoney(refreshCost, game.fighter.region) })}</p>
+        <button type="button" className="choice-confirm" disabled={!canRefresh} onClick={() => dispatch({ type: 'PURCHASE_OFFER_REFRESH' })}>{game.offerRefreshUsed ? t('offer.refreshUsed') : game.fighter.money < refreshCost ? t('offer.refreshShortfall', { amount: formatRegionalMoney(refreshCost - game.fighter.money, game.fighter.region) }) : t('offer.refreshAction')}</button>
+      </section>}
+      <p className={`memory-callout${weakestHealth[1] <= 40 ? ' danger-callout' : ''}`}>{t('offer.careerRule', { recovery: CAREER_HEALTH_RECOVERY_THRESHOLD, retirement: CAREER_HEALTH_RETIREMENT_THRESHOLD, part: t(`health.${weakestHealth[0]}`), health: weakestHealth[1], ageRule: game.fighter.age >= 34 ? t('offer.ageRule') : '' })}</p>
+      <button className="secondary-action" onClick={() => dispatch({ type: 'DECLINE_OFFERS' })}>{game.fighter.age >= 37 ? t('offer.declineRetire') : t('offer.declineYear')}</button>
+      {(game.fighter.evidence.fights >= 5 || game.fighter.age >= 34) && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>{t('offer.retireNow')}</button>}
     </Screen>
   )
+}
+
+function WorldNewsFeed({ entries }: { entries: WorldNewsEntry[] }) {
+  const { t, message } = useI18n()
+  return <aside className="world-news-feed" aria-label={t('worldNews.label')}><header><span>{t('worldNews.kicker')}</span><strong>{t('worldNews.title')}</strong></header>{entries.map((entry) => <p key={entry.id}><time>{entry.year}</time>{message(entry.textRef, entry.text)}</p>)}</aside>
 }
 
 function leagueForGame(game: GameState): LeagueId | undefined {
@@ -432,22 +622,28 @@ function leagueForGame(game: GameState): LeagueId | undefined {
     ? game.stage === 'legacy' ? 'world' : game.stage : undefined
 }
 
+function localizedLeagueLabel(league: LeagueId, t: (id: TranslationKey, values?: Record<string, string | number>) => string) {
+  return t(`league.${league}`)
+}
+
 function LeagueStatusCard({ game }: { game: GameState }) {
+  const { t } = useI18n()
   const standing = game.fighter.leagueStanding
   const league = leagueForGame(game)
   const rating = competitiveRatingForFighter(game.fighter)
-  if (!league || !standing) return <aside className="league-status-card"><div><span>目前階段</span><strong>草根試煉 · 未納入聯盟排名</strong></div><p>完成這段草根試煉後，你會以未排名拳手加入業餘聯盟。</p></aside>
+  if (!league || !standing) return <aside className="league-status-card"><div><span>{t('league.currentStage')}</span><strong>{t('league.grassroots')}</strong></div><p>{t('league.grassrootsHelp')}</p></aside>
   const floor = LEAGUE_TITLE_RATING_FLOORS[league]
   const champion = standing.status === 'champion'
-  return <aside className={`league-status-card${champion ? ' league-champion' : ''}`} aria-label="目前聯盟排名">
-    <div><span>{LEAGUE_LABELS[league]}</span><strong>{standing.status === 'champion' ? '聯盟冠軍' : standing.status === 'ranked' ? `排名 #${standing.rank}` : '未排名'}</strong></div>
+  return <aside className={`league-status-card${champion ? ' league-champion' : ''}`} aria-label={t('league.currentStanding')}>
+    <div><span>{localizedLeagueLabel(league, t)}</span><strong>{standing.status === 'champion' ? t('league.champion') : standing.status === 'ranked' ? t('league.rank', { rank: standing.rank }) : t('league.unranked')}</strong></div>
     {champion
-      ? <p>{standing.defenses ? `已成功衛冕 ${standing.defenses} 次。` : '你剛剛拿下這條腰帶。下一步可以選擇升上更大的舞台，或留下來衛冕。'}</p>
-      : <><p>{standing.status === 'unranked' ? '先擊敗排名對手，取得這個聯盟的第一個席位；快速晉級卡能直接挑戰 #10。' : '排名前 3 並達到競技評級門檻，就會收到冠軍戰邀請。競技評級會綜合最強兩項、其餘三項與戰術智商。'}</p><div className="league-requirements"><span className={standing.status === 'ranked' && standing.rank <= 3 ? 'met' : ''}>前 3 {standing.status === 'ranked' ? (standing.rank <= 3 ? '✓' : `#${standing.rank}`) : '—'}</span><span className={rating >= floor ? 'met' : ''}>評級 {rating}／{floor}</span></div></>}
+      ? <p>{standing.defenses ? t('league.defenses', { count: standing.defenses }) : t('league.newChampionHelp')}</p>
+      : <><p>{standing.status === 'unranked' ? t('league.unrankedHelp') : t('league.ratingHelp')}</p><div className="league-requirements"><span className={standing.status === 'ranked' && standing.rank <= 3 ? 'met' : ''}>{t('league.topThree', { status: standing.status === 'ranked' ? (standing.rank <= 3 ? '✓' : `#${standing.rank}`) : '—' })}</span><span className={rating >= floor ? 'met' : ''}>{t('league.ratingFloor', { rating, floor })}</span></div></>}
   </aside>
 }
 
 function LeagueStandingsTable({ game }: { game: GameState }) {
+  const { t } = useI18n()
   const league = leagueForGame(game)
   if (!league) return null
   const standing = game.fighter.leagueStanding
@@ -455,57 +651,102 @@ function LeagueStandingsTable({ game }: { game: GameState }) {
   const ranked = game.opponents.filter((opponent) => opponent.league === league && opponent.standing === 'ranked' && opponent.rank !== undefined).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99)).slice(0, 15)
   const playerRank = standing?.status === 'ranked' ? standing.rank : undefined
   const rows = [
-    ...ranked.map((opponent) => ({ rank: opponent.rank!, id: opponent.id, name: opponent.name, note: `${opponent.record.wins}-${opponent.record.losses} · 評級 ${competitiveRatingForOpponent(opponent)}`, player: false })),
-    ...(playerRank !== undefined ? [{ rank: playerRank, id: 'player-standing', name: `${game.fighter.name}（你）`, note: `本聯盟 ${game.fighter.leagueRecords?.[league]?.wins ?? 0} 勝 · 競技評級 ${competitiveRatingForFighter(game.fighter)}`, player: true }] : []),
+    ...ranked.map((opponent) => ({ rank: opponent.rank!, id: opponent.id, name: opponent.name, note: t('league.rowRating', { record: `${opponent.record.wins}-${opponent.record.losses}-${opponent.record.draws}`, rating: competitiveRatingForOpponent(opponent) }), player: false })),
+    ...(playerRank !== undefined ? [{ rank: playerRank, id: 'player-standing', name: t('league.you', { name: game.fighter.name }), note: t('league.playerRecord', { wins: game.fighter.leagueRecords?.[league]?.wins ?? 0, rating: competitiveRatingForFighter(game.fighter) }), player: true }] : []),
   // A malformed or hand-edited save can temporarily contain an NPC in the
   // same slot as the player. Prefer the player on a tie so the status table
   // never hides the player's own standing.
   ].sort((a, b) => a.rank - b.rank || Number(b.player) - Number(a.player)).slice(0, 15)
-  return <section className="league-standings" aria-labelledby="league-standings-title"><SectionTitle title={`${LEAGUE_LABELS[league]}排名`} subtitle="冠軍不列入數字排名；只有前 15 名會出現在表內。" /><div className="standings-table"><div className="standing-row champion-row"><span>冠軍</span><strong>{standing?.status === 'champion' ? `${game.fighter.name}（你）` : championOpponent?.name ?? '冠軍席位'}</strong><small>{standing?.status === 'champion' ? '目前持有腰帶' : '等待下一場冠軍戰'}</small></div>{standing?.status === 'unranked' && <div className="standing-player-unranked"><span>你的狀態</span><strong>未排名</strong><small>先擊敗排名對手取得席位</small></div>}{rows.map((row) => <div className={`standing-row${row.player ? ' standing-player' : ''}`} aria-current={row.player ? 'true' : undefined} key={row.id}><span>#{row.rank}</span><strong>{row.name}</strong><small>{row.note}</small></div>)}</div></section>
+  return <section className="league-standings" aria-labelledby="league-standings-title"><SectionTitle title={t('league.standingsTitle', { league: localizedLeagueLabel(league, t) })} subtitle={t('league.standingsHelp')} /><div className="standings-table"><div className="standing-row champion-row"><span>{t('league.championShort')}</span><strong>{standing?.status === 'champion' ? t('league.you', { name: game.fighter.name }) : championOpponent?.name ?? t('league.championSlot')}</strong><small>{standing?.status === 'champion' ? t('league.holdsBelt') : t('league.awaitingTitleFight')}</small></div>{standing?.status === 'unranked' && <div className="standing-player-unranked"><span>{t('league.yourStatus')}</span><strong>{t('league.unranked')}</strong><small>{t('league.claimSlot')}</small></div>}{rows.map((row) => <div className={`standing-row${row.player ? ' standing-player' : ''}`} aria-current={row.player ? 'true' : undefined} key={row.id}><span>#{row.rank}</span><strong>{row.name}</strong><small>{row.note}</small></div>)}</div></section>
 }
 
 function LeagueDecisionView({ game, dispatch }: ViewProps) {
+  const { t } = useI18n()
   const from = game.promotionFrom!
   const to = game.promotionTo!
   const standing = game.fighter.leagueStanding
-  return <Screen className="league-decision-screen" title="冠軍之後" kicker={`${LEAGUE_LABELS[from]} · 你已經登頂`}>
+  return <Screen className="league-decision-screen" title={t('league.decisionTitle')} kicker={t('league.reachedTop', { league: localizedLeagueLabel(from, t) })}>
     <article className="promotion-card">
       <span className="promotion-belt" aria-hidden="true">◆</span>
-      <p className="eyebrow">TITLE WON</p>
-      <h2>{LEAGUE_LABELS[from]}冠軍</h2>
-      <p>這條腰帶不會替你回答下一個問題。你可以帶著冠軍身分走向更強的{LEAGUE_LABELS[to]}，也可以留下來讓整個聯盟挑戰你的王座。</p>
-      <div className="promotion-summary"><span>目前</span><strong>{standing?.status === 'champion' ? '聯盟冠軍' : '冠軍'}</strong><span>下一站</span><strong>{LEAGUE_LABELS[to]} · 從未排名開始</strong></div>
+      <p className="eyebrow">{t('league.titleWon')}</p>
+      <h2>{t('league.leagueChampion', { league: localizedLeagueLabel(from, t) })}</h2>
+      <p>{t('league.decisionBody', { nextLeague: localizedLeagueLabel(to, t) })}</p>
+      <div className="promotion-summary"><span>{t('league.current')}</span><strong>{standing?.status === 'champion' ? t('league.champion') : t('league.championShort')}</strong><span>{t('league.next')}</span><strong>{t('league.nextUnranked', { league: localizedLeagueLabel(to, t) })}</strong></div>
     </article>
     <div className="promotion-actions">
-      <button type="button" className="primary-action" onClick={() => dispatch({ type: 'CHOOSE_LEAGUE_FUTURE', choice: 'promote' })}><span>加入{LEAGUE_LABELS[to]}</span><small>永久離開目前聯盟，重新從未排名開始</small></button>
-      <button type="button" className="secondary-action" onClick={() => dispatch({ type: 'CHOOSE_LEAGUE_FUTURE', choice: 'defend' })}>留下來衛冕{LEAGUE_LABELS[from]}</button>
+      <button type="button" className="primary-action" onClick={() => dispatch({ type: 'CHOOSE_LEAGUE_FUTURE', choice: 'promote' })}><span>{t('league.join', { league: localizedLeagueLabel(to, t) })}</span><small>{t('league.joinHelp')}</small></button>
+      <button type="button" className="secondary-action" onClick={() => dispatch({ type: 'CHOOSE_LEAGUE_FUTURE', choice: 'defend' })}>{t('league.defend', { league: localizedLeagueLabel(from, t) })}</button>
     </div>
   </Screen>
 }
 
 function PurseBreakdown({ offer, region }: { offer: FightOffer; region: Region }) {
+  const { t } = useI18n()
   const parts = [
-    `基礎 ${formatRegionalMoney(offer.purseBreakdown.base, region)}`,
-    offer.purseBreakdown.riskAdjustment ? `對手風險 ${signedRegionalMoney(offer.purseBreakdown.riskAdjustment, region)}` : '標準風險 ±0',
-    offer.purseBreakdown.shortNoticePremium ? `短期代打 ${signedRegionalMoney(offer.purseBreakdown.shortNoticePremium, region)}` : undefined,
-    offer.purseBreakdown.titleBonus ? `冠軍戰 ${signedRegionalMoney(offer.purseBreakdown.titleBonus, region)}` : undefined,
+    t('offer.purseBase', { amount: formatRegionalMoney(offer.purseBreakdown.base, region) }),
+    offer.purseBreakdown.riskAdjustment ? t('offer.purseRisk', { amount: signedRegionalMoney(offer.purseBreakdown.riskAdjustment, region) }) : t('offer.purseStandardRisk'),
+    offer.purseBreakdown.shortNoticePremium ? t('offer.purseShortNotice', { amount: signedRegionalMoney(offer.purseBreakdown.shortNoticePremium, region) }) : undefined,
+    offer.purseBreakdown.titleBonus ? t('offer.purseTitle', { amount: signedRegionalMoney(offer.purseBreakdown.titleBonus, region) }) : undefined,
+    offer.purseBreakdown.motivePremium ? `${t('motiveOffer.headlinePremium')} ${signedRegionalMoney(offer.purseBreakdown.motivePremium, region)}` : undefined,
   ].filter((part): part is string => Boolean(part))
-  return <p className="purse-breakdown" aria-label="出場費計算">{parts.join(' · ')}</p>
+  return <p className="purse-breakdown" aria-label={t('offer.purseCalculation')}>{parts.join(' · ')}</p>
+}
+
+function MotiveOfferCallout({ offer, opponent }: { offer: FightOffer; opponent: Opponent }) {
+  const { t } = useI18n()
+  if (!offer.motiveOpportunityId) return null
+  const kind = offer.purseMultiplierReason === 'sponsor'
+    ? 'sponsor'
+    : offer.purseMultiplierReason === 'motive-spotlight'
+      ? 'headline'
+      : opponent.meetings > 0 ? 'rival' : 'fastTrack'
+  return <aside className="motive-offer-callout" aria-label={t(`motiveOffer.${kind}Title`)}>
+    <span>{t('motiveOffer.kicker')}</span>
+    <strong>{t(`motiveOffer.${kind}Title`)}</strong>
+    <p>{t(`motiveOffer.${kind}Body`)}</p>
+  </aside>
 }
 
 function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills: boolean }) {
-  const [branch, setBranch] = useState<Branch>('boxing')
+  const { locale, t, message } = useI18n()
+  const storedBranch = localStorage.getItem('cage-life:camp-branch') as Branch | null
+  const engineBranch = game.selectedTrainingBranch
+  const [branch, setBranch] = useState<Branch>(() => engineBranch ?? (storedBranch && BRANCHES.includes(storedBranch) ? storedBranch : 'boxing'))
+  const preparedMoveId = game.preparedMove?.moveId
+  const lessonMoveId = game.lossLesson?.recommendedMoveId
+  const movesForFocus = FIGHT_INTENTS
+    .filter((move) => move.branch === branch && !move.emergency && game.fighter.learnedMoves.includes(move.id))
+    .sort((a, b) => Number(b.id === lessonMoveId) - Number(a.id === lessonMoveId))
+  const [focusMoveId, setFocusMoveId] = useState<string | undefined>(() => preparedMoveId ?? movesForFocus[0]?.id)
+  useEffect(() => {
+    const nextMoves = FIGHT_INTENTS
+      .filter((move) => move.branch === branch && !move.emergency && game.fighter.learnedMoves.includes(move.id))
+      .sort((a, b) => Number(b.id === lessonMoveId) - Number(a.id === lessonMoveId))
+    if (!nextMoves.some((move) => move.id === focusMoveId)) setFocusMoveId(nextMoves[0]?.id)
+  }, [branch, focusMoveId, game.fighter.learnedMoves, lessonMoveId])
+  const selectBranch = (next: Branch) => {
+    setBranch(next)
+    localStorage.setItem('cage-life:camp-branch', next)
+  }
+  const moveBranchFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const movement = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? BRANCHES.length - 1 : movement ? (index + movement + BRANCHES.length) % BRANCHES.length : index
+    if (!movement && event.key !== 'Home' && event.key !== 'End') return
+    event.preventDefault()
+    selectBranch(BRANCHES[nextIndex])
+    event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus()
+  }
   const benefitFor = (action: CampAction) => {
-    const role = action === 'technique' ? 'coach' : action === 'recovery' ? 'family' : undefined
+    const role = action === 'technique' ? 'coach' : action === 'recovery' ? 'family' : action === 'film' ? 'partner' : undefined
     const relationship = game.fighter.relationships.find((item) => item.role === role)
     return relationship ? getRelationshipBenefit(relationship) : undefined
   }
   const techniqueActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
-    { id: 'technique', name: '技術訓練', detail: `穩定累積${BRANCH_META[branch].name} XP；累積至 100 XP 時自動學會 3 招基本功，之後每多 ${POST_FOUNDATION_MOVE_XP} XP 可選一次招：最多 4 招中學會 1 招`, risk: '增加疲勞', edge: '爭取額外 XP' },
+    { id: 'technique', name: t('camp.techniqueName'), detail: t('camp.techniqueDetail', { branch: t(`branch.${branch}`), threshold: POST_FOUNDATION_MOVE_XP }), risk: t('camp.techniqueRisk'), edge: t('camp.techniqueEdge') },
   ]
   const generalActions: Array<{ id: CampAction; name: string; detail: string; risk: string; edge: string }> = [
-    { id: 'film', name: '影片研究', detail: '研究對手習慣，穩定增加情報與戰術智商', risk: '疲勞 +3', edge: '爭取更多情報' },
-    { id: 'recovery', name: '休養治療', detail: '穩定降低疲勞，讓受損部位逐步恢復', risk: '不會增加技能 XP', edge: '爭取更多恢復' },
+    { id: 'film', name: t('camp.filmName'), detail: t('camp.filmDetail'), risk: t('camp.filmRisk'), edge: t('camp.filmEdge') },
+    { id: 'recovery', name: t('camp.recoveryName'), detail: t('camp.recoveryDetail'), risk: t('camp.recoveryRisk'), edge: t('camp.recoveryEdge') },
   ]
   const renderActivity = (action: { id: CampAction; name: string; detail: string; risk: string; edge: string }, actionBranch?: Branch) => {
     const benefit = benefitFor(action.id)
@@ -513,54 +754,81 @@ function CampView({ game, dispatch, relaxedDrills }: ViewProps & { relaxedDrills
     return <article className="camp-activity" key={action.id}>
       <div className="camp-activity-copy"><strong>{action.name}</strong><span>{action.detail}</span>{benefit && <small>{benefit.effect}</small>}<em>{benefit?.tierLabel ?? action.risk}</em></div>
       <div className="camp-activity-actions">
-        <button type="button" className="camp-standard-action" disabled={unavailable} onClick={() => dispatch({ type: 'COMPLETE_CAMP_ACTIVITY', action: action.id, branch: actionBranch })}>正常完成</button>
-        <button type="button" className="camp-edge-action" disabled={unavailable} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, branch: actionBranch, relaxedTiming: relaxedDrills })}>挑戰：{action.edge}</button>
+        <button type="button" className="camp-standard-action" disabled={unavailable} onClick={() => dispatch({ type: 'COMPLETE_CAMP_ACTIVITY', action: action.id, branch: actionBranch, ...(action.id === 'technique' && focusMoveId ? { focusMoveId } : {}) })}>{t('camp.standardAction')}</button>
+        <button type="button" className="camp-edge-action" disabled={unavailable || game.campEdgeUsed} onClick={() => dispatch({ type: 'START_CAMP_DRILL', action: action.id, branch: actionBranch, relaxedTiming: relaxedDrills, ...(action.id === 'technique' && focusMoveId ? { focusMoveId } : {}) })}>{game.campEdgeUsed ? t('camp.edgeUsed') : t('camp.edgeAction', { action: action.edge })}</button>
       </div>
     </article>
   }
   return (
-    <Screen title="訓練營" kicker={`第 ${game.fighter.evidence.fights + 1} 場比賽`}>
+    <Screen title={t('camp.title')} kicker={t('camp.fightKicker', { fight: game.fighter.evidence.fights + 1 })}>
       <ContextStrip fighter={game.fighter} />
-      <div className="budget-row"><span>本次營隊</span><div>{[0, 1, 2].map((slot) => <i key={slot} className={slot < game.campActions.length ? 'spent' : ''} />)}</div><strong>剩餘 {3 - game.campActions.length}</strong></div>
+      <div className="budget-row"><span>{t('camp.budget')}</span><div>{[0, 1, 2].map((slot) => <i key={slot} className={slot < game.campActions.length ? 'spent' : ''} />)}</div><strong>{t('camp.remaining', { count: 3 - game.campActions.length })}</strong></div>
       <RelationshipInfluenceStrip relationships={game.fighter.relationships} />
       <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
+      {game.lossLesson && <section className="loss-lesson camp-loss-lesson" aria-label={t('lossLesson.label')}><span>{t('lossLesson.kicker')}</span><h2>{t('lossLesson.title')}</h2><p>{game.lossLesson.localizedReason?.[locale] ?? game.lossLesson.reason}</p>{lessonMoveId && <strong>{t('lossLesson.recommendation', { move: localizedMoveName(lessonMoveId, FIGHT_INTENTS.find((move) => move.id === lessonMoveId)?.label ?? lessonMoveId, message) })}</strong>}</section>}
       <fieldset className="branch-selector">
-        <legend>技術焦點</legend>
-        <div className="branch-tabs five">{BRANCHES.map((value) => <button key={value} className={branch === value ? 'selected' : ''} onClick={() => setBranch(value)}>{BRANCH_META[value].short}<small>{BRANCH_META[value].name}</small></button>)}</div>
+        <legend>{t('camp.focusBranch')}</legend>
+        <div className="branch-tabs five" role="radiogroup" aria-label={t('camp.focusBranch')}>{BRANCHES.map((value, index) => <button type="button" role="radio" aria-checked={branch === value} tabIndex={branch === value ? 0 : -1} key={value} className={branch === value ? 'selected' : ''} onKeyDown={(event) => moveBranchFocus(event, index)} onClick={() => selectBranch(value)}>{t(`branchShort.${value}`)}<small>{t(`branch.${value}`)}</small></button>)}</div>
         <SkillProgressCard branch={branch} fighter={game.fighter} />
+        {movesForFocus.length > 0 && <label className="prepared-move-selector">
+          <span>{t('camp.focusMove')}</span>
+          <select value={focusMoveId} onChange={(event) => setFocusMoveId(event.target.value)}>{movesForFocus.map((move) => <option key={move.id} value={move.id}>{localizedMoveName(move.id, move.label, message)}</option>)}</select>
+          <small>{t('camp.focusMoveHelp')}</small>
+        </label>}
         <div className="camp-activity-list">{techniqueActions.map((action) => renderActivity(action, branch))}</div>
       </fieldset>
-      <SectionTitle title="通用訓練" subtitle="不論本次主練哪一門技術，都可以安排以下項目。" />
+      <SectionTitle title={t('camp.generalTitle')} subtitle={t('camp.generalHelp')} />
       <div className="camp-activity-list">{generalActions.map((action) => renderActivity(action))}</div>
-      <div className="camp-log">{relaxedDrills ? '寬鬆節奏只影響挑戰的讀取與操作窗口，最高獎勵不變。 ' : ''}{game.campActions.length ? `已完成：${game.campDrillHistory.map((result) => `${campLabel(result.kind)} · ${Math.round(result.score * 100)}%`).join(' → ')}` : '已完成：尚未安排'}</div>
+      <div className="camp-log">{relaxedDrills ? t('camp.relaxedLog') : ''}{t('camp.completed', { items: game.campActions.length ? game.campDrillHistory.map((result) => `${campLabel(result.kind, t)} · ${Math.round(result.score * 100)}%`).join(' → ') : t('camp.noneCompleted') })}</div>
     </Screen>
   )
 }
 
-function campLabel(action: CampAction) {
-  return ({ technique: '技術', film: '研究', recovery: '恢復' } as const)[action]
+function campLabel(action: CampAction, t: (id: TranslationKey, values?: Record<string, string | number>) => string) {
+  return t(`camp.kind.${action}`)
 }
 
 function CampActivitySummary({ outcome }: { outcome?: GameState['campDrillHistory'][number] }) {
+  const { t, message } = useI18n()
   if (!outcome) return null
-  const heading = outcome.source === 'edge' ? '挑戰成果' : outcome.source === 'normal' ? '正常完成' : '訓練成果'
-  return <aside className="camp-activity-summary" aria-label="最近一次訓練成果"><div><span>{heading}</span><strong>{campLabel(outcome.kind)} · {outcome.label}</strong></div><p>{outcome.summary}</p><div>{outcome.effects.map((effect) => <b key={effect}>{effect}</b>)}</div></aside>
+  const heading = outcome.source === 'edge' ? t('camp.summaryEdge') : outcome.source === 'normal' ? t('camp.summaryNormal') : t('camp.summaryOther')
+  const branch = outcome.branch ? t(`branch.${outcome.branch}`) : t(`camp.kind.${outcome.kind}`)
+  return <aside className="camp-activity-summary" aria-label={t('camp.summaryLabel')}><div><span>{heading}</span><strong>{campLabel(outcome.kind, t)} · {message(campOutcomeLabelReference(outcome), outcome.label)}</strong></div><p>{message(campOutcomeSummaryReference(outcome, branch), outcome.summary)}</p><div>{outcome.effects.map((effect) => <b key={effect}>{message(campEffectReference(effect, outcome, branch, (label) => localizedMoveFromAuthoredLabel(label, message)), effect)}</b>)}</div></aside>
 }
 
 function CampDrillView({ game, dispatch }: ViewProps) {
+  const { t } = useI18n()
   const drill = game.activeCampDrill!
-  return <Screen title="挑戰額外收益" kicker={`${drill.title} · 營隊訓練 ${game.campActions.length + 1}/3`}>
+  const [started, setStarted] = useState(false)
+  const reducedMotion = useMemo(() => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches), [])
+  const controls = drill.mode === 'combo' ? t('camp.preflightControlsCombo')
+    : drill.mode === 'film-study' ? t('camp.preflightControlsFilm')
+      : drill.kind === 'recovery' ? t('camp.preflightControlsRecovery') : t('camp.preflightControlsChoice')
+  return <Screen title={t('camp.drillTitle')} kicker={t('camp.drillKicker', { title: drill.title, slot: game.campActions.length + 1 })}>
     <ContextStrip fighter={game.fighter} />
-    <article className="drill-brief"><span>{campLabel(drill.kind)} · 正常收益已保留</span><p>{drill.instruction}</p><small>{drill.relaxedTiming ? '寬鬆節奏已開啟：窗口更長、更寬，最高獎勵不變。' : '這是選擇性挑戰：即使表現不理想，也會保有正常訓練的穩定收益。'}</small></article>
-    {drill.mode === 'combo' ? <ComboDrill challenge={drill} dispatch={dispatch} />
+    <article className="drill-brief"><span>{t('camp.standardProtected', { kind: campLabel(drill.kind, t) })}</span><p>{drill.instruction}</p><small>{drill.relaxedTiming ? t('camp.relaxedBrief') : t('camp.optionalBrief')}</small></article>
+    {!started ? <section className="drill-preflight" aria-labelledby="drill-preflight-title">
+      <span aria-hidden="true">◎</span>
+      <div><h2 id="drill-preflight-title">{t('camp.challengeReadyTitle')}</h2><p>{t('camp.challengeReadyBody')}</p>
+        <dl className="drill-preflight-details">
+          <div><dt>{t('camp.preflightObjective')}</dt><dd>{drill.instruction}</dd></div>
+          <div><dt>{t('camp.preflightControls')}</dt><dd>{controls}</dd></div>
+          <div><dt>{t('camp.preflightFloor')}</dt><dd>{t('camp.preflightFloorBody')}</dd></div>
+          <div><dt>{t('camp.preflightBonus')}</dt><dd>{t('camp.preflightBonusBody')}</dd></div>
+          <div><dt>{t('camp.preflightAccessibility')}</dt><dd>{drill.relaxedTiming ? t('camp.challengeRelaxed') : reducedMotion ? t('camp.preflightReducedMotion') : t('camp.challengeTimed')}</dd></div>
+        </dl>
+      </div>
+      <button type="button" autoFocus data-initial-focus className="primary-action" onClick={() => setStarted(true)}>{t('camp.challengeStart')}</button>
+    </section> : drill.mode === 'combo' ? <ComboDrill challenge={drill} dispatch={dispatch} />
       : drill.mode === 'film-study' ? <FilmStudyDrill challenge={drill} dispatch={dispatch} />
         : drill.kind === 'recovery' ? <RecoveryDrill challenge={drill} dispatch={dispatch} />
           : <ChoiceDrill challenge={drill} dispatch={dispatch} />}
-    <button className="text-button" onClick={() => dispatch({ type: 'CANCEL_CAMP_DRILL' })}>返回訓練營，不計入這次時段</button>
+    <button className="text-button" onClick={() => dispatch({ type: 'CANCEL_CAMP_DRILL' })}>{t('camp.cancelDrill')}</button>
   </Screen>
 }
 
 function TrainingRewardView({ game, dispatch }: ViewProps) {
+  const { locale, t, message } = useI18n()
   const branch = game.trainingMoveBranch ?? 'boxing'
   const moves = (game.trainingMoveChoices ?? [])
     .map((id) => FIGHT_INTENTS.find((move) => move.id === id))
@@ -568,44 +836,46 @@ function TrainingRewardView({ game, dispatch }: ViewProps) {
   const selected = game.trainingMoveSelections ?? []
   const required = game.trainingMoveRequired ?? Math.min(2, moves.length)
   const choiceExplanation = required === 1
-    ? `你已累積足夠 XP 解鎖 1 招。以下有 ${moves.length} 招可學，選其中 1 招學會。`
-    : `你一次累積跨過 ${required} 次招式解鎖。以下有 ${moves.length} 招可學，選 ${required} 招學會。`
-  return <Screen title="把訓練變成你的招式" kicker={`${BRANCH_META[branch].name} · Lv.${skillLevel(game.fighter.skills[branch].xp)}`}>
+    ? t('training.rewardChoiceSingle', { count: moves.length })
+    : t('training.rewardChoiceMultiple', { required, count: moves.length })
+  return <Screen title={t('training.rewardTitle')} kicker={t('training.rewardKicker', { branch: t(`branch.${branch}`), level: skillLevel(game.fighter.skills[branch].xp) })}>
     <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
-    <p className="lead">{choiceExplanation} 確認前可換選，這次不會重抽。</p>
-    <p className="training-selection-status" role="status">已選 {selected.length}／{required} 招</p>
+    <p className="lead">{t('training.rewardLead', { choice: choiceExplanation })}</p>
+    <p className="training-selection-status" role="status">{t('training.rewardSelected', { selected: selected.length, required })}</p>
     <div className="move-learning-list">{moves.map((move) => {
       const isSelected = selected.includes(move.id)
       return <button type="button" aria-pressed={isSelected} className={`choice-row move-learning-card ${isSelected ? 'selected' : ''}`} key={move.id} onClick={() => dispatch({ type: 'TOGGLE_TRAINING_MOVE', moveId: move.id })}>
-      <strong>{move.label}<small>{isSelected ? '✓ 已選 · ' : ''}Lv.{minimumMoveLevel(move)} · {move.category === 'offense' ? '進攻' : move.category === 'transition' ? '轉位' : '防守'}</small></strong>
-      <span>{move.description}</span>
-      <small>可用位置：{move.positions.map(positionLabel).join('、')} · 最適階段：{bestMoveStageLabel(move)}</small>
-      <em>{move.submission ? '降服路線' : move.cleanPosition ? `成功可進入 ${positionLabel(move.cleanPosition)}` : `終結壓力 ${move.effects.finishPressure}`}</em>
+      <strong>{localizedMoveName(move.id, move.label, message)}<small>{isSelected ? t('training.rewardSelectedMark') : ''}Lv.{minimumMoveLevel(move)} · {t(`combat.category.${move.category}`)}</small></strong>
+      <span>{locale === 'zh-Hant' ? move.description : t('combat.presentation.optionDescription', { branch: t(`branch.${move.branch}`), category: t(`combat.category.${move.category}`), position: positionLabel(move.positions[0], t) })}</span>
+      <small>{t('training.rewardPositions', { positions: move.positions.map((position) => positionLabel(position, t)).join(locale === 'zh-Hant' ? '、' : ', '), stages: bestMoveStageLabel(move, t) })}</small>
+      <em>{move.submission ? t('training.rewardSubmission') : move.cleanPosition ? t('training.rewardPosition', { position: positionLabel(move.cleanPosition, t) }) : t('training.rewardFinish', { value: move.effects.finishPressure })}</em>
     </button>})}</div>
     <ActionDock><button type="button" className="primary-action" disabled={selected.length !== required} onClick={() => dispatch({ type: 'CONFIRM_TRAINING_MOVES' })}>
-      <span>學會這 {required} 招</span><small>{selected.length === required ? '確認後帶進下一場比賽' : `還要選擇 ${required - selected.length} 招`}</small>
+      <span>{t('training.rewardConfirm', { required })}</span><small>{selected.length === required ? t('training.rewardConfirmHelp') : t('training.rewardRemaining', { count: required - selected.length })}</small>
     </button></ActionDock>
   </Screen>
 }
 
-const MOVE_STAGE_LABELS: Record<FightStageName, string> = { contact: '接觸', exchange: '交鋒', turn: '轉折', finish: '收尾' }
-
-function bestMoveStageLabel(move: FightMoveDefinition): string {
+function bestMoveStageLabel(move: FightMoveDefinition, t: Translator): string {
   const bestWeight = Math.max(...Object.values(move.stageWeights))
   return (Object.keys(move.stageWeights) as FightStageName[])
     .filter((stage) => move.stageWeights[stage] === bestWeight)
-    .map((stage) => MOVE_STAGE_LABELS[stage])
+    .map((stage) => t(`training.stage.${stage}` as TranslationKey))
     .join('／')
 }
 
-function drillChoiceLabel(value: string) {
-  if (value === 'offense') return '進攻截斷'
-  if (value === 'transition') return '轉位繞過'
-  if (value === 'defense') return '防守拆解'
-  if (value === 'pattern') return '記下固定節奏'
-  if (value === 'power') return '只找重擊'
-  if (value === 'random') return '隨機出招'
-  return FIGHT_INTENTS.find((move) => move.id === value)?.label ?? OPENING_LABELS[value as keyof typeof OPENING_LABELS] ?? BRANCH_META[value as Branch]?.name ?? value
+function drillChoiceLabel(value: string, t?: Translator, message?: MessageFormatter, locale: Locale = 'zh-Hant') {
+  if (value === 'offense') return t?.('training.choice.offense') ?? '進攻截斷'
+  if (value === 'transition') return t?.('training.choice.transition') ?? '轉位繞過'
+  if (value === 'defense') return t?.('training.choice.defense') ?? '防守拆解'
+  if (value === 'pattern') return t?.('training.choice.pattern') ?? '記下固定節奏'
+  if (value === 'power') return t?.('training.choice.power') ?? '只找重擊'
+  if (value === 'random') return t?.('training.choice.random') ?? '隨機出招'
+  if (BRANCHES.includes(value as Branch)) return t?.(`branch.${value as Branch}`) ?? BRANCH_META[value as Branch].name
+  const move = FIGHT_INTENTS.find((candidate) => candidate.id === value)
+  if (move) return message ? localizedMoveName(move.id, move.label, message) : move.label
+  if (OPENING_LABELS[value as keyof typeof OPENING_LABELS]) return localizedOpeningLabel(value, locale)
+  return BRANCH_META[value as Branch]?.name ?? value
 }
 
 function choiceResult(challenge: CampDrillChallenge, answers: string[], elapsedMs: number): CampDrillResult {
@@ -618,16 +888,18 @@ type ComboChallenge = Extract<CampDrillChallenge, { mode: 'combo' }>
 type FilmChallenge = Extract<CampDrillChallenge, { mode: 'film-study' }>
 
 function TrainingTutorial({ kind, onStart }: { kind: 'combo' | 'film-study'; onStart: () => void }) {
+  const { t } = useI18n()
   const copy = kind === 'combo'
-    ? ['記住三拍', '教練只完整示範一次；開始後依序選出實際招式。', '踩準節奏', '每一拍越接近中央時機，額外成長越高。']
-    : ['看片段', '三段攻防會包含一個重複習慣。', '做計畫', '找出招式、留下的破綻，以及真正可執行的反擊。']
-  return <section className="training-tutorial" aria-label="訓練說明">
-    <span>第一次進行</span><h2>{copy[0]}</h2><p>{copy[1]}</p><h3>{copy[2]}</h3><p>{copy[3]}</p>
-    <button type="button" className="primary-action" onClick={onStart}>明白，開始訓練</button>
+    ? [t('training.tutorial.comboTitle'), t('training.tutorial.comboBody'), t('training.tutorial.comboTimingTitle'), t('training.tutorial.comboTimingBody')]
+    : [t('training.tutorial.filmTitle'), t('training.tutorial.filmBody'), t('training.tutorial.filmPlanTitle'), t('training.tutorial.filmPlanBody')]
+  return <section className="training-tutorial" aria-label={t('training.tutorialLabel')}>
+    <span>{t('training.tutorialFirst')}</span><h2>{copy[0]}</h2><p>{copy[1]}</p><h3>{copy[2]}</h3><p>{copy[3]}</p>
+    <button type="button" className="primary-action" onClick={onStart}>{t('training.tutorialStart')}</button>
   </section>
 }
 
 function ComboDrill({ challenge, dispatch }: { challenge: ComboChallenge; dispatch: (command: GameCommand) => void }) {
+  const { locale, t, message } = useI18n()
   const tutorialKey = 'cage-life:training-tutorial:combo-v1'
   const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(tutorialKey) !== 'true')
   const [previewing, setPreviewing] = useState(true)
@@ -666,22 +938,23 @@ function ComboDrill({ challenge, dispatch }: { challenge: ComboChallenge; dispat
   }
   if (showTutorial) return <TrainingTutorial kind="combo" onStart={dismissTutorial} />
   const step = challenge.steps[stepIndex]
-  return <section className="camp-drill combo-drill" aria-label="技術組合小遊戲">
-    <div className="drill-progress"><span>組合 {Math.min(stepIndex, challenge.steps.length)}/{challenge.steps.length}</span><i><b style={{ width: `${stepIndex / challenge.steps.length * 100}%` }} /></i><small>{challenge.comboName}</small></div>
+  return <section className="camp-drill combo-drill" aria-label={t('training.comboLabel')}>
+    <div className="drill-progress"><span>{t('training.comboProgress', { current: Math.min(stepIndex, challenge.steps.length), total: challenge.steps.length })}</span><i><b style={{ width: `${stepIndex / challenge.steps.length * 100}%` }} /></i><small>{challenge.comboName}</small></div>
     {previewing ? <div className="combo-preview">
-      <span>教練示範</span><div>{challenge.steps.map((item, index) => <b key={`${item.moveId}-${index}`}>{index + 1}<small>{drillChoiceLabel(item.moveId)}</small></b>)}</div>
-      {reduceMotion && <button type="button" className="primary-action" onClick={beginInputs}>記住了，開始三拍</button>}
-    </div> : expired ? <><p className="drill-cue">時間到。已完成的拍數仍會記錄，基礎成長不會消失。</p><button type="button" className="primary-action" onClick={finish}>記錄這次訓練</button></>
+      <span>{t('training.comboDemonstration')}</span><div>{challenge.steps.map((item, index) => <b key={`${item.moveId}-${index}`}>{index + 1}<small>{drillChoiceLabel(item.moveId, t, message, locale)}</small></b>)}</div>
+      {reduceMotion && <button type="button" className="primary-action" onClick={beginInputs}>{t('training.comboBegin')}</button>}
+    </div> : expired ? <><p className="drill-cue">{t('training.comboTimeout')}</p><button type="button" className="primary-action" onClick={finish}>{t('training.comboRecord')}</button></>
       : <>
-        <p className="drill-cue">第 {stepIndex + 1} 拍：選出下一個動作</p>
+        <p className="drill-cue">{t('training.comboBeatCue', { beat: stepIndex + 1 })}</p>
         <div className="training-timing" style={{ '--training-cycle': `${challenge.beatMs}ms` } as React.CSSProperties}><i /><span /></div>
-        <div className="drill-options">{step.options.map((moveId) => <button type="button" key={moveId} onClick={() => choose(moveId)}>{drillChoiceLabel(moveId)}</button>)}</div>
+        <div className="drill-options">{step.options.map((moveId) => <button type="button" key={moveId} onClick={() => choose(moveId)}>{drillChoiceLabel(moveId, t, message, locale)}</button>)}</div>
       </>}
-    <p className="minigame-instruction">順序正確佔 65%，踩準每一拍佔 35%；失誤仍會完成訓練。</p>
+    <p className="minigame-instruction">{t('training.comboInstruction')}</p>
   </section>
 }
 
 function FilmStudyDrill({ challenge, dispatch }: { challenge: FilmChallenge; dispatch: (command: GameCommand) => void }) {
+  const { locale, t, message } = useI18n()
   const tutorialKey = 'cage-life:training-tutorial:film-v1'
   const [showTutorial, setShowTutorial] = useState(() => localStorage.getItem(tutorialKey) !== 'true')
   const [watching, setWatching] = useState(true)
@@ -697,14 +970,21 @@ function FilmStudyDrill({ challenge, dispatch }: { challenge: FilmChallenge; dis
     return () => window.clearInterval(timer)
   }, [challenge.sequenceMoveIds.length, reduceMotion, showTutorial, watching])
   if (showTutorial) return <TrainingTutorial kind="film-study" onStart={dismissTutorial} />
-  return <section className="film-study-drill" aria-label="影片研究小遊戲">
-    <div className="film-strip"><header><span>對手影片</span><strong>{challenge.opponentName}</strong></header><div>{challenge.sequenceMoveIds.map((moveId, index) => <article className={watching && index === beat ? 'active' : ''} key={`${moveId}-${index}`}><b>{index + 1}</b><strong>{drillChoiceLabel(moveId)}</strong><small>{FIGHT_INTENTS.find((move) => move.id === moveId)?.description}</small></article>)}</div></div>
-    {watching ? <div className="film-watching"><p>{reduceMotion ? '依序讀完三段攻防，再開始分析。' : '影片播放中……留意哪個動作重複出現。'}</p>{reduceMotion && <button type="button" className="primary-action" onClick={() => setWatching(false)}>看完了，開始分析</button>}</div>
+  return <section className="film-study-drill" aria-label={t('training.filmLabel')}>
+    <div className="film-strip"><header><span>{t('training.filmOpponent')}</span><strong>{challenge.opponentName}</strong></header><div>{challenge.sequenceMoveIds.map((moveId, index) => {
+      const move = FIGHT_INTENTS.find((candidate) => candidate.id === moveId)
+      const detail = move && locale === 'en'
+        ? t('combat.presentation.optionDescription', { branch: t(`branch.${move.branch}`), category: t(`combat.category.${move.category}`), position: positionLabel(move.positions[0], t) })
+        : move?.description
+      return <article className={watching && index === beat ? 'active' : ''} key={`${moveId}-${index}`}><b>{index + 1}</b><strong>{drillChoiceLabel(moveId, t, message, locale)}</strong><small>{detail}</small></article>
+    })}</div></div>
+    {watching ? <div className="film-watching"><p>{reduceMotion ? t('training.filmReduced') : t('training.filmPlaying')}</p>{reduceMotion && <button type="button" className="primary-action" onClick={() => setWatching(false)}>{t('training.filmBeginAnalysis')}</button>}</div>
       : <ChoiceDrill challenge={challenge} dispatch={dispatch} />}
   </section>
 }
 
 function ChoiceDrill({ challenge, dispatch }: { challenge: CampDrillChallenge; dispatch: (command: GameCommand) => void }) {
+  const { locale, t, message } = useI18n()
   const [answers, setAnswers] = useState<string[]>([])
   const [expired, setExpired] = useState(false)
   const startedAt = useRef(performance.now())
@@ -728,17 +1008,18 @@ function ChoiceDrill({ challenge, dispatch }: { challenge: CampDrillChallenge; d
     if (next.length >= challenge.prompts.length) finish(next)
   }
   const remaining = Math.max(0, challenge.prompts.length - answers.length)
-  return <section className="camp-drill choice-drill" aria-label={`${campLabel(challenge.kind)}小遊戲`}>
-    <div className="drill-progress"><span>讀取 {answers.length}/{challenge.prompts.length}</span><i><b style={{ width: `${challenge.prompts.length ? answers.length / challenge.prompts.length * 100 : 0}%` }} /></i><small>剩餘 {remaining} 段</small></div>
+  return <section className="camp-drill choice-drill" aria-label={t('camp.drillGameLabel', { kind: campLabel(challenge.kind, t) })}>
+    <div className="drill-progress"><span>{t('training.choiceProgress', { current: answers.length, total: challenge.prompts.length })}</span><i><b style={{ width: `${challenge.prompts.length ? answers.length / challenge.prompts.length * 100 : 0}%` }} /></i><small>{t('training.choiceRemaining', { count: remaining })}</small></div>
     {prompt ? <>
       <p className="drill-cue">{prompt.cue}</p>
-      <div className="drill-options">{prompt.options.map((option) => <button type="button" key={option} onClick={() => choose(option)}>{drillChoiceLabel(option)}</button>)}</div>
-    </> : <><p className="drill-cue">{expired ? '時間到。確認後才會記錄這次訓練。' : '教練正在記錄你的表現……'}</p>{expired && <button type="button" className="primary-action" onClick={() => finish(answersRef.current)}>記錄這次訓練</button>}</>}
-    <p className="minigame-instruction">{challenge.kind === 'technique' ? '按正確順序完成動作；反應越穩，額外成長越多。' : '把影片中的優勢、弱點與固定節奏連起來。'}</p>
+      <div className="drill-options">{prompt.options.map((option) => <button type="button" key={option} onClick={() => choose(option)}>{drillChoiceLabel(option, t, message, locale)}</button>)}</div>
+    </> : <><p className="drill-cue">{expired ? t('training.choiceTimeout') : t('training.choiceRecording')}</p>{expired && <button type="button" className="primary-action" onClick={() => finish(answersRef.current)}>{t('training.choiceRecord')}</button>}</>}
+    <p className="minigame-instruction">{challenge.kind === 'technique' ? t('training.choiceTechniqueInstruction') : t('training.choiceFilmInstruction')}</p>
   </section>
 }
 
 function RecoveryDrill({ challenge, dispatch }: { challenge: CampDrillChallenge; dispatch: (command: GameCommand) => void }) {
+  const { t } = useI18n()
   const [cycles, setCycles] = useState(0)
   const [holding, setHolding] = useState(false)
   const [expired, setExpired] = useState(false)
@@ -756,10 +1037,16 @@ function RecoveryDrill({ challenge, dispatch }: { challenge: CampDrillChallenge;
     const timer = window.setTimeout(() => setExpired(true), challenge.durationMs)
     return () => window.clearTimeout(timer)
   }, [challenge.durationMs])
-  const begin = () => { if (!expired && cyclesRef.current < 3) { heldAt.current = performance.now(); setHolding(true) } }
+  const begin = () => {
+    if (!expired && heldAt.current === undefined && cyclesRef.current < 3) {
+      heldAt.current = performance.now()
+      setHolding(true)
+    }
+  }
   const release = () => {
-    if (!holding || heldAt.current === undefined) return
+    if (heldAt.current === undefined) return
     const held = performance.now() - heldAt.current
+    heldAt.current = undefined
     const next = cyclesRef.current + 1
     cyclesRef.current = next
     heldDurationsRef.current = [...heldDurationsRef.current, held]
@@ -767,23 +1054,37 @@ function RecoveryDrill({ challenge, dispatch }: { challenge: CampDrillChallenge;
     setHolding(false)
     if (next >= 3) finish(heldDurationsRef.current)
   }
-  return <section className="camp-drill recovery-drill" aria-label="恢復訓練小遊戲">
-    <div className={`recovery-orb ${holding ? 'holding' : ''}`} aria-hidden="true"><i /><b>{holding ? '穩住' : '呼吸'}</b></div>
-    <div className="drill-progress"><span>循環 {cycles}/3</span><i><b style={{ width: `${cycles / 3 * 100}%` }} /></i><small>{holding ? '保持節奏' : '準備下一次'}</small></div>
-    {expired ? <button type="button" className="primary-action" onClick={() => finish()}>記錄這次訓練</button> : <button type="button" className="recovery-control" onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); begin() }} onPointerUp={release} onPointerCancel={() => setHolding(false)}>{holding ? '放開，完成呼氣' : '按住，穩定呼吸'}</button>}
-    <p className="minigame-instruction">每次穩定按住後放開，完成三次呼吸循環。節奏越平穩，恢復越完整。</p>
+  const cancelHold = () => {
+    heldAt.current = undefined
+    setHolding(false)
+  }
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== ' ' && event.key !== 'Enter') return
+    event.preventDefault()
+    if (!event.repeat) begin()
+  }
+  const handleKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== ' ' && event.key !== 'Enter') return
+    event.preventDefault()
+    release()
+  }
+  return <section className="camp-drill recovery-drill" aria-label={t('recovery.label')}>
+    <div className={`recovery-orb ${holding ? 'holding' : ''}`} aria-hidden="true"><i /><b>{holding ? t('recovery.steady') : t('recovery.breathe')}</b></div>
+    <div className="drill-progress"><span>{t('recovery.cycle', { current: cycles })}</span><i><b style={{ width: `${cycles / 3 * 100}%` }} /></i><small>{holding ? t('recovery.keepPace') : t('recovery.next')}</small></div>
+    {expired ? <button type="button" className="primary-action" onClick={() => finish()}>{t('recovery.record')}</button> : <button type="button" className="recovery-control" aria-pressed={holding} aria-describedby="recovery-instruction" onKeyDown={handleKeyDown} onKeyUp={handleKeyUp} onBlur={cancelHold} onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); begin() }} onPointerUp={release} onPointerCancel={cancelHold} onLostPointerCapture={() => { if (heldAt.current !== undefined) cancelHold() }}>{holding ? t('recovery.release') : t('recovery.hold')}</button>}
+    <p id="recovery-instruction" className="minigame-instruction">{t('recovery.instructions')}</p>
   </section>
 }
 
 function RelationshipInfluenceStrip({ relationships }: { relationships: FighterState['relationships'] }) {
+  const { t } = useI18n()
   const influences = relationships
-    .filter((relationship) => relationship.role === 'coach' || relationship.role === 'family')
     .map((relationship) => ({ relationship, benefit: getRelationshipBenefit(relationship) }))
     .filter(({ benefit }) => benefit.tier !== 'steady')
   if (!influences.length) return null
-  return <section className="relationship-influence-strip" aria-label="本次營隊的關係影響">
+  return <section className="relationship-influence-strip" aria-label={t('camp.relationshipInfluence')}>
     {influences.map(({ relationship, benefit }) => <div key={relationship.id} className={`relationship-influence-chip ${benefit.tier}`}>
-      <span>{relationship.role === 'coach' ? '教練' : '家人'}</span>
+      <span>{t(`relationship.role.${relationship.role}`)}</span>
       <strong>{benefit.tierLabel}</strong>
       <small>{benefit.effect}</small>
     </div>)}
@@ -791,32 +1092,64 @@ function RelationshipInfluenceStrip({ relationships }: { relationships: FighterS
 }
 
 function LifeView({ game, dispatch }: ViewProps) {
+  const { t, message } = useI18n()
   const event = game.lifeEvent!
   const person = game.fighter.relationships.find((item) => item.id === event.personId)!
+  const [weakestPart, weakestHealth] = weakestHealthEntry(game.fighter)
   return (
-    <Screen title={event.title} kicker={event.region ? `${REGION_LABELS[event.region]} · 家鄉機會` : '拳館之外'}>
+    <Screen title={message(event.titleRef, event.title)} kicker={event.region ? t('event.homeOpportunity', { region: t(`region.${event.region}.label`) }) : t('event.outsideGym')}>
       <CampActivitySummary outcome={game.campDrillHistory.at(-1)} />
-      <div className="person-chip"><span>{person.role === 'coach' ? '教' : person.role === 'family' ? '家' : '伴'}</span><div><strong>{person.name}</strong><small>{person.status}</small></div></div>
-      <p className="story-copy">{event.description}</p>
+      <section aria-label={t('event.currentContext')}><ContextStrip fighter={game.fighter} /></section>
+      <div className="person-chip"><span>{t(`event.person.${person.role}`)}</span><div><strong>{person.name}</strong><small>{person.status}</small></div></div>
+      <p className="memory-callout">{person.memories.length > 0
+        ? t('event.personMemory', { name: person.name, memory: person.memories.at(-1)! })
+        : t('event.personMemoryEmpty', { name: person.name })}</p>
+      <p className="story-copy">{message(event.descriptionRef, event.description)}</p>
       <div className="choice-list">
         {event.options.map((option) => {
           const requiredMoney = option.minimumMoney ?? Math.max(0, -(option.effects.money ?? 0))
           const canAfford = game.fighter.money >= requiredMoney
-          const trustDelta = option.effects.trust ?? 0
-          const nextTrust = Math.max(0, Math.min(100, person.trust + trustDelta))
-          const nextBenefit = getRelationshipBenefit({ ...person, trust: nextTrust })
-          const tierChanges = relationshipTier(person.trust) !== nextBenefit.tier
+          const trustDeltas = new Map<string, number>()
+          for (const [relationshipId, delta] of Object.entries(option.effects.relationshipTrust ?? {})) {
+            if (delta) trustDeltas.set(relationshipId, (trustDeltas.get(relationshipId) ?? 0) + delta)
+          }
+          if (option.effects.trust) trustDeltas.set(event.personId, (trustDeltas.get(event.personId) ?? 0) + option.effects.trust)
+          const relationshipPreviews = game.fighter.relationships.flatMap((relationship) => {
+            const requested = trustDeltas.get(relationship.id) ?? 0
+            if (!requested) return []
+            const nextTrust = clampUi(relationship.trust + requested)
+            const benefit = getRelationshipBenefit({ ...relationship, trust: nextTrust })
+            return [{ relationship, nextTrust, actualDelta: nextTrust - relationship.trust, benefit, tierChanges: relationshipTier(relationship.trust) !== benefit.tier }]
+          })
+          const projectedMoney = game.fighter.money + (option.effects.money ?? 0)
+          const projectedReadiness = clampUi(game.fighter.readiness + (option.effects.readiness ?? 0))
+          const projectedFatigue = clampUi(game.fighter.fatigue + (option.effects.fatigue ?? 0))
+          const projectedHealth = clampUi(weakestHealth + (option.effects.health ?? 0))
+          const projectedReputation = clampUi(game.fighter.reputation + (option.effects.reputation ?? 0))
+          const projectedScouting = clampUi(game.scouting + (option.effects.scouting ?? 0))
+          const projectedFightIQ = clampUi(game.fighter.mind.fightIQ + (option.effects.fightIQ ?? 0))
+          const projectedCredits = Math.max(0, game.preparationCredits + (option.effects.preparationCredits ?? 0))
+          const currentReputationBand = reputationBandLabel(game.fighter.reputation, t)
+          const projectedReputationBand = reputationBandLabel(projectedReputation, t)
           const effectPreview = [
-            option.effects.money ? `資金 ${signedRegionalMoney(option.effects.money, game.fighter.region)}` : undefined,
-            option.effects.readiness ? `準備度 ${signed(option.effects.readiness)}` : undefined,
-            option.effects.fatigue ? `疲勞 ${signed(option.effects.fatigue)}` : undefined,
-            option.effects.health ? `健康 ${signed(option.effects.health)}` : undefined,
-            option.effects.reputation ? `名聲 ${signed(option.effects.reputation)}` : undefined,
+            ...relationshipPreviews.map(({ relationship, nextTrust, actualDelta }) => t('event.projectTrust', { name: relationship.name, before: relationship.trust, after: nextTrust, delta: signed(actualDelta) })),
+            option.effects.money ? t('event.projectMoney', { before: formatRegionalMoney(game.fighter.money, game.fighter.region), after: formatRegionalMoney(projectedMoney, game.fighter.region), delta: signedRegionalMoney(projectedMoney - game.fighter.money, game.fighter.region) }) : undefined,
+            option.effects.readiness ? t('event.projectReadiness', { before: game.fighter.readiness, after: projectedReadiness, delta: signed(projectedReadiness - game.fighter.readiness) }) : undefined,
+            option.effects.fatigue ? t('event.projectFatigue', { before: game.fighter.fatigue, after: projectedFatigue, delta: signed(projectedFatigue - game.fighter.fatigue) }) : undefined,
+            option.effects.health ? t('event.projectHealth', { part: t(`health.${weakestPart}`), before: weakestHealth, after: projectedHealth, delta: signed(projectedHealth - weakestHealth), cap: projectedHealth - weakestHealth !== option.effects.health ? t('event.capped') : '' }) : undefined,
+            option.effects.scouting ? t('event.projectScouting', { before: game.scouting, after: projectedScouting, delta: signed(projectedScouting - game.scouting) }) : undefined,
+            option.effects.fightIQ ? t('event.projectFightIQ', { before: game.fighter.mind.fightIQ, after: projectedFightIQ, delta: signed(projectedFightIQ - game.fighter.mind.fightIQ) }) : undefined,
+            option.effects.preparationCredits ? t('event.projectPreparation', { before: game.preparationCredits, after: projectedCredits, delta: signed(projectedCredits - game.preparationCredits) }) : undefined,
+            option.effects.reputation
+              ? currentReputationBand === projectedReputationBand
+                ? t('event.projectReputationSame', { direction: option.effects.reputation > 0 ? t('event.reputationRise') : t('event.reputationFall'), band: projectedReputationBand })
+                : t('event.projectReputation', { before: currentReputationBand, after: projectedReputationBand })
+              : undefined,
           ].filter((value): value is string => Boolean(value))
           return <button className="choice-row" key={option.id} disabled={!canAfford} onClick={() => dispatch({ type: 'RESOLVE_LIFE', optionId: option.id })}>
-            <strong>{option.label}</strong><span>{option.detail}</span>
+            <strong>{message(option.labelRef, option.label)}</strong><span>{message(option.detailRef, option.detail)}</span>
             {effectPreview.length > 0 && <div className="event-option-effects">{effectPreview.map((effect) => <b key={effect}>{effect}</b>)}</div>}
-            {!canAfford ? <em className="unavailable-reason">資金不足 · 需要 {formatRegionalMoney(requiredMoney, game.fighter.region)}</em> : <em className={tierChanges ? 'relationship-change' : ''}>信任 {trustDelta >= 0 ? '+' : ''}{trustDelta} → {nextTrust}。{tierChanges ? `關係將變為「${nextBenefit.tierLabel}」：` : `之後仍是「${nextBenefit.tierLabel}」：`}{nextBenefit.effect}</em>}
+            {!canAfford ? <em className="unavailable-reason">{t('event.insufficientFunds', { amount: formatRegionalMoney(requiredMoney, game.fighter.region) })}</em> : relationshipPreviews.map(({ relationship, benefit, tierChanges }) => <em key={relationship.id} className={tierChanges ? 'relationship-change' : ''}>{t(tierChanges ? 'event.relationshipChanges' : 'event.relationshipSame', { name: relationship.name, tier: benefit.tierLabel, effect: benefit.effect })}</em>)}
           </button>
         })}
       </div>
@@ -825,17 +1158,23 @@ function LifeView({ game, dispatch }: ViewProps) {
 }
 
 function GrowthView({ game, dispatch }: ViewProps) {
+  const { locale, t, message } = useI18n()
   const awards = (game.traitAwards ?? []).map((id) => traitDefinition(id)).filter(Boolean)
   const traitProgressUpdates = game.traitProgressUpdates ?? []
   const weakestHealth = weakestHealthEntry(game.fighter)
   const injuryRetirement = game.growthDestination === 'retirement' && weakestHealth[1] <= CAREER_HEALTH_RETIREMENT_THRESHOLD
   const injuryRecovery = game.growthDestination === 'injury-recovery'
-  if (!injuryRetirement && !injuryRecovery && !awards.length && !traitProgressUpdates.length && !game.lifeEventResult) return <EmptyGrowthAdvance dispatch={dispatch} />
+  if (!injuryRetirement && !injuryRecovery && !awards.length && !traitProgressUpdates.length && !game.lifeEventResult && !game.lossLesson) return <EmptyGrowthAdvance dispatch={dispatch} />
   return (
     <Screen title={injuryRetirement ? '傷勢終結了職業生涯' : injuryRecovery ? '傷勢逼你停賽' : awards.length ? '打法成為了特質' : '實戰留下的痕跡'} kicker={injuryRetirement || injuryRecovery ? `${healthPartLabel(weakestHealth[0])}健康 ${weakestHealth[1]}` : awards.length ? `${awards.length} 項新特質` : '生涯進度'}>
       {injuryRetirement && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康已降至 {weakestHealth[1]}。達到 {CAREER_HEALTH_RETIREMENT_THRESHOLD} 或以下的硬性退役線；剛才那場比賽是你的職業生涯終點。</p>}
       {injuryRecovery && <p className="memory-callout danger-callout">{healthPartLabel(weakestHealth[0])}的長期健康降至 {weakestHealth[1]}。你不能直接簽下一場比賽：可停賽一年，讓這個部位恢復 18 點健康後再回來；或選擇現在退役。療傷的代價是失去一年生涯時間與一輪合約。</p>}
-      {awards.length ? <div className="trait-awards">{awards.map((trait) => trait && <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity)}</span><h2>{trait.name}</h2><p>{trait.description}</p><strong>{trait.effect}</strong><small>生效：{trait.condition}</small></article>)}</div>
+      {game.lossLesson && <section className="loss-lesson" aria-label={t('lossLesson.label')}><span>{t('lossLesson.kicker')}</span><h2>{t('lossLesson.title')}</h2><p>{game.lossLesson.localizedReason?.[locale] ?? game.lossLesson.reason}</p>{game.lossLesson.recommendedMoveId && <strong>{t('lossLesson.recommendation', { move: localizedMoveName(game.lossLesson.recommendedMoveId, FIGHT_INTENTS.find((move) => move.id === game.lossLesson?.recommendedMoveId)?.label ?? game.lossLesson.recommendedMoveId, message) })}</strong>}</section>}
+      {awards.length ? <div className="trait-awards">{awards.map((trait) => {
+        if (!trait) return null
+        const copy = localizedTraitCopy(trait, message)
+        return <article className={`trait-card rarity-${trait.rarity}`} key={trait.id}><span>{rarityLabel(trait.rarity, t)}</span><h2>{copy.name}</h2><p>{copy.description}</p><strong>{copy.effect}</strong><small>{copy.condition}</small></article>
+      })}</div>
         : <div className="growth-complete"><span>✓</span><div><strong>沒有憑空出現的新能力</strong><small>真正的招式來自訓練；重複的實戰行為則會逐步形成特質。</small></div></div>}
       {traitProgressUpdates.length > 0 && <><SectionTitle title="正在形成的特質" subtitle="這場比賽推進了以下實戰特質。" /><TraitProgressList fighter={game.fighter} traitIds={traitProgressUpdates} /></>}
       <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'CONTINUE_GROWTH' })}>{game.growthDestination === 'retirement' ? '查看退役生涯傳記' : injuryRecovery ? '停賽一年，專心療傷' : game.growthDestination === 'prefight' ? '查看賽前簡報' : game.growthDestination === 'league-decision' ? '查看晉級選擇' : '繼續生涯'}</button>{injuryRecovery && <button className="text-button danger-text" onClick={() => dispatch({ type: 'RETIRE' })}>不等了，現在退役</button>}</ActionDock>
@@ -849,7 +1188,7 @@ function EmptyGrowthAdvance({ dispatch }: { dispatch: (command: GameCommand) => 
 }
 
 function PreFightView({ game, dispatch }: ViewProps) {
-  const { locale } = useI18n()
+  const { locale, t, message } = useI18n()
   const opponent = getOpponent(game)!
   const offer = game.offers.find((item) => item.id === game.selectedOfferId)!
   const coach = game.fighter.relationships.find((relationship) => relationship.role === 'coach')
@@ -864,36 +1203,58 @@ function PreFightView({ game, dispatch }: ViewProps) {
   const bodyForecast = Math.round((bodyMatchup.rangeEdge + bodyMatchup.insideEdge + bodyMatchup.clinchEdge) / 3)
   const forecast = playerRating - opponentRating + readinessForecast + scoutingForecast + bodyForecast
   const opponentStanding = opponent.standing === 'champion'
-    ? `${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
-    : opponent.rank !== undefined ? `排名 #${opponent.rank}` : '未排名'
+    ? t('offer.champion', { league: localizedLeagueLabel(opponent.league as LeagueId, t) })
+    : opponent.rank !== undefined ? t('offer.rank', { rank: opponent.rank }) : t('offer.unranked')
   const playerFrame = localizedFrameLabel(game.fighter.frame, locale)
   const opponentFrame = localizedFrameLabel(opponent.frame, locale)
-  return <Screen title="籠門之前" kicker={offer.promotion}>
+  return <Screen title={t('prefight.title')} kicker={offer.promotion}>
     <div className="tale-of-tape">
-      <FighterFace label="你" name={game.fighter.name} value={playerRating} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} body={locale === 'en' ? `Weight ${game.fighter.naturalWeight} kg · ${playerFrame}` : `體重 ${game.fighter.naturalWeight} kg · ${game.fighter.frame}`} />
+      <FighterFace label={t('prefight.you')} name={game.fighter.name} value={playerRating} measurements={`${game.fighter.heightCm} / ${game.fighter.reachCm} cm`} body={t('prefight.weight', { weight: game.fighter.naturalWeight, frame: playerFrame })} />
       <span className="versus">VS</span>
-      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={opponentRating} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} body={locale === 'en' ? `Frame · ${opponentFrame}` : `骨架 ${opponent.frame}`} opponent />
+      <FighterFace label={`${opponent.nationality ?? opponent.region} · ${opponent.style}`} name={opponent.name} value={opponentRating} measurements={`${opponent.heightCm} / ${opponent.reachCm} cm`} body={t('prefight.frame', { frame: opponentFrame })} opponent />
     </div>
+    {game.preparedMove && !game.preparedMove.used && <aside className="prepared-move-callout"><span>{t('preparedMove.kicker')}</span><strong>{localizedMoveName(game.preparedMove.moveId, FIGHT_INTENTS.find((move) => move.id === game.preparedMove?.moveId)?.label ?? game.preparedMove.moveId, message)}</strong><p>{t('preparedMove.body')}</p></aside>}
+    <MotiveOfferCallout offer={offer} opponent={opponent} />
+    {opponent.meetings > 0 && <aside className="memory-callout"><strong>{t('rival.briefingTitle')}</strong> {rivalMemorySummary(opponent, t, message)}</aside>}
     <div className="briefing">
-      <Metric label="比賽" value={offer.titleFight ? '五回合冠軍戰' : '三回合'} note={`${opponentStanding} · ${offer.riskLabel}`} />
-      <Metric label="比賽量級" value={game.fighter.weightClass} note={`準備度 ${game.fighter.readiness}`} />
-      <Metric label="情報" value={game.scouting >= 50 ? '充分' : game.scouting >= 25 ? '基本' : '有限'} note={`最強 ${BRANCH_META[strength].name}／最弱 ${BRANCH_META[opponent.weakness].name}`} />
-      <Metric label="技術對位" value={`${BRANCH_META[playerStrength].name} 對 ${BRANCH_META[opponent.weakness].name}`} note={`你的弱項 ${BRANCH_META[playerWeakness].name}／他最強 ${BRANCH_META[strength].name}`} />
-      <Metric label="體格對位" value={locale === 'en' ? bodyMatchupLabelEnglish(bodyMatchup) : bodyMatchupLabel(bodyMatchup)} note={locale === 'en' ? `You: ${playerFrame} · Opponent: ${opponentFrame} · Height ${signedDelta(bodyMatchup.heightDelta)} cm · Reach ${signedDelta(bodyMatchup.reachDelta)} cm · Minor effect only` : `你 ${game.fighter.frame}／對手 ${opponent.frame} · 身高差 ${signedDelta(bodyMatchup.heightDelta)} cm · 臂展差 ${signedDelta(bodyMatchup.reachDelta)} cm · 只帶來小幅影響`} />
-      <Metric label="賽前評估" value={forecast >= 5 ? '你略佔優勢' : forecast <= -5 ? '對手略佔優勢' : '旗鼓相當'} note={`競技評級 ${playerRating} vs ${opponentRating} · 狀態 ${signedDelta(readinessForecast)} · 情報 +${scoutingForecast} · 體格 ${signedDelta(bodyForecast)}`} />
+      <Metric label={t('prefight.fight')} value={offer.titleFight ? t('prefight.fiveRoundTitle') : t('prefight.threeRounds')} note={`${opponentStanding} · ${localizedRiskLabel(offer.riskLabel, t)}`} />
+      <Metric label={t('prefight.weightClass')} value={game.fighter.weightClass} note={t('prefight.readiness', { value: game.fighter.readiness })} />
+      <Metric label={t('prefight.scouting')} value={game.scouting >= 50 ? t('prefight.scoutingFull') : game.scouting >= 25 ? t('prefight.scoutingBasic') : t('prefight.scoutingLimited')} note={t('prefight.branchRead', { strongest: t(`branch.${strength}`), weakest: t(`branch.${opponent.weakness}`) })} />
+      <Metric label={t('prefight.techniqueMatchup')} value={t('prefight.techniqueValue', { player: t(`branch.${playerStrength}`), opponent: t(`branch.${opponent.weakness}`) })} note={t('prefight.techniqueNote', { playerWeakness: t(`branch.${playerWeakness}`), opponentStrength: t(`branch.${strength}`) })} />
+      <Metric label={t('prefight.bodyMatchup')} value={locale === 'en' ? bodyMatchupLabelEnglish(bodyMatchup) : bodyMatchupLabel(bodyMatchup)} note={t('prefight.bodyNote', { playerFrame, opponentFrame, height: signedDelta(bodyMatchup.heightDelta), reach: signedDelta(bodyMatchup.reachDelta) })} />
+      <Metric label={t('prefight.forecast')} value={forecast >= 5 ? t('prefight.forecastAhead') : forecast <= -5 ? t('prefight.forecastBehind') : t('prefight.forecastEven')} note={t('prefight.forecastNote', { player: playerRating, opponent: opponentRating, readiness: signedDelta(readinessForecast), scouting: scoutingForecast, body: signedDelta(bodyForecast) })} />
     </div>
     <aside className="coach-note compact">
       <span className="coach-avatar" aria-hidden="true" data-i18n-native>C</span>
-      <div><strong>{coach?.name ?? '教練'}最後提醒</strong><p>「{prefightCoachRecommendation(game.fighter, opponent, offer.riskLabel, playerRating, opponentRating, forecast, readinessForecast, scoutingForecast, bodyMatchup)}」</p></div>
+      <div><strong>{t('prefight.coachReminder', { name: coach?.name ?? t('offer.coachFallback') })}</strong><p>「{prefightCoachRecommendation(game.fighter, opponent, offer.riskLabel, playerRating, opponentRating, forecast, readinessForecast, scoutingForecast, bodyMatchup)}」</p></div>
     </aside>
-    <p className="memory-callout">畫面只會顯示大致勝算。傷勢、招式熟練度、場上位置和對手反應都會影響結果。</p>
-    <ActionDock><button className="primary-action danger" onClick={() => dispatch({ type: 'START_FIGHT' })}>關上籠門</button></ActionDock>
+    <p className="memory-callout">{t('prefight.uncertainty')}</p>
+    <ActionDock><button className="primary-action danger" onClick={() => dispatch({ type: 'START_FIGHT' })}>{t('prefight.start')}</button></ActionDock>
   </Screen>
 }
 
 function strongestBranch(combatant: { technique: Record<Branch, number> }): Branch {
   return (Object.keys(combatant.technique) as Branch[]).reduce((best, branch) =>
     combatant.technique[branch] > combatant.technique[best] ? branch : best)
+}
+
+function rivalMemorySummary(opponent: Opponent, t: Translator, message?: MessageFormatter): string {
+  const memory = opponent.rivalMemory
+  if (!memory) return t('rival.legacyUnknown', { meetings: opponent.meetings })
+  const result = t(`rival.result.${memory.lastResult}` as TranslationKey)
+  const details = [
+    memory.lastMethod
+      ? t('rival.lastMeeting', { result, method: methodLabel(memory.lastMethod, t) })
+      : t('rival.lastMeetingNoMethod', { result }),
+    memory.movePattern ? t('rival.movePattern', {
+      move: message
+        ? localizedMoveName(memory.movePattern.moveId, FIGHT_INTENTS.find((move) => move.id === memory.movePattern?.moveId)?.label ?? memory.movePattern.moveId, message)
+        : FIGHT_INTENTS.find((move) => move.id === memory.movePattern?.moveId)?.label ?? memory.movePattern.moveId,
+      uses: memory.movePattern.uses,
+    }) : undefined,
+    memory.branchPattern ? t('rival.branchPattern', { branch: t(`branch.${memory.branchPattern.branch}`), uses: memory.branchPattern.uses }) : undefined,
+  ].filter((entry): entry is string => Boolean(entry))
+  return details.join(' · ')
 }
 
 function weakestBranch(combatant: { technique: Record<Branch, number> }): Branch {
@@ -974,17 +1335,24 @@ function riskTone(risk: RiskLabel) {
   return 'severe'
 }
 
-function coachVerdict(opponent: Opponent, risk: RiskLabel) {
-  const strength = BRANCH_META[strongestBranch(opponent)].name
-  const weakness = BRANCH_META[opponent.weakness].name
+function localizedRiskLabel(risk: RiskLabel, t: (id: TranslationKey, values?: Record<string, string | number>) => string) {
+  if (risk === '低風險') return t('risk.low')
+  if (risk === '中度風險') return t('risk.medium')
+  if (risk === '高風險') return t('risk.high')
+  return t('risk.extreme')
+}
+
+function coachVerdict(opponent: Opponent, risk: RiskLabel, t: Translator) {
+  const strength = t(`branch.${strongestBranch(opponent)}`)
+  const weakness = t(`branch.${opponent.weakness}`)
   const opening = risk === '低風險'
-    ? '這場適合你累積實戰經驗。'
+    ? t('offer.coachRisk.low')
     : risk === '中度風險'
-      ? '這是場能讓你穩穩成長的對位。'
+      ? t('offer.coachRisk.medium')
       : risk === '高風險'
-        ? '他略佔上風，接了就得按計畫打。'
-        : '這不是普通的考驗，現在接要有付出代價的準備。'
-  return `${opening}別在${strength}跟他硬碰，想辦法把戰局帶向${weakness}。`
+        ? t('offer.coachRisk.high')
+        : t('offer.coachRisk.extreme')
+  return t('offer.coachVerdict', { opening, strength, weakness })
 }
 
 function fightDamagePartLabel(part?: FightDamagePart) {
@@ -996,10 +1364,11 @@ function mostDamagedPart(damage: FightState['playerDamageByPart']): FightDamageP
 }
 
 function CornerDirective({ fight, pending = false }: { fight: FightState; pending?: boolean }) {
+  const { t } = useI18n()
   const adjustment = fight.cornerAdjustment ?? (pending ? 'rest' : undefined)
   if (!adjustment) return null
   const target = fightDamagePartLabel(fight.cornerTarget)
-  const title = adjustment === 'rest' ? 'Just rest'
+  const title = adjustment === 'rest' ? t('corner.rest')
     : adjustment === 'protect' ? `鎖住${target}防線`
       : adjustment === 'recover' ? '搶回呼吸' : `追打${target}`
   const detail = adjustment === 'rest' ? '體力回復 14（會受軀幹傷勢與上限影響）；沒有額外代價。'
@@ -1012,68 +1381,77 @@ function CornerDirective({ fight, pending = false }: { fight: FightState; pendin
 }
 
 function RoundPlanView({ game, dispatch }: ViewProps) {
+  const { t } = useI18n()
   const fight = game.fight!
   const plans: Array<{ id: RoundPlan; label: string; detail: string }> = [
-    { id: 'distance', label: '保持距離', detail: '以前踢、刺拳和移動控制外圍' },
-    { id: 'pressure', label: '向前壓迫', detail: '冒險近身換拳，把對手逼到鐵網邊' },
-    { id: 'takedown', label: '尋找抱摔', detail: '改變高度，把回合帶到上位、纏抱或下位的爭奪' },
-    { id: 'clinch', label: '尋找纏抱', detail: '主動進入近身，爭搶頭位與內勾' },
-    { id: 'cage', label: '籠邊消耗', detail: '控制對手的頭部與身體，讓他難以脫身' },
-    { id: 'recover', label: '放慢節奏', detail: '暫時讓出主動權，保存後半場的體力' },
+    { id: 'distance', label: t('combat.plan.distance'), detail: t('combat.plan.distanceDetail') },
+    { id: 'pressure', label: t('combat.plan.pressure'), detail: t('combat.plan.pressureDetail') },
+    { id: 'takedown', label: t('combat.plan.takedown'), detail: t('combat.plan.takedownDetail') },
+    { id: 'clinch', label: t('combat.plan.clinch'), detail: t('combat.plan.clinchDetail') },
+    { id: 'cage', label: t('combat.plan.cage'), detail: t('combat.plan.cageDetail') },
+    { id: 'recover', label: t('combat.plan.recover'), detail: t('combat.plan.recoverDetail') },
   ]
-  return <Screen title={`第 ${fight.round} 回合`} kicker={`${fight.totalRounds} 回合制`}>
+  return <Screen title={t('combat.roundTitle', { round: fight.round })} kicker={t('combat.roundFormat', { rounds: fight.totalRounds })}>
     <FightArena game={game} />
     <CornerDirective fight={fight} />
-    <SectionTitle title="這回合怎麼打？" subtitle="戰術會影響場上位置、體力消耗和接下來出現的機會。" />
+    <SectionTitle title={t('combat.roundQuestion')} subtitle={t('combat.roundHelp')} />
     <div className="choice-list fight-choices">{plans.map((plan) => <button className="choice-row" key={plan.id} onClick={() => dispatch({ type: 'SET_ROUND_PLAN', plan: plan.id })}><strong>{plan.label}</strong><span>{plan.detail}</span></button>)}</div>
   </Screen>
 }
 
 function CriticalView({ game, dispatch }: ViewProps) {
+  const { locale, t, message } = useI18n()
   if (game.combatMode === 'coach-guided') return <CoachGuidedCriticalView game={game} dispatch={dispatch} />
   const prompt = game.fight!.prompt!
   const fight = game.fight!
   const [showAllMoves, setShowAllMoves] = useState(false)
   const [moveCategory, setMoveCategory] = useState<MoveCategory>('offense')
   const [moveBranch, setMoveBranch] = useState<'all' | Branch>('all')
-  const momentum = fight.initiative === 'player' ? '你掌握攻勢' : fight.initiative === 'opponent' ? '對手開始壓制' : '局勢膠著'
+  const momentum = fight.initiative === 'player' ? t('combat.momentum.player') : fight.initiative === 'opponent' ? t('combat.momentum.opponent') : t('combat.momentum.neutral')
   const remaining = prompt.allOptions.length - prompt.featuredOptions.length
   const categoryPool = prompt.allOptions.filter((option) => option.category === moveCategory)
   const availableBranches = BRANCHES.filter((branch) => categoryPool.some((option) => option.branch === branch))
   const categoryMoves = categoryPool.filter((option) => moveBranch === 'all' || option.branch === moveBranch)
+  const lastBeat = fight.beatHistory.at(-1)
+  const lastPresentation = lastBeat ? localizedBeatPresentation(lastBeat, locale, t, message) : undefined
+  const promptTitle = locale === 'zh-Hant' ? prompt.title : t('combat.presentation.promptTitle', { position: positionLabel(fight.position, t) })
+  const promptDescription = locale === 'zh-Hant' ? prompt.description : t('combat.presentation.promptDescription', { step: fight.sequenceStep, position: positionLabel(fight.position, t) })
   const resolve = (optionId: string) => { setShowAllMoves(false); dispatch({ type: 'RESOLVE_CRITICAL', optionId }) }
-  const outcomeLabel = fight.lastNarrative?.outcome === 'clean' ? '乾淨奏效' : fight.lastNarrative?.outcome === 'contested' ? '互有得失' : '遭到破解'
-  return <Screen title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · ${momentum}`}>
+  const outcomeLabel = fight.lastNarrative?.outcome === 'clean' ? t('combat.outcome.clean') : fight.lastNarrative?.outcome === 'contested' ? t('combat.outcome.contested') : t('combat.outcome.countered')
+  return <Screen title={promptTitle} kicker={t('combat.manualKicker', { round: fight.round, step: fight.sequenceStep, momentum })}>
     {fight.positionEntry && <PositionEntryDialog game={game} dispatch={dispatch} />}
     <FightArena game={game} compact showLiveLog={false} />
     <CornerDirective fight={fight} />
-    {fight.positionPayoff && <aside className="position-payoff-notice" aria-live="polite"><strong>位置追擊</strong><span>你剛建立{positionLabel(fight.position)}，這次選擇不會額外消耗一段回合時間。</span></aside>}
-    <div className="fight-trait-strip"><span>你的特質</span>{game.fighter.traits.map((owned) => {
+    {fight.positionPayoff && <aside className="position-payoff-notice" aria-live="polite"><strong>{t('combat.positionPayoff')}</strong><span>{t('combat.positionPayoffManual', { position: positionLabel(fight.position, t) })}</span></aside>}
+    <div className="fight-trait-strip"><span>{t('combat.yourTraits')}</span>{game.fighter.traits.map((owned) => {
       const trait = traitDefinition(owned.id)
-      return trait ? <b className={`rarity-${trait.rarity}`} key={owned.id} title={`${trait.condition}：${trait.effect}`}>{trait.name}</b> : null
+      if (!trait) return null
+      const copy = localizedTraitCopy(trait, message)
+      return <b className={`rarity-${trait.rarity}`} key={owned.id} title={`${copy.condition}: ${copy.effect}`}>{copy.name}</b>
     })}</div>
-    {fight.lastNarrative && <article className={`narrative-beat ${fight.lastNarrative.outcome}`}>
-      <header><span>上一段攻防</span><strong>{outcomeLabel}</strong></header>
-      <p>{fight.lastNarrative.paragraph}</p>
-      {fight.lastNarrative.colorCommentary && <aside className="color-call"><span>解說台</span><q>{fight.lastNarrative.colorCommentary}</q></aside>}
-      <div className="impact-tags">{(fight.lastNarrative.impactTags ?? []).map((tag) => <b key={tag}>{tag}</b>)}</div>
-    </article>}
-    <p className="story-copy critical-copy">{prompt.description}</p>
+    {fight.lastNarrative && <details className={`narrative-beat previous-exchange ${fight.lastNarrative.outcome}`}>
+      <summary><span>{t('combat.previousExchange')}</span><strong>{outcomeLabel}</strong><small>{lastPresentation?.playerMove ?? localizedMoveName(fight.lastNarrative.executionId, fight.lastNarrative.executionName, message)} · {positionLabel(fight.lastNarrative.positionBefore, t)} → {positionLabel(fight.lastNarrative.positionAfter, t)}</small></summary>
+      <p>{lastPresentation?.story ?? (locale === 'zh-Hant' ? fight.lastNarrative.paragraph : t('combat.presentation.legacyText'))}</p>
+      <div className="impact-tags">{(lastPresentation?.tags ?? []).map((tag) => <b key={tag}>{tag}</b>)}</div>
+    </details>}
+    {(lastPresentation?.commentary ?? (locale === 'zh-Hant' ? fight.lastNarrative?.colorCommentary : undefined)) && <aside className="color-call" aria-live="polite"><span>{t('combat.commentaryDesk')}</span><q>{lastPresentation?.commentary ?? fight.lastNarrative?.colorCommentary}</q></aside>}
+    {fight.lastNarrative && <p className="visually-hidden" role="status" aria-live="polite">{t('combat.previousAnnouncement', { outcome: outcomeLabel, story: lastPresentation?.story ?? (locale === 'zh-Hant' ? fight.lastNarrative.paragraph : t('combat.presentation.legacyText')) })}</p>}
+    <p className="story-copy critical-copy">{promptDescription}</p>
     <ThreatCard game={game} />
-    {fight.opponentOpenings.length > 0 && <div className="opening-strip"><span>可利用破綻</span>{fight.opponentOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
-    {fight.playerOpenings.length > 0 && <div className="opening-strip danger"><span>你的防守空檔</span>{fight.playerOpenings.map((opening) => <b key={opening.key}>{OPENING_LABELS[opening.key]}</b>)}</div>}
+    {fight.opponentOpenings.length > 0 && <div className="opening-strip"><span>{t('combat.exploitableOpenings')}</span>{fight.opponentOpenings.map((opening) => <b key={opening.key}>{localizedOpeningLabel(opening.key, locale)}</b>)}</div>}
+    {fight.playerOpenings.length > 0 && <div className="opening-strip danger"><span>{t('combat.yourOpenings')}</span>{fight.playerOpenings.map((opening) => <b key={opening.key}>{localizedOpeningLabel(opening.key, locale)}</b>)}</div>}
     {fight.beatHistory.length > 0 && <AdaptationWarning fight={fight} />}
-    <div className="move-section-label"><span>關鍵選擇</span><small>有利選擇、招牌、轉位與安全路線</small></div>
+    <div className="move-section-label critical-decision-anchor" data-critical-decision-anchor tabIndex={-1}><span>{t('combat.decisionLabel')}</span><small>{t('combat.decisionHelp')}</small></div>
     <div className="choice-list">{prompt.featuredOptions.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} />)}</div>
-    {remaining > 0 && <button className="more-moves-button" onClick={() => { setMoveBranch('all'); setShowAllMoves(true) }}>查看其餘 {remaining} 種招式 <span>進攻、轉位與防守</span></button>}
+    {remaining > 0 && <button className="more-moves-button" onClick={() => { setMoveBranch('all'); setShowAllMoves(true) }}>{t('combat.moreMoves', { count: remaining })} <span>{t('combat.moreMovesHint')}</span></button>}
     {showAllMoves && <div className="sheet-backdrop move-sheet-backdrop" role="presentation" onClick={() => setShowAllMoves(false)}>
       <section className="detail-sheet move-sheet" role="dialog" aria-modal="true" aria-labelledby="move-sheet-title" onClick={(event) => event.stopPropagation()}>
-        <header className="sheet-head"><div><span>完整招式庫</span><h2 id="move-sheet-title">{prompt.title}</h2></div><button onClick={() => setShowAllMoves(false)} aria-label="關閉完整招式庫">×</button></header>
+        <header className="sheet-head"><div><span>{t('combat.fullMoveLibrary')}</span><h2 id="move-sheet-title">{promptTitle}</h2></div><button onClick={() => setShowAllMoves(false)} aria-label={t('combat.closeMoveLibrary')}>×</button></header>
         <div className="move-filters">
-          <nav className="move-tabs" aria-label="招式分類">{([['offense', '進攻'], ['transition', '轉位'], ['defense', '防守']] as Array<[MoveCategory, string]>).map(([id, label]) => <button className={moveCategory === id ? 'active' : ''} key={id} onClick={() => { setMoveCategory(id); setMoveBranch('all') }}>{label}<small>{prompt.allOptions.filter((option) => option.category === id).length}</small></button>)}</nav>
-          {categoryPool.length > 8 && availableBranches.length > 1 && <nav className="branch-tabs" aria-label="技術分類">
-            <button className={moveBranch === 'all' ? 'active' : ''} onClick={() => setMoveBranch('all')}>全部 <small>{categoryPool.length}</small></button>
-            {availableBranches.map((branch) => <button className={moveBranch === branch ? 'active' : ''} key={branch} onClick={() => setMoveBranch(branch)}>{BRANCH_META[branch].name} <small>{categoryPool.filter((option) => option.branch === branch).length}</small></button>)}
+          <nav className="move-tabs" aria-label={t('combat.moveCategories')}>{(['offense', 'transition', 'defense'] as MoveCategory[]).map((id) => <button className={moveCategory === id ? 'active' : ''} key={id} onClick={() => { setMoveCategory(id); setMoveBranch('all') }}>{t(`combat.category.${id}`)}<small>{prompt.allOptions.filter((option) => option.category === id).length}</small></button>)}</nav>
+          {categoryPool.length > 8 && availableBranches.length > 1 && <nav className="branch-tabs" aria-label={t('combat.techniqueCategories')}>
+            <button className={moveBranch === 'all' ? 'active' : ''} onClick={() => setMoveBranch('all')}>{t('combat.all')} <small>{categoryPool.length}</small></button>
+            {availableBranches.map((branch) => <button className={moveBranch === branch ? 'active' : ''} key={branch} onClick={() => setMoveBranch(branch)}>{t(`branch.${branch}`)} <small>{categoryPool.filter((option) => option.branch === branch).length}</small></button>)}
           </nav>}
         </div>
         <div className="sheet-scroll move-sheet-list">{categoryMoves.map((option) => <CombatOption key={option.id} option={option} onChoose={resolve} compact />)}</div>
@@ -1083,88 +1461,165 @@ function CriticalView({ game, dispatch }: ViewProps) {
 }
 
 function CoachGuidedCriticalView({ game, dispatch }: ViewProps) {
+  const { locale, t, message } = useI18n()
   const fight = game.fight!
   const prompt = fight.prompt!
   const latestBeat = fight.beatHistory.at(-1)
+  const resolutionLock = useRef(false)
+  const unlockTimer = useRef<number | undefined>(undefined)
+  const [resolving, setResolving] = useState(false)
+  const presentation = latestBeat ? localizedBeatPresentation(latestBeat, locale, t, message) : undefined
+  const promptTitle = locale === 'zh-Hant' ? prompt.title : t('combat.presentation.promptTitle', { position: positionLabel(fight.position, t) })
+  const promptDescription = locale === 'zh-Hant' ? prompt.description : t('combat.presentation.promptDescription', { step: fight.sequenceStep, position: positionLabel(fight.position, t) })
+  const beatKey = `${fight.round}:${fight.sequenceStep}:${latestBeat?.step ?? 0}:${latestBeat?.outcome ?? 'ready'}`
+  const nextLabel = latestBeat?.finishWindow && !fight.activeFinishWindow
+    ? t('coach.resumeAfterFinish', { step: fight.sequenceStep, total: 4 })
+    : latestBeat
+      ? t('coach.continueExchange', { step: fight.sequenceStep, total: 4 })
+      : t('coach.startExchange', { step: fight.sequenceStep, total: 4 })
 
-  return <Screen className="coach-guided-screen" title={prompt.title} kicker={`第 ${fight.round} 回合 · 攻防 ${fight.sequenceStep}/4 · 教練帶領`}>
+  const unlockResolution = () => {
+    resolutionLock.current = false
+    setResolving(false)
+    if (unlockTimer.current !== undefined) window.clearTimeout(unlockTimer.current)
+    unlockTimer.current = undefined
+  }
+
+  useEffect(() => () => {
+    if (unlockTimer.current !== undefined) window.clearTimeout(unlockTimer.current)
+  }, [])
+
+  const advanceExchange = () => {
+    if (resolutionLock.current) return
+    resolutionLock.current = true
+    setResolving(true)
+    dispatch({ type: 'RESOLVE_COACH_EXCHANGE' })
+    // Keep the new button locked through the tail of a double click. The
+    // engine update can replace this view before the browser emits click #2.
+    unlockTimer.current = window.setTimeout(unlockResolution, 450)
+  }
+
+  return <Screen className="coach-guided-screen" title={promptTitle} kicker={t('coach.kicker', { round: fight.round, step: fight.sequenceStep })}>
     <FightArena game={game} compact showLiveLog={false} />
     <CornerDirective fight={fight} />
-    {fight.positionPayoff && <aside className="position-payoff-notice" aria-live="polite"><strong>位置追擊</strong><span>剛建立{positionLabel(fight.position)}，教練還能追加一次攻防。</span></aside>}
-    <section className="coach-fight-feed" aria-label="即時賽況">
-      <header><span>即時賽況</span><strong>教練正在指揮</strong></header>
+    {fight.positionPayoff && <aside className="position-payoff-notice" aria-live="polite"><strong>{t('combat.positionPayoff')}</strong><span>{t('combat.positionPayoffCoach', { position: positionLabel(fight.position, t) })}</span></aside>}
+    <section className="coach-fight-feed" aria-label={t('coach.feedLabel')}>
+      <header><span>{t('coach.feedLabel')}</span><strong>{t('coach.directing')}</strong></header>
       {!latestBeat && fight.positionEntry && <article className="feed-entry position-entry-feed">
-        <span>回合戰術</span><p>{fight.positionEntry.explanation}</p>
+        <span>{t('coach.roundPlan')}</span><p>{locale === 'zh-Hant' ? fight.positionEntry.explanation : t('combat.presentation.positionEntry', {
+          plan: t(`combat.plan.${fight.positionEntry.plan}` as TranslationKey),
+          position: positionLabel(fight.positionEntry.position, t),
+          owner: t(`position.entry.owner.${POSITION_VISUALS[fight.positionEntry.position].owner}` as TranslationKey),
+        })}</p>
       </article>}
-      {latestBeat && <article className={`feed-entry ${latestBeat.outcome}`}>
-        <header><span>攻防 {latestBeat.step}/4</span><strong>{latestBeat.outcome === 'clean' ? '奏效' : latestBeat.outcome === 'contested' ? '互有得失' : '遭到反制'}</strong></header>
-        <div className="feed-actions"><b>{latestBeat.action}</b><i>對上</i><b>{latestBeat.opponentAction}</b></div>
-        <p>{latestBeat.summary}</p>
-        {latestBeat.narrative.impactTags.length > 0 && <div className="impact-tags">{latestBeat.narrative.impactTags.map((tag) => <b key={tag}>{tag}</b>)}</div>}
+      {latestBeat && <article key={beatKey} className={`feed-entry ${latestBeat.outcome}`} aria-live="polite" aria-atomic="true">
+        <header><span>{t('coach.exchangeLabel', { step: latestBeat.step })}</span><strong>{latestBeat.outcome === 'clean' ? t('coach.clean') : latestBeat.outcome === 'contested' ? t('coach.contested') : t('coach.countered')}</strong></header>
+        <div className="feed-actions"><b>{presentation?.playerMove}</b><i>{t('coach.versus')}</i><b>{presentation?.opponentMove}</b></div>
+        <p>{presentation?.summary}</p>
+        {presentation?.commentary && <aside className="color-call"><span>{t('combat.commentaryDesk')}</span><q>{presentation.commentary}</q></aside>}
+        <small>{positionLabel(latestBeat.narrative.positionBefore, t)} → {positionLabel(latestBeat.narrative.positionAfter, t)}</small>
+        {(presentation?.tags.length ?? 0) > 0 && <div className="impact-tags">{presentation?.tags.map((tag) => <b key={tag}>{tag}</b>)}</div>}
       </article>}
-      {!latestBeat && !fight.positionEntry && <article className="feed-entry pending"><p>{prompt.description}</p></article>}
-      <button type="button" className="coach-next-exchange" onClick={() => dispatch({ type: 'RESOLVE_COACH_EXCHANGE' })}>下一步</button>
+      {!latestBeat && !fight.positionEntry && <article className="feed-entry pending"><p>{promptDescription}</p></article>}
     </section>
+    <ActionDock><button type="button" className="coach-next-exchange" disabled={resolving} aria-busy={resolving} onClick={advanceExchange}>{resolving ? t('coach.resolving') : nextLabel}</button></ActionDock>
   </Screen>
 }
 
 function PositionEntryDialog({ game, dispatch }: ViewProps) {
+  const { locale, t } = useI18n()
   const entry = game.fight!.positionEntry!
   const visual = POSITION_VISUALS[entry.position]
-  const ownerLabel = visual.owner === 'player' ? '你先取得主動位置' : visual.owner === 'opponent' ? '對手先取得主動位置' : '雙方仍在爭奪位置'
-  const tactic = ({ distance: '保持距離', pressure: '向前壓迫', takedown: '尋找抱摔', clinch: '尋找纏抱', cage: '籠邊消耗', recover: '放慢節奏' } as const)[entry.plan]
+  const ownerLabel = t(`position.entry.owner.${visual.owner}` as TranslationKey)
+  const tactic = t(`combat.plan.${entry.plan}` as TranslationKey)
+  const currentPosition = positionLabel(entry.position, t)
+  const explanation = locale === 'zh-Hant' ? entry.explanation : t('combat.presentation.positionEntry', { plan: tactic, position: currentPosition, owner: ownerLabel })
   return <div className="position-entry-backdrop">
     <section className={`position-entry-dialog owner-${visual.owner}`} role="dialog" aria-modal="true" aria-labelledby="position-entry-title" aria-describedby="position-entry-explanation">
-      <p className="eyebrow">ROUND {entry.round} · 戰術落點</p>
-      <div className="position-entry-route" aria-label={`選擇戰術：${tactic}，目前位置：${positionLabel(entry.position)}`}>
-        <span><small>你的戰術</small><strong>{tactic}</strong></span>
+      <p className="eyebrow">{t('position.entry.kicker', { round: entry.round })}</p>
+      <div className="position-entry-route" aria-label={t('position.entry.routeAria', { tactic, position: currentPosition })}>
+        <span><small>{t('position.entry.yourTactic')}</small><strong>{tactic}</strong></span>
         <i aria-hidden="true">→</i>
-        <span><small>目前位置</small><strong>{positionLabel(entry.position)}</strong></span>
+        <span><small>{t('position.entry.currentPosition')}</small><strong>{currentPosition}</strong></span>
       </div>
-      <h2 id="position-entry-title">你怎麼來到這個位置？</h2>
-      <p id="position-entry-explanation" className="position-entry-story">{entry.explanation}</p>
-      <div className="position-entry-meaning"><span>{ownerLabel}</span><p><strong>現在意味著：</strong>{visual.detail}</p></div>
-      <button type="button" autoFocus className="primary-action" onClick={() => dispatch({ type: 'ACK_POSITION_ENTRY' })}>明白，開始攻防</button>
+      <h2 id="position-entry-title">{t('position.entry.title')}</h2>
+      <p id="position-entry-explanation" className="position-entry-story">{explanation}</p>
+      <div className="position-entry-meaning"><span>{ownerLabel}</span><p><strong>{t('position.entry.meaning')}</strong>{t(`position.${entry.position}.detail` as TranslationKey)}</p></div>
+      <button type="button" autoFocus className="primary-action" onClick={() => dispatch({ type: 'ACK_POSITION_ENTRY' })}>{t('position.entry.ack')}</button>
     </section>
   </div>
 }
 
 function AdaptationWarning({ fight }: { fight: FightState }) {
-  const categories: Array<[MoveCategory, string]> = [['offense', '進攻'], ['transition', '轉位'], ['defense', '防守']]
+  const { t } = useI18n()
+  const categories: Array<[MoveCategory, string]> = [['offense', t('combat.category.offense')], ['transition', t('combat.category.transition')], ['defense', t('combat.category.defense')]]
   const mostRead = categories
     .map(([id, label]) => ({ label, count: fight.opponentAdaptation[`category:${id}`] ?? 0 }))
     .sort((a, b) => b.count - a.count)[0]
   return <aside className="adaptation-warning" aria-live="polite">
-    <span>對手正在學習你的節奏</span>
-    <p>{mostRead.count > 1 ? `你已經使用 ${mostRead.label} ${mostRead.count} 次；` : ''}重複同類攻防或同一技術分支會逐步降低成功率。換一條路，往往比再按一次綠色答案更安全。</p>
+    <span>{t('combat.adaptationTitle')}</span>
+    <p>{t('combat.adaptationBody', { uses: mostRead.count > 1 ? t('combat.adaptationUses', { category: mostRead.label, count: mostRead.count }) : '' })}</p>
   </aside>
 }
 
 function ThreatCard({ game }: { game: GameState }) {
+  const { locale, t, message } = useI18n()
   const threat = game.fight!.opponentIntent
-  const target = threat.target === 'head' ? '頭部' : threat.target === 'body' ? '軀幹' : threat.target === 'leg' ? '腿部' : '位置'
-  const category = threat.category === 'offense' ? '進攻' : threat.category === 'transition' ? '轉位' : '防守反制'
-  return <article className={`threat-card ${threat.threatLevel}`} aria-label={`對手威脅：${threat.executionName}`}>
-    <header><span>對手下一步 · {category}</span><b>{threat.threatLevel === 'critical' ? '致命威脅' : threat.threatLevel === 'danger' ? '高威脅' : '注意'}</b></header>
-    <strong>{threat.executionName}</strong>
-    <p>{threat.effectSummary}{threat.target ? `，瞄準${target}` : ''}。</p>
-    {threat.exploitsOpenings.length > 0 && <small>正在利用你的{threat.exploitsOpenings.map((key) => OPENING_LABELS[key]).join('、')}</small>}
+  const move = FIGHT_INTENTS.find((candidate) => candidate.id === threat.intentId) ?? intentForExecutionId(threat.intentId)
+  const moveName = localizedMoveName(move?.id ?? threat.intentId, threat.executionName, message)
+  const target = threat.target === 'head' ? t('health.head') : threat.target === 'body' ? t('health.torso') : threat.target === 'leg' ? t('health.knees') : t('combat.positionPayoff')
+  const category = t(`combat.category.${threat.category}`)
+  const effectSummary = locale === 'zh-Hant' ? threat.effectSummary : t('combat.presentation.threatSummary', {
+    branch: t(`branch.${threat.branch}`),
+    category,
+    control: move?.effects.control ?? 0,
+    finish: move?.effects.finishPressure ?? 0,
+    position: threat.predictedPosition ? t('combat.presentation.predictedPosition', { position: positionLabel(threat.predictedPosition, t) }) : '',
+  })
+  return <article className={`threat-card ${threat.threatLevel}`} aria-label={t('combat.threatLabel', { move: moveName })}>
+    <header><span>{t('combat.threatNext', { category })}</span><b>{threat.threatLevel === 'critical' ? t('combat.threatCritical') : threat.threatLevel === 'danger' ? t('combat.threatDanger') : t('combat.threatWatch')}</b></header>
+    <strong>{moveName}</strong>
+    <p>{effectSummary}{threat.target ? t('combat.threatTarget', { target }) : ''}{locale === 'zh-Hant' ? '。' : '.'}</p>
+    {threat.exploitsOpenings.length > 0 && <small>{t('combat.threatExploits', { openings: threat.exploitsOpenings.map((key) => localizedOpeningLabel(key, locale)).join(locale === 'zh-Hant' ? '、' : ', ') })}</small>}
   </article>
 }
 
 function CombatOption({ option, onChoose, compact = false }: { option: CriticalOption; onChoose: (id: string) => void; compact?: boolean }) {
-  const matchupLabel = option.matchup === 'favored' ? '有利選擇' : option.matchup === 'exposed' ? '容易被反制' : '勝負均等'
+  const { locale, t, message } = useI18n()
+  const move = FIGHT_INTENTS.find((candidate) => candidate.id === option.intentId)
+    ?? (option.executionId ? intentForExecutionId(option.executionId) : undefined)
+  const label = localizedMoveName(move?.id ?? option.intentId, option.label, message)
+  const executionName = localizedMoveName(move?.id ?? option.intentId, option.executionName ?? option.label, message)
+  const category = option.category ?? move?.category ?? 'offense'
+  const branch = option.branch ?? move?.branch ?? 'boxing'
+  const matchupLabel = option.matchup === 'favored' ? t('combat.matchupFavored') : option.matchup === 'exposed' ? t('combat.matchupExposed') : t('combat.matchupNeutral')
+  const odds = { clean: Math.round(option.odds.clean), contested: Math.round(option.odds.contested), countered: Math.round(option.odds.countered) }
+  const factorTags = option.factors.filter((factor) => factor.reasonId.startsWith('combat.uiTag.')).map((factor) => safeFactorReason(factor, locale, t))
+  const identityTags = factorTags.length > 0 ? factorTags : locale === 'zh-Hant' ? option.identityTags : []
+  const matchupFactor = option.factors.find((factor) => factor.reasonId === 'combat.semanticMatchup')
+  const matchupReason = matchupFactor ? safeFactorReason(matchupFactor, locale, t) : locale === 'zh-Hant' ? option.matchupReason : t('combat.presentation.factorFallback')
+  const description = locale === 'zh-Hant' ? option.description : t('combat.presentation.optionDescription', {
+    branch: t(`branch.${branch}`),
+    category: t(`combat.category.${category}`),
+    position: positionLabel(move?.positions[0] ?? 'range', t),
+  })
+  const effectSummary = locale === 'zh-Hant' ? option.effectSummary : t('combat.presentation.optionEffect', {
+    damage: move ? move.effects.headDamage + move.effects.bodyDamage + move.effects.legDamage : 0,
+    control: move?.effects.control ?? 0,
+    stamina: move?.effects.staminaCost ?? 0,
+    finish: move?.effects.finishPressure ?? 0,
+  })
   return <button className={`choice-row critical-option matchup-${option.matchup}`} onClick={() => onChoose(option.id)}>
-    <div className="option-head"><strong>{option.label}</strong><b>{matchupLabel}</b></div>
-    {!compact && <span>{option.description}</span>}
-    <em className="execution-preview">執行：{option.executionName}</em>
-    {option.identityTags.length > 0 && <div className="identity-tags">{option.identityTags.map((tag) => <small key={tag}>{tag}</small>)}</div>}
-    <div className="outcome-bands" aria-label={`乾淨奏效 ${Math.round(option.odds.clean)}%，互有得失 ${Math.round(option.odds.contested)}%，遭到反制 ${Math.round(option.odds.countered)}%`}>
+    <div className="option-head"><strong>{label}</strong><b>{matchupLabel}</b></div>
+    {!compact && <span>{description}</span>}
+    <em className="execution-preview">{t('combat.execution', { move: executionName })}</em>
+    {identityTags.length > 0 && <div className="identity-tags">{identityTags.map((tag) => <small key={tag}>{tag}</small>)}</div>}
+    <div className="outcome-bands" aria-label={t('combat.oddsLabel', odds)}>
       <i className="clean" style={{ flex: option.odds.clean }} /><i className="contested" style={{ flex: option.odds.contested }} /><i className="countered" style={{ flex: option.odds.countered }} />
     </div>
-    <div className="causal-tags"><small>{option.matchupReason}</small>{option.recommendation && <small>{option.recommendation}</small>}{option.finishRoute && <small className="finish-route">{option.finishRoute}</small>}</div>
-    <span className="option-effect">{option.effectSummary}{option.negatives.length ? `／${option.negatives.join('、')}` : ''}</span>
-    <span className="exact-odds">詳細機率：{Math.round(option.odds.clean)} / {Math.round(option.odds.contested)} / {Math.round(option.odds.countered)}</span>
+    <div className="causal-tags"><small>{matchupReason}</small>{locale === 'zh-Hant' && option.recommendation && <small>{option.recommendation}</small>}{locale === 'zh-Hant' && option.finishRoute && <small className="finish-route">{option.finishRoute}</small>}</div>
+    <span className="option-effect">{effectSummary}{locale === 'zh-Hant' && option.negatives.length ? `／${option.negatives.join('、')}` : ''}</span>
+    <span className="exact-odds">{t('combat.exactOdds', odds)}</span>
   </button>
 }
 
@@ -1381,6 +1836,7 @@ function SubmissionMinigame({ game, dispatch }: ViewProps) {
 }
 
 function RoundResultView({ game, dispatch }: ViewProps) {
+  const { t } = useI18n()
   const fight = game.fight!
   const cornerAdjustment = fight.cornerAdjustment ?? 'rest'
   const score = fight.scores.at(-1)!
@@ -1391,7 +1847,7 @@ function RoundResultView({ game, dispatch }: ViewProps) {
     <div className="result-explain"><strong>{score.note}</strong><p>這是場邊根據有效打擊和纏鬥表現做出的估分，正式裁判的看法可能不同。</p></div>
     {fight.round < fight.totalRounds && <><SectionTitle title="場角建議" subtitle="預設好好休息；也可以選擇一項會改變下回合的戰術調整。" />
       <div className="corner-grid">
-        <button aria-pressed={cornerAdjustment === 'rest'} className={cornerAdjustment === 'rest' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'rest' })}><strong>Just rest</strong><span>體力回復 14；沒有額外代價</span></button>
+        <button aria-pressed={cornerAdjustment === 'rest'} className={cornerAdjustment === 'rest' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'rest' })}><strong>{t('corner.rest')}</strong><span>{t('corner.restEffect')}</span></button>
         <button aria-pressed={cornerAdjustment === 'protect'} className={cornerAdjustment === 'protect' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'protect' })}><strong>鎖住{protectTarget}防線</strong><span>{protectTarget}承傷 -50%；下回合開局主動 -4</span></button>
         <button aria-pressed={cornerAdjustment === 'recover'} className={cornerAdjustment === 'recover' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'recover' })}><strong>搶回呼吸</strong><span>體力回復 22；下回合開局主動 -10</span></button>
         <button aria-pressed={cornerAdjustment === 'press'} className={cornerAdjustment === 'press' ? 'selected' : ''} onClick={() => dispatch({ type: 'SET_CORNER_ADJUSTMENT', adjustment: 'press' })}><strong>追打對手{pressTarget}</strong><span>{pressTarget}招式命中 +12、傷害 +35%；我方承傷 +15%</span></button>
@@ -1402,6 +1858,7 @@ function RoundResultView({ game, dispatch }: ViewProps) {
 }
 
 function FightResultView({ game, dispatch }: ViewProps) {
+  const { t } = useI18n()
   const fight = game.fight!
   const opponent = getOpponent(game)!
   const offer = fight.offer
@@ -1412,26 +1869,26 @@ function FightResultView({ game, dispatch }: ViewProps) {
   const finishAction = finishingMove?.label ?? (fight.method === 'submission' ? '這次降服' : '這波攻勢')
   const praise = celebratedFinish ? finishVictoryPraise(game, opponent, finishAction) : undefined
   const resultTitle = fight.winner === 'draw'
-    ? titleRole === 'defense' ? '平手，冠軍仍在你手上' : '本場平手'
-    : titleRole === 'challenge' && won ? `你成為${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
-      : titleRole === 'defense' && won ? `你衛冕${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
-        : titleRole === 'defense' ? `${opponent.name}成為新的${LEAGUE_LABELS[opponent.league as LeagueId]}冠軍`
-          : won ? '你贏了' : `${opponent.name}獲勝`
-  return <Screen className={`fight-result-screen${celebratedFinish ? ' finish-victory' : ''}`} title={resultTitle} kicker={`${methodLabel(fight.method)}${fight.finishRound ? ` · 第 ${fight.finishRound} 回合` : ''}`}>
+    ? titleRole === 'defense' ? t('result.drawDefense') : t('result.draw')
+    : titleRole === 'challenge' && won ? t('result.newChampion', { league: localizedLeagueLabel(opponent.league as LeagueId, t) })
+      : titleRole === 'defense' && won ? t('result.defendedChampion', { league: localizedLeagueLabel(opponent.league as LeagueId, t) })
+        : titleRole === 'defense' ? t('result.opponentChampion', { name: opponent.name, league: localizedLeagueLabel(opponent.league as LeagueId, t) })
+          : won ? t('result.win') : t('result.opponentWin', { name: opponent.name })
+  return <Screen className={`fight-result-screen${celebratedFinish ? ' finish-victory' : ''}`} title={resultTitle} kicker={`${methodLabel(fight.method, t)}${fight.finishRound ? t('result.roundKicker', { round: fight.finishRound }) : ''}`}>
     {celebratedFinish ? <>
-      <section className={`victory-hero method-${fight.method}`} aria-label="終結勝利">
+      <section className={`victory-hero method-${fight.method}`} aria-label={t('result.finishVictory')}>
         <span className="victory-burst" aria-hidden="true" />
         <p>FINISH VICTORY</p>
         <div className="victory-mark" aria-hidden="true">W</div>
         <div className="victory-facts">
-          <strong>{methodLabel(fight.method)}</strong>
-          {fight.finishRound && <span>第 {fight.finishRound} 回合</span>}
+          <strong>{methodLabel(fight.method, t)}</strong>
+          {fight.finishRound && <span>{t('combat.roundTitle', { round: fight.finishRound })}</span>}
           <span>{finishAction}</span>
         </div>
       </section>
       <div className="victory-praise-grid">
         <article className="victory-praise commentary-praise">
-          <span>解說台</span>
+          <span>{t('result.commentaryDesk')}</span>
           <p>{praise!.commentary}</p>
         </article>
         <article className="victory-praise coach-praise">
@@ -1439,13 +1896,63 @@ function FightResultView({ game, dispatch }: ViewProps) {
           <div><strong>{praise!.coachName}</strong><p>{praise!.coach}</p></div>
         </article>
       </div>
-    </> : <div className={`verdict ${won ? 'win' : fight.winner === 'draw' ? 'draw' : 'loss'}`}><span>{won ? 'W' : fight.winner === 'draw' ? 'D' : 'L'}</span><div><strong>{game.fighter.name}</strong><small>對 {opponent.name}</small></div></div>}
+    </> : <div className={`verdict ${won ? 'win' : fight.winner === 'draw' ? 'draw' : 'loss'}`}><span>{won ? 'W' : fight.winner === 'draw' ? 'D' : 'L'}</span><div><strong>{game.fighter.name}</strong><small>{t('result.versus', { name: opponent.name })}</small></div></div>}
     {fight.scores.length > 0 && <div className="scorecards">{fight.scores.map((score) => <div key={score.round}><span>R{score.round}</span><b>{score.player}</b><i>–</i><b>{score.opponent}</b></div>)}</div>}
     {(fight.playerKnockdowns ?? 0) > 0 && <KnockdownCallout fight={fight} careerKnockdowns={game.fighter.evidence.knockdowns} result />}
-    <div className="result-explain"><strong>為什麼會有這個結果</strong><p>{fight.explanation}</p></div>
-    <details className="fight-log"><summary><span>完整戰報</span><span className="fight-log-arrow" aria-hidden="true">→</span></summary>{fight.commentary.map((line, index) => <p key={index}>{line}</p>)}</details>
-    <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_FIGHT_RESULT' })}>繼續生涯</button></ActionDock>
+    <div className="result-explain"><strong>{t('result.why')}</strong><p>{fight.explanation}</p></div>
+    {game.careerChanges && <CareerChangesPanel changes={game.careerChanges} fighter={game.fighter} />}
+    <details className="fight-log"><summary><span>{t('result.fullReport')}</span><span className="fight-log-arrow" aria-hidden="true">→</span></summary>{fight.commentary.map((line, index) => <p key={index}>{line}</p>)}</details>
+    <ActionDock><button className="primary-action" onClick={() => dispatch({ type: 'ACK_FIGHT_RESULT' })}>{t('result.continueCareer')}</button></ActionDock>
   </Screen>
+}
+
+function CareerChangesPanel({ changes, fighter }: { changes: CareerChanges; fighter: FighterState }) {
+  const { locale, t, message } = useI18n()
+  const entries: Array<{ key: string; label: string; before: string; after: string; delta?: string }> = []
+  const newTraitIds = changes.after.traitIds.filter((traitId) => !changes.before.traitIds.includes(traitId))
+  if (changes.before.money !== changes.after.money) entries.push({ key: 'money', label: t('fightChange.funds'), before: formatRegionalMoney(changes.before.money, fighter.region), after: formatRegionalMoney(changes.after.money, fighter.region), delta: signedRegionalMoney(changes.after.money - changes.before.money, fighter.region) })
+  if (changes.before.wins !== changes.after.wins || changes.before.losses !== changes.after.losses || changes.before.draws !== changes.after.draws) entries.push({ key: 'record', label: t('fightChange.record'), before: `${changes.before.wins}-${changes.before.losses}-${changes.before.draws}`, after: `${changes.after.wins}-${changes.after.losses}-${changes.after.draws}` })
+  const beforeStanding = settlementStandingLabel(changes.before.leagueStanding, t)
+  const afterStanding = settlementStandingLabel(changes.after.leagueStanding, t)
+  if (beforeStanding !== afterStanding) entries.push({ key: 'standing', label: t('fightChange.standing'), before: beforeStanding, after: afterStanding })
+  const beforeReputationBand = reputationBandLabel(changes.before.reputation, t)
+  const afterReputationBand = reputationBandLabel(changes.after.reputation, t)
+  if (beforeReputationBand !== afterReputationBand) entries.push({ key: 'reputation', label: t('fightChange.reputation'), before: beforeReputationBand, after: afterReputationBand })
+  if (changes.before.age !== changes.after.age) entries.push({ key: 'age', label: t('fightChange.age'), before: `${changes.before.age}`, after: `${changes.after.age}`, delta: signed(changes.after.age - changes.before.age) })
+  if (changes.before.year !== changes.after.year) entries.push({ key: 'year', label: t('fightChange.year'), before: `${changes.before.year}`, after: `${changes.after.year}`, delta: signed(changes.after.year - changes.before.year) })
+  if (changes.before.readiness !== changes.after.readiness) entries.push({ key: 'readiness', label: t('fightChange.readiness'), before: `${changes.before.readiness}`, after: `${changes.after.readiness}`, delta: signed(changes.after.readiness - changes.before.readiness) })
+  for (const part of Object.keys(changes.after.health) as HealthPart[]) {
+    if (changes.before.health[part] !== changes.after.health[part]) entries.push({ key: `health-${part}`, label: `${t(`health.${part}`)}${t('fightChange.healthSuffix')}`, before: `${changes.before.health[part]}`, after: `${changes.after.health[part]}`, delta: signed(changes.after.health[part] - changes.before.health[part]) })
+  }
+  for (const [relationshipId, after] of Object.entries(changes.after.relationshipTrust)) {
+    const before = changes.before.relationshipTrust[relationshipId] ?? after
+    if (before === after) continue
+    const name = fighter.relationships.find((relationship) => relationship.id === relationshipId)?.name ?? relationshipId
+    entries.push({ key: `relationship-${relationshipId}`, label: t('fightChange.trust', { name }), before: `${before}`, after: `${after}`, delta: signed(after - before) })
+  }
+  const route = ({ prefight: t('fightChange.routePrefight'), offer: t('fightChange.routeOffer'), retirement: t('fightChange.routeRetirement'), 'injury-recovery': t('fightChange.routeRecovery'), 'league-decision': t('fightChange.routeLeague') } as const)[changes.route]
+  const traitEvidence = changes.traitEvidenceLocalized?.length
+    ? changes.traitEvidenceLocalized.map((reason) => reason[locale])
+    : changes.traitEvidence
+  return <section className="career-changes" aria-label={t('fightChange.label')}>
+    <header><div><span>{t('fightChange.kicker')}</span><h2>{t('fightChange.title')}</h2></div><strong>{route}</strong></header>
+    <p>{t('fightChange.purse', { purse: formatRegionalMoney(changes.purse, fighter.region) })}</p>
+    {entries.length > 0 && <ul>{entries.map((entry) => <li key={entry.key}><span>{entry.label}</span><div><del>{entry.before}</del><i aria-hidden="true">→</i><strong>{entry.after}</strong>{entry.delta && <small>{entry.delta}</small>}</div></li>)}</ul>}
+    {newTraitIds.length > 0 && <div className="career-change-evidence"><span>{t('fightChange.newTraits')}</span>{newTraitIds.map((traitId) => {
+      const trait = traitDefinition(traitId)
+      return <b key={traitId}>{trait ? localizedTraitCopy(trait, message).name : t('combat.presentation.legacyText')}</b>
+    })}</div>}
+    {traitEvidence.length > 0 && <div className="career-change-evidence"><span>{t('fightChange.evidence')}</span>{traitEvidence.map((evidence) => <b key={evidence}>{evidence}</b>)}</div>}
+    {changes.relationshipMemories.length > 0 && <div className="career-change-memories"><span>{t('fightChange.relationshipMemories')}</span>{changes.relationshipMemories.map((entry, index) => <p key={`${entry.relationshipId}-${index}`}><strong>{fighter.relationships.find((relationship) => relationship.id === entry.relationshipId)?.name ?? entry.relationshipId}</strong>{message(entry.memoryRef, entry.memory)}</p>)}</div>}
+    {changes.worldNews.length > 0 && <details className="world-news"><summary>{t('fightChange.worldNews', { count: changes.worldNews.length })}</summary>{changes.worldNews.map((entry) => <p key={entry.id}>{message(entry.textRef, entry.text)}</p>)}</details>}
+  </section>
+}
+
+function settlementStandingLabel(standing: CareerChanges['after']['leagueStanding'], t: (id: TranslationKey, values?: Record<string, string | number>) => string) {
+  if (!standing) return t('standing.none')
+  if (standing.status === 'champion') return t('standing.champion', { league: localizedLeagueLabel(standing.league, t) })
+  if (standing.status === 'ranked') return t('standing.ranked', { league: localizedLeagueLabel(standing.league, t), rank: standing.rank })
+  return t('standing.unranked', { league: localizedLeagueLabel(standing.league, t) })
 }
 
 function finishVictoryPraise(game: GameState, opponent: Opponent, finishAction: string) {
@@ -1472,27 +1979,37 @@ function finishVictoryPraise(game: GameState, opponent: Opponent, finishAction: 
   return { commentary, coach: coachPraise, coachName }
 }
 
-function methodLabel(method?: string) {
+function methodLabel(method: string | undefined, t?: (id: TranslationKey, values?: Record<string, string | number>) => string) {
+  if (t) return t(`method.${method ?? 'decision'}` as TranslationKey)
   return ({ decision: '判定', draw: '平手', ko: '擊倒', tko: '裁判終止', submission: '降服', doctor: '醫療終止' } as Record<string, string>)[method ?? 'decision']
 }
 
 function RetirementView({ game, onNew }: { game: GameState; onNew: () => void }) {
   const bio = game.biography!
-  return <Screen title="最後一回合之後" kicker={`${bio.retiredAt} 歲退役 · Seed ${bio.seed}`}>
+  const { t, message } = useI18n()
+  return <Screen title={t('retirement.title')} kicker={t('retirement.kicker', { age: bio.retiredAt, seed: bio.seed })}>
     <article className="biography-card" id="biography-card">
-      <p className="eyebrow">CAREER BIOGRAPHY</p><h2>{bio.name}</h2>{bio.alias && <em className="biography-alias">{bio.alias}</em>}<small className="biography-origin">{REGION_LABELS[bio.region]}{bio.hometown ? ` · ${bio.hometown}` : ''} · {REGION_PROFILES[bio.region].circuit}</small><strong>{bio.title}</strong><div className="career-record">{bio.record}</div>{bio.leagueTitles?.length ? <div className="biography-titles" aria-label="聯盟冠軍履歷"><span>冠軍履歷</span><strong>{bio.leagueTitles.map((league) => `${LEAGUE_LABELS[league]}冠軍`).join(' · ')}</strong></div> : null}<p>{bio.summary}</p>{bio.financialLegacy && <blockquote>{bio.financialLegacy}</blockquote>}
+      <p className="eyebrow">{t('retirement.biographyLabel')}</p><h2>{bio.name}</h2>{bio.alias && <em className="biography-alias">{bio.alias}</em>}<small className="biography-origin">{t(`region.${bio.region}.label`)}{bio.hometown ? ` · ${bio.hometown}` : ''} · {t(`region.${bio.region}.circuit`)}</small><strong>{message(bio.titleRef, bio.title)}</strong><div className="career-record">{localizedBiographyRecord(bio, t)}</div>{bio.leagueTitles?.length ? <div className="biography-titles" aria-label={t('retirement.titleHistory')}><span>{t('retirement.championships')}</span><strong>{bio.leagueTitles.map((league) => t('retirement.champion', { league: localizedLeagueLabel(league, t) })).join(' · ')}</strong></div> : null}<p>{message(bio.summaryRef, bio.summary)}</p>{bio.financialLegacy && <blockquote>{message(bio.financialLegacyRef, bio.financialLegacy)}</blockquote>}
     </article>
-    <section><SectionTitle title="生涯轉捩點" subtitle="勝敗會被記錄，但真正留下來的是你做過的選擇。" />
-      <div className="timeline">{bio.turningPoints.map((entry) => <div key={entry.id}><span>{entry.age} 歲</span><article><strong>{entry.title}</strong><p>{entry.summary}</p></article></div>)}</div>
-    </section>
-    <div className="retirement-actions"><button className="primary-action" onClick={() => shareBiography(bio)}>分享這段人生</button><button className="secondary-action" onClick={() => downloadBiography(bio)}>匯出生涯檔案</button><button className="text-button" onClick={onNew}>開始另一段人生</button></div>
+    <BiographyHighlights biography={bio} />
+    <BiographyOutcomeSummary biography={bio} />
+    <details className="biography-full-timeline"><summary>{t('biography.fullTimeline')}</summary><p>{t('biography.fullTimelineHelp')}</p><div className="timeline">{bio.turningPoints.map((entry) => <div key={entry.id}><span>{t('retirement.timelineAge', { age: entry.age })}</span><article><strong>{message(entry.titleRef, entry.title)}</strong><p>{message(entry.summaryRef, entry.summary)}</p></article></div>)}</div></details>
+    <div className="retirement-actions"><button className="primary-action" onClick={() => shareBiography(bio, t, message)}>{t('retirement.share')}</button><button className="secondary-action" onClick={() => downloadBiography(bio)}>{t('retirement.export')}</button><button className="text-button" onClick={onNew}>{t('retirement.newCareer')}</button></div>
   </Screen>
 }
 
-async function shareBiography(bio: Biography) {
-  const text = `《拳途人生 Cage Life》${bio.name}｜${REGION_LABELS[bio.region]}${bio.hometown ? `・${bio.hometown}` : ''}｜${bio.record}\n${bio.title}\n${bio.summary}${bio.financialLegacy ? `\n留下的東西：${bio.financialLegacy}` : ''}\nSeed：${bio.seed}`
-  if (navigator.share) await navigator.share({ title: `拳途人生 Cage Life｜${bio.name}`, text })
-  else { await navigator.clipboard.writeText(text); window.alert('生涯摘要已複製。') }
+async function shareBiography(bio: Biography, t: (id: TranslationKey, values?: Record<string, string | number>) => string, message: (reference: MessageReference | undefined, fallback?: string) => string) {
+  const origin = `${t(`region.${bio.region}.label`)}${bio.hometown ? t('retirement.shareHometown', { hometown: bio.hometown }) : ''}`
+  const text = [
+    t('retirement.shareHeader', { name: bio.name }),
+    t('retirement.shareRecord', { origin, record: bio.record }),
+    message(bio.titleRef, bio.title),
+    message(bio.summaryRef, bio.summary),
+    bio.financialLegacy ? message(bio.financialLegacyRef, bio.financialLegacy) : undefined,
+    t('retirement.shareSeed', { seed: bio.seed }),
+  ].filter((line): line is string => Boolean(line)).join('\n')
+  if (navigator.share) await navigator.share({ title: t('retirement.shareTitle', { name: bio.name }), text })
+  else { await navigator.clipboard.writeText(text); window.alert(t('retirement.copied')) }
 }
 
 function downloadBiography(bio: Biography) {
@@ -1503,28 +2020,35 @@ function downloadBiography(bio: Biography) {
 }
 
 function FightArena({ game, compact = false, showLiveLog = true }: { game: GameState; compact?: boolean; showLiveLog?: boolean }) {
+  const { locale, t, message } = useI18n()
   const fight = game.fight!
   const opponent = getOpponent(game)!
   const lastBeat = fight.beatHistory.at(-1)
   const roundCommentary = fight.commentary.slice(fight.roundCommentaryStart ?? 0)
   const playerHit = lastBeat?.damageEvents.find((event) => event.side === 'player')
   const opponentHit = lastBeat?.damageEvents.find((event) => event.side === 'opponent')
+  const localizedLog = locale === 'zh-Hant'
+    ? roundCommentary.slice(-2)
+    : lastBeat ? [localizedBeatPresentation(lastBeat, locale, t, message).summary] : []
   const critical = (['head', 'body', 'leg'] as const).some((part) => damageSeverity(fight.playerDamageByPart[part], part) === 'critical' || damageSeverity(fight.opponentDamageByPart[part], part) === 'critical')
-  return <section key={`${fight.round}-${fight.sequenceStep}-${lastBeat?.outcome ?? 'ready'}`} className={`fight-arena ${compact ? 'compact' : ''} ${lastBeat ? `impact-${lastBeat.outcome}` : ''} ${playerHit ? `player-hit-${playerHit.part}` : ''} ${opponentHit ? `opponent-hit-${opponentHit.part}` : ''} ${critical ? 'critical-vignette' : ''}`}>
+  return <section key={`${fight.round}-${fight.sequenceStep}-${lastBeat?.outcome ?? 'ready'}`} className={`fight-arena ${compact ? 'compact' : ''} ${lastBeat ? `impact-${lastBeat.outcome}` : ''} ${playerHit ? `player-hit-${playerHit.part}` : ''} ${opponentHit ? `opponent-hit-${opponentHit.part}` : ''} ${critical ? 'critical-vignette' : ''}`} data-combat-arena-anchor tabIndex={-1}>
     <div className="fight-bars">
       <div><StatusBar label={game.fighter.name} value={fight.playerStamina} tone="player" /><DamageRibbon damage={fight.playerDamageByPart} /></div>
       <div><StatusBar label={opponent.name} value={fight.opponentStamina} tone="opponent" /><DamageRibbon damage={fight.opponentDamageByPart} opponent /></div>
     </div>
     {(fight.playerKnockdowns ?? 0) > 0 && <KnockdownCallout fight={fight} careerKnockdowns={game.fighter.evidence.knockdowns} />}
     <PositionScene position={fight.position} league={leagueForGame(game) ?? 'grassroots'} lastBeat={lastBeat} />
-    {showLiveLog && <div className="live-log">{roundCommentary.slice(-2).map((line, index) => <p key={index}>{line}</p>)}</div>}
+    {showLiveLog && <div className="live-log">{localizedLog.map((line, index) => <p key={index}>{line}</p>)}</div>}
   </section>
 }
 
 function KnockdownCallout({ fight, careerKnockdowns, result = false }: { fight: FightState; careerKnockdowns: number; result?: boolean }) {
+  const { t, message } = useI18n()
   const count = fight.playerKnockdowns ?? 0
-  return <aside className={`knockdown-callout${result ? ' result' : ''}`} aria-label={`本場擊倒 ${count} 次，生涯擊倒 ${careerKnockdowns} 次`} aria-live="polite">
-    <span>擊倒成立</span><strong>本場 {count} 次</strong><small>生涯 {careerKnockdowns}／3 · 擊倒嗅覺</small>
+  const trait = traitDefinition('knockdown-instinct')
+  const traitName = trait ? localizedTraitCopy(trait, message).name : 'Knockdown Instinct'
+  return <aside className={`knockdown-callout${result ? ' result' : ''}`} aria-label={t('combat.knockdownAria', { fight: count, career: careerKnockdowns })} aria-live="polite">
+    <span>{t('combat.knockdown')}</span><strong>{t('combat.knockdownFight', { count })}</strong><small>{t('combat.knockdownCareer', { count: careerKnockdowns, trait: traitName })}</small>
   </aside>
 }
 
@@ -1563,11 +2087,11 @@ const POSITION_VISUALS: Record<Position, PositionVisual> = {
 }
 
 const LEAGUE_ARENA_BACKDROPS: Record<LeagueId | 'grassroots', string> = {
-  grassroots: '/assets/combat-arena-pixel.png',
-  amateur: '/assets/combat-arena-amateur-pixel.png',
-  regional: '/assets/combat-arena-regional-pixel.png',
-  asia: '/assets/combat-arena-asia-pixel.png',
-  world: '/assets/combat-arena-world-pixel.png',
+  grassroots: '/assets/combat-arena-pixel.webp',
+  amateur: '/assets/combat-arena-amateur-pixel.webp',
+  regional: '/assets/combat-arena-regional-pixel.webp',
+  asia: '/assets/combat-arena-asia-pixel.webp',
+  world: '/assets/combat-arena-world-pixel.webp',
 }
 
 interface PositionSprite {
@@ -1586,19 +2110,19 @@ interface ActionSprite extends PositionSprite {
   outcome: 'clean' | 'countered'
 }
 
-const STANDING_SPRITE: PositionSprite = { src: '/assets/fighters-standing-pixel.png', x: 10, y: 14, width: 80, height: 34 }
-const CLINCH_SPRITE: PositionSprite = { src: '/assets/fighters-clinch-pixel.png', x: 13, y: 14, width: 74, height: 34 }
+const STANDING_SPRITE: PositionSprite = { src: '/assets/fighters-standing-pixel.webp', x: 10, y: 14, width: 80, height: 34 }
+const CLINCH_SPRITE: PositionSprite = { src: '/assets/fighters-clinch-pixel.webp', x: 13, y: 14, width: 74, height: 34 }
 const CAGE_NEUTRAL_SPRITE: PositionSprite = { ...CLINCH_SPRITE, x: -3, width: 58 }
-const GROUND_PLAYER_SPRITE: PositionSprite = { src: '/assets/fighters-top-player-pixel.png', x: 18, y: 17, width: 64, height: 34 }
-const GROUND_OPPONENT_SPRITE: PositionSprite = { src: '/assets/fighters-top-opponent-pixel.png', x: 18, y: 17, width: 64, height: 34 }
+const GROUND_PLAYER_SPRITE: PositionSprite = { src: '/assets/fighters-top-player-pixel.webp', x: 18, y: 17, width: 64, height: 34 }
+const GROUND_OPPONENT_SPRITE: PositionSprite = { src: '/assets/fighters-top-opponent-pixel.webp', x: 18, y: 17, width: 64, height: 34 }
 
 const POSITION_SPRITES: Record<Position, PositionSprite> = {
   range: STANDING_SPRITE,
   pocket: STANDING_SPRITE,
   clinch: CLINCH_SPRITE,
   cage: CAGE_NEUTRAL_SPRITE,
-  'cage-control': { src: '/assets/fighters-cage-control-pixel.png', x: -3, y: 14, width: 58, height: 34 },
-  'cage-defense': { src: '/assets/fighters-cage-defense-pixel.png', x: -3, y: 14, width: 58, height: 34 },
+  'cage-control': { src: '/assets/fighters-cage-control-pixel.webp', x: -3, y: 14, width: 58, height: 34 },
+  'cage-defense': { src: '/assets/fighters-cage-defense-pixel.webp', x: -3, y: 14, width: 58, height: 34 },
   'thai-clinch': CLINCH_SPRITE,
   'thai-clinch-defense': { ...CLINCH_SPRITE, flip: true },
   'body-lock': CLINCH_SPRITE,
@@ -1609,44 +2133,49 @@ const POSITION_SPRITES: Record<Position, PositionSprite> = {
   bottom: GROUND_OPPONENT_SPRITE,
   mount: GROUND_PLAYER_SPRITE,
   'mount-defense': GROUND_OPPONENT_SPRITE,
-  'back-control': { src: '/assets/fighters-back-player-pixel.png', x: 18, y: 17, width: 64, height: 34 },
-  'back-defense': { src: '/assets/fighters-back-opponent-pixel.png', x: 18, y: 17, width: 64, height: 34 },
-  scramble: { src: '/assets/fighters-scramble-pixel.png', x: 15, y: 15, width: 70, height: 34 },
+  'back-control': { src: '/assets/fighters-back-player-pixel.webp', x: 18, y: 17, width: 64, height: 34 },
+  'back-defense': { src: '/assets/fighters-back-opponent-pixel.webp', x: 18, y: 17, width: 64, height: 34 },
+  scramble: { src: '/assets/fighters-scramble-pixel.webp', x: 15, y: 15, width: 70, height: 34 },
 }
 
 const ACTION_SPRITE_GEOMETRY: Record<'center' | 'cage' | 'ground', Pick<ActionSprite, 'x' | 'y' | 'width' | 'height' | 'playerLabelX' | 'opponentLabelX'>> = {
-  center: { x: 13, y: 14, width: 74, height: 34, playerLabelX: 31, opponentLabelX: 69 },
-  cage: { x: -3, y: 14, width: 58, height: 34, playerLabelX: 10, opponentLabelX: 35 },
-  ground: { x: 18, y: 17, width: 64, height: 34, playerLabelX: 35, opponentLabelX: 65 },
+  center: { x: 27.5, y: 18, width: 45, height: 30, playerLabelX: 38, opponentLabelX: 62 },
+  cage: { x: 1, y: 18, width: 45, height: 30, playerLabelX: 12, opponentLabelX: 34 },
+  ground: { x: 27.5, y: 18, width: 45, height: 30, playerLabelX: 38, opponentLabelX: 62 },
 }
 
 const ACTION_SPRITES: Record<MoveVisualFamily, { clean: string; countered: string }> = {
-  punch: { clean: '/assets/action-punch-clean-pixel.png', countered: '/assets/action-punch-countered-pixel.png' },
-  kick: { clean: '/assets/action-kick-clean-pixel.png', countered: '/assets/action-kick-countered-pixel.png' },
-  takedown: { clean: '/assets/action-takedown-clean-pixel.png', countered: '/assets/action-takedown-countered-pixel.png' },
-  clinch: { clean: '/assets/action-clinch-clean-pixel.png', countered: '/assets/action-clinch-countered-pixel.png' },
-  'ground-strike': { clean: '/assets/action-ground-strike-clean-pixel.png', countered: '/assets/action-ground-strike-countered-pixel.png' },
-  submission: { clean: '/assets/action-submission-clean-pixel.png', countered: '/assets/action-submission-countered-pixel.png' },
-  position: { clean: '/assets/action-position-clean-pixel.png', countered: '/assets/action-position-countered-pixel.png' },
-  escape: { clean: '/assets/action-escape-clean-pixel.png', countered: '/assets/action-escape-countered-pixel.png' },
+  punch: { clean: '/assets/action-punch-clean-pixel.webp', countered: '/assets/action-punch-countered-pixel.webp' },
+  kick: { clean: '/assets/action-kick-clean-pixel.webp', countered: '/assets/action-kick-countered-pixel.webp' },
+  takedown: { clean: '/assets/action-takedown-clean-pixel.webp', countered: '/assets/action-takedown-countered-pixel.webp' },
+  clinch: { clean: '/assets/action-clinch-clean-pixel.webp', countered: '/assets/action-clinch-countered-pixel.webp' },
+  'ground-strike': { clean: '/assets/action-ground-strike-clean-pixel.webp', countered: '/assets/action-ground-strike-countered-pixel.webp' },
+  submission: { clean: '/assets/action-submission-clean-pixel.webp', countered: '/assets/action-submission-countered-pixel.webp' },
+  position: { clean: '/assets/action-position-clean-pixel.webp', countered: '/assets/action-position-countered-pixel.webp' },
+  escape: { clean: '/assets/action-escape-clean-pixel.webp', countered: '/assets/action-escape-countered-pixel.webp' },
 }
 
-function actionSpriteForBeat(beat: FightBeat | undefined): ActionSprite | undefined {
+const BOTTOM_SUBMISSION_CLEAN_INTENTS = new Set(['bottom-submission', 'guard-armbar'])
+
+function actionSpriteForBeat(beat: FightBeat | undefined, message: MessageFormatter): ActionSprite | undefined {
   if (!beat || (beat.outcome !== 'clean' && beat.outcome !== 'countered')) return undefined
   const intent = intentForExecutionId(beat.narrative.executionId)
   const family = intent ? MOVE_VISUAL_FAMILY_BY_INTENT[intent.id] : undefined
-  const src = family ? ACTION_SPRITES[family][beat.outcome] : undefined
+  const src = intent && beat.outcome === 'clean' && BOTTOM_SUBMISSION_CLEAN_INTENTS.has(intent.id)
+    ? '/assets/action-bottom-submission-clean-pixel.webp'
+    : family ? ACTION_SPRITES[family][beat.outcome] : undefined
   if (!intent || !family || !src) return undefined
   const geometry = ['cage', 'cage-control', 'cage-defense'].includes(beat.narrative.positionBefore) ? ACTION_SPRITE_GEOMETRY.cage
     : ['top', 'bottom', 'mount', 'mount-defense', 'back-control', 'back-defense'].includes(beat.narrative.positionBefore) ? ACTION_SPRITE_GEOMETRY.ground
       : ACTION_SPRITE_GEOMETRY.center
-  return { src, ...geometry, moveLabel: intent.label, outcome: beat.outcome }
+  return { src, ...geometry, moveLabel: localizedMoveName(intent.id, intent.label, message), outcome: beat.outcome }
 }
 
 function PositionScene({ position, league, lastBeat }: { position: Position; league: LeagueId | 'grassroots'; lastBeat?: FightBeat }) {
+  const { t, message } = useI18n()
   const visual = POSITION_VISUALS[position]
   const sprite = POSITION_SPRITES[position]
-  const action = actionSpriteForBeat(lastBeat)
+  const action = actionSpriteForBeat(lastBeat, message)
   const [failedActionSrc, setFailedActionSrc] = useState<string | undefined>()
 
   useEffect(() => {
@@ -1654,8 +2183,11 @@ function PositionScene({ position, league, lastBeat }: { position: Position; lea
   }, [action?.src])
 
   const visibleAction = action?.src === failedActionSrc ? undefined : action
-  const ownerLabel = visual.owner === 'player' ? '你掌握位置' : visual.owner === 'opponent' ? '對手掌握位置' : '位置仍在爭奪'
-  const sceneLabel = visibleAction ? `目前位置：${positionLabel(position)}；上一招${visibleAction.moveLabel}${visibleAction.outcome === 'clean' ? '奏效' : '遭到反制'}` : `目前位置：${positionLabel(position)}`
+  const localizedPosition = positionLabel(position, t)
+  const ownerLabel = t(`position.owner.${visual.owner}` as TranslationKey)
+  const sceneLabel = visibleAction
+    ? t('position.scene.withAction', { position: localizedPosition, move: visibleAction.moveLabel, outcome: t(`position.scene.${visibleAction.outcome}` as TranslationKey) })
+    : t('position.scene.withoutAction', { position: localizedPosition })
   return <div className={`position-scene family-${visual.family} owner-${visual.owner}`}>
     <svg viewBox="0 0 100 58" role="img" aria-label={sceneLabel}>
       <image href={LEAGUE_ARENA_BACKDROPS[league]} x="0" y="0" width="100" height="58" preserveAspectRatio="xMidYMid slice" />
@@ -1663,30 +2195,33 @@ function PositionScene({ position, league, lastBeat }: { position: Position; lea
       {visual.cageSide && <CagePressureZone side={visual.cageSide} />}
       {!visibleAction && <image className="position-sprite" href={sprite.src} x={sprite.x} y={sprite.y} width={sprite.width} height={sprite.height} preserveAspectRatio="xMidYMid meet" transform={sprite.flip ? 'translate(100 0) scale(-1 1)' : undefined} />}
       {visibleAction && <image className="action-result-sprite" href={visibleAction.src} x={visibleAction.x} y={visibleAction.y} width={visibleAction.width} height={visibleAction.height} preserveAspectRatio="xMidYMid meet" onError={() => { setFailedActionSrc(visibleAction.src) }} />}
-      <text className="scene-name player-name" x={visibleAction?.playerLabelX ?? visual.player.x} y="17" textAnchor="middle">你</text>
-      <text className="scene-name opponent-name" x={visibleAction?.opponentLabelX ?? visual.opponent.x} y="17" textAnchor="middle">對手</text>
+      <text className="scene-name player-name" x={visibleAction?.playerLabelX ?? visual.player.x} y="17" textAnchor="middle">{t('position.scene.player')}</text>
+      <text className="scene-name opponent-name" x={visibleAction?.opponentLabelX ?? visual.opponent.x} y="17" textAnchor="middle">{t('position.scene.opponent')}</text>
     </svg>
-    <div className="position-readout"><div><strong>{positionLabel(position)}</strong></div><em>{ownerLabel}</em><p>{visual.detail}</p></div>
+    <div className="position-readout"><div><strong>{localizedPosition}</strong></div><em>{ownerLabel}</em><p>{t(`position.${position}.detail` as TranslationKey)}</p></div>
   </div>
 }
 
 function CagePressureZone({ side }: { side: NonNullable<PositionVisual['cageSide']> }) {
+  const { t } = useI18n()
   const x = side === 'left' ? 4 : 96
   const direction = side === 'left' ? 1 : -1
-  return <g className="cage-pressure-zone" transform={`translate(${x} 0) scale(${direction} 1)`}><path d="M0 7v41M3 7v41" /><text x="5" y="13">鐵網</text></g>
+  return <g className="cage-pressure-zone" transform={`translate(${x} 0) scale(${direction} 1)`}><path d="M0 7v41M3 7v41" /><text x="5" y="13">{t('position.scene.cage')}</text></g>
 }
 
 function DamageRibbon({ damage, opponent = false }: { damage: { head: number; body: number; leg: number }; opponent?: boolean }) {
-  return <div className={`damage-ribbon ${opponent ? 'opponent' : ''}`} aria-label={`${opponent ? '對手' : '我方'}傷勢：頭部 ${damage.head}、軀幹 ${damage.body}、腿部 ${damage.leg}`}>
+  const { t } = useI18n()
+  return <div className={`damage-ribbon ${opponent ? 'opponent' : ''}`} aria-label={t('damage.ribbonAria', { side: t(opponent ? 'damage.opponent' : 'damage.player'), head: damage.head, body: damage.body, leg: damage.leg })}>
     {(['head', 'body', 'leg'] as const).map((part) => {
       const value = damage[part]
       const severity = damageSeverity(value, part)
-      return <span className={severity} key={part}><b>{part === 'head' ? '頭' : part === 'body' ? '軀' : '腿'}</b><i><em style={{ width: `${value}%` }} /></i><small>{value}</small></span>
+      return <span className={severity} key={part}><b>{t(`damage.${part}.short` as TranslationKey)}</b><i><em style={{ width: `${value}%` }} /></i><small>{value}</small></span>
     })}
   </div>
 }
 
-function positionLabel(position: string) {
+function positionLabel(position: string, t?: (id: TranslationKey, values?: Record<string, string | number>) => string) {
+  if (typeof t === 'function') return t(`position.${position}.label` as TranslationKey)
   return ({
     range: '遠距站立', pocket: '近身交換', clinch: '中央纏抱', cage: '籠邊爭位',
     'cage-control': '籠邊壓制', 'cage-defense': '背靠籠網',
@@ -1705,11 +2240,13 @@ function ContextStrip({ fighter }: { fighter: FighterState }) {
 }
 
 function StatusBar({ label, value, tone }: { label: string; value: number; tone: string }) {
-  return <div className={`status-bar ${tone}`} aria-label={`${label} 體力 ${value}`}><div><span>{label}</span><b><small>體力</small>{value}</b></div><i><span style={{ width: `${value}%` }} /></i></div>
+  const { t } = useI18n()
+  return <div className={`status-bar ${tone}`} aria-label={`${label} ${t('combat.stamina')} ${value}`}><div><span>{label}</span><b><small>{t('combat.stamina')}</small>{value}</b></div><i><span style={{ width: `${value}%` }} /></i></div>
 }
 
 function FighterFace({ label, name, value, measurements, body, opponent = false }: { label: string; name: string; value: number; measurements: string; body: string; opponent?: boolean }) {
-  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span aria-hidden="true" data-i18n-native>{opponent ? 'B' : 'R'}</span><small>{label}</small><strong>{name}</strong><em>身高／臂展 {measurements}</em><em>{body}</em><em>競技評級 {value}</em></div>
+  const { t } = useI18n()
+  return <div className={`fighter-face ${opponent ? 'opponent' : ''}`}><span aria-hidden="true" data-i18n-native>{opponent ? 'B' : 'R'}</span><small>{label}</small><strong>{name}</strong><em>{t('prefight.measurements', { measurements })}</em><em>{body}</em><em>{t('prefight.rating', { rating: value })}</em></div>
 }
 
 function Metric({ label, value, note }: { label: string; value: string; note: string }) {
@@ -1724,7 +2261,8 @@ function experienceLabel(value: StartingExperience) {
   return value === 'normie' ? '普通人' : value === 'semi-pro' ? '半職業選手' : '業餘愛好者'
 }
 
-function rarityLabel(value: NonNullable<ReturnType<typeof traitDefinition>>['rarity']) {
+function rarityLabel(value: NonNullable<ReturnType<typeof traitDefinition>>['rarity'], t?: Translator) {
+  if (t) return t(`trait.rarity.${value}` as TranslationKey)
   return value === 'legendary' ? '傳奇' : value === 'rare' ? '稀有' : value === 'uncommon' ? '罕見' : '常見'
 }
 
@@ -1755,33 +2293,38 @@ function SkillOverview({ fighter }: { fighter: FighterState }) {
 }
 
 function TraitGrid({ traits }: { traits: FighterState['traits'] }) {
-  if (!traits.length) return <div className="empty-progression">目前沒有特質。</div>
+  const { t, message } = useI18n()
+  if (!traits.length) return <div className="empty-progression">{t('trait.empty')}</div>
   return <div className="trait-grid">{traits.map((owned) => {
     const trait = traitDefinition(owned.id)
     if (!trait) return null
-    return <article className={`trait-card rarity-${trait.rarity}`} key={owned.id}><span>{rarityLabel(trait.rarity)} · {owned.source === 'born' ? '天生' : '實戰獲得'}</span><strong>{trait.name}</strong><p>{trait.description}</p><b>{trait.effect}</b><small>生效：{trait.condition}{trait.tradeoff ? ` · 代價：${trait.tradeoff}` : ''}</small></article>
+    const copy = localizedTraitCopy(trait, message)
+    return <article className={`trait-card rarity-${trait.rarity}`} key={owned.id}><span>{rarityLabel(trait.rarity, t)} · {t(owned.source === 'born' ? 'trait.source.born' : 'trait.source.earned')}</span><strong>{copy.name}</strong><p>{copy.description}</p><b>{copy.effect}</b><small>{t('trait.active', { condition: copy.condition })}{copy.tradeoff ? ` · ${t('trait.tradeoff', { tradeoff: copy.tradeoff })}` : ''}</small></article>
   })}</div>
 }
 
 function TraitProgressList({ fighter, traitIds }: { fighter: FighterState; traitIds?: string[] }) {
+  const { t, message } = useI18n()
   const progressItems = traitIds ? fighter.traitProgress.filter((progress) => traitIds.includes(progress.traitId)) : fighter.traitProgress
   return <div className="trait-progress-list">{progressItems.map((progress) => {
     const trait = traitDefinition(progress.traitId)
     if (!trait) return null
+    const copy = localizedTraitCopy(trait, message)
     const percent = Math.min(100, progress.current / progress.threshold * 100)
     const current = Number.isInteger(progress.current) ? progress.current : progress.current.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
-    return <article key={progress.traitId}><div><strong>{trait.name}</strong><span>{current}/{progress.threshold}</span></div><i><b style={{ width: `${percent}%` }} /></i><small>{trait.condition} · 完成後：{trait.effect}</small></article>
+    return <article key={progress.traitId}><div><strong>{copy.name}</strong><span>{current}/{progress.threshold}</span></div><i><b style={{ width: `${percent}%` }} /></i><small>{copy.condition} · {t('trait.completeEffect', { effect: copy.effect })}</small></article>
   })}</div>
 }
 
 function MoveChips({ moveIds }: { moveIds: string[] }) {
+  const { t, message } = useI18n()
   const moves = FIGHT_INTENTS.filter((move) => moveIds.includes(move.id))
-  if (!moves.length) return <div className="empty-progression">尚未學會正式招式。</div>
-  return <div className="learned-move-grid">{moves.map((move) => <span key={move.id} style={{ '--skill': BRANCH_META[move.branch].accent } as React.CSSProperties}><b>{move.label}</b><small>{BRANCH_META[move.branch].name} · Lv.{minimumMoveLevel(move)}</small></span>)}</div>
+  if (!moves.length) return <div className="empty-progression">{t('move.empty')}</div>
+  return <div className="learned-move-grid">{moves.map((move) => <span key={move.id} style={{ '--skill': BRANCH_META[move.branch].accent } as React.CSSProperties}><b>{localizedMoveName(move.id, move.label, message)}</b><small>{t(`branch.${move.branch}`)} · Lv.{minimumMoveLevel(move)}</small></span>)}</div>
 }
 
 function Screen({ title, kicker, className, children }: { title: string; kicker?: string; className?: string; children: React.ReactNode }) {
-  return <div className={`screen${className ? ` ${className}` : ''}`}><header className="screen-title">{kicker && <p>{kicker}</p>}<h1>{title}</h1></header>{children}</div>
+  return <div className={`screen${className ? ` ${className}` : ''}`}><header className="screen-title">{kicker && <p>{kicker}</p>}<h1 tabIndex={-1}>{title}</h1></header>{children}</div>
 }
 
 function ActionDock({ children }: { children: React.ReactNode }) {
@@ -1789,34 +2332,91 @@ function ActionDock({ children }: { children: React.ReactNode }) {
 }
 
 function LifeEventResultDialog({ game, dispatch }: { game: GameState; dispatch: (command: GameCommand) => void }) {
+  const { t, message } = useI18n()
+  const dialogRef = useRef<HTMLElement>(null)
+  useDialogFocusTrap(dialogRef)
   const result = game.lifeEventResult!
+  const affectedRelationships = Object.entries(result.effects.relationshipTrust ?? {}).map(([relationshipId, delta]) => {
+    const relationship = game.fighter.relationships.find((item) => item.id === relationshipId)
+    const actualDelta = delta ?? 0
+    const after = relationship?.trust ?? 0
+    return {
+      label: t('event.resultTrust', { name: relationship?.name ?? result.personName, delta: signed(actualDelta), before: after - actualDelta, after }),
+      positive: actualDelta > 0,
+    }
+  })
+  const healthPart = result.healthPart ?? weakestHealthEntry(game.fighter)[0]
+  const healthAfter = game.fighter.health[healthPart]
   const effectLabels = [
-    result.effects.trust ? { label: `${result.personName}信任 ${signed(result.effects.trust)}`, positive: result.effects.trust > 0 } : undefined,
-    result.effects.readiness ? { label: `準備度 ${signed(result.effects.readiness)}`, positive: result.effects.readiness > 0 } : undefined,
-    result.effects.fatigue ? { label: `疲勞 ${signed(result.effects.fatigue)}`, positive: result.effects.fatigue < 0 } : undefined,
-    result.effects.health ? { label: `最弱部位健康 ${signed(result.effects.health)}`, positive: result.effects.health > 0 } : undefined,
-    result.effects.money ? { label: `金錢 ${signedRegionalMoney(result.effects.money, game.fighter.region)}`, positive: result.effects.money > 0 } : undefined,
-    result.effects.reputation ? { label: `名聲 ${signed(result.effects.reputation)}`, positive: result.effects.reputation > 0 } : undefined,
+    ...affectedRelationships,
+    affectedRelationships.length === 0 && result.effects.trust ? {
+      label: t('event.resultTrustDelta', { name: result.personName, delta: signed(result.effects.trust) }), positive: result.effects.trust > 0,
+    } : undefined,
+    result.effects.readiness ? { label: t('event.resultReadiness', { delta: signed(result.effects.readiness), before: game.fighter.readiness - result.effects.readiness, after: game.fighter.readiness }), positive: result.effects.readiness > 0 } : undefined,
+    result.effects.fatigue ? { label: t('event.resultFatigue', { delta: signed(result.effects.fatigue), before: game.fighter.fatigue - result.effects.fatigue, after: game.fighter.fatigue }), positive: result.effects.fatigue < 0 } : undefined,
+    result.effects.health ? { label: t('event.resultHealth', { part: t(`health.${healthPart}`), delta: signed(result.effects.health), before: healthAfter - result.effects.health, after: healthAfter }), positive: result.effects.health > 0 } : undefined,
+    result.effects.scouting ? { label: t('event.resultScouting', { delta: signed(result.effects.scouting), before: game.scouting - result.effects.scouting, after: game.scouting }), positive: result.effects.scouting > 0 } : undefined,
+    result.effects.fightIQ ? { label: t('event.resultFightIQ', { delta: signed(result.effects.fightIQ), before: game.fighter.mind.fightIQ - result.effects.fightIQ, after: game.fighter.mind.fightIQ }), positive: result.effects.fightIQ > 0 } : undefined,
+    result.effects.preparationCredits ? { label: t('event.resultPreparation', { delta: signed(result.effects.preparationCredits), before: game.preparationCredits - result.effects.preparationCredits, after: game.preparationCredits }), positive: result.effects.preparationCredits > 0 } : undefined,
+    result.preparedMoveId ? { label: t('event.resultPreparedMove', { move: FIGHT_INTENTS.find((move) => move.id === result.preparedMoveId)?.label ?? result.preparedMoveId }), positive: true } : undefined,
+    result.effects.money ? { label: t('event.resultMoney', { delta: signedRegionalMoney(result.effects.money, game.fighter.region), before: formatRegionalMoney(game.fighter.money - result.effects.money, game.fighter.region), after: formatRegionalMoney(game.fighter.money, game.fighter.region) }), positive: result.effects.money > 0 } : undefined,
+    result.effects.reputation ? {
+      label: t('event.reputationResult', {
+        direction: result.effects.reputation > 0 ? t('event.reputationRise') : t('event.reputationFall'),
+        band: reputationBandLabel(game.fighter.reputation, t),
+      }),
+      positive: result.effects.reputation > 0,
+    } : undefined,
   ].filter((effect): effect is { label: string; positive: boolean } => Boolean(effect))
 
   return <div className="event-result-backdrop">
-    <section className="event-result-dialog" role="dialog" aria-modal="true" aria-labelledby="event-result-title" aria-describedby="event-result-story">
-      <p className="eyebrow">CHOICE RESULT</p>
+    <section ref={dialogRef} className="event-result-dialog" role="dialog" aria-modal="true" aria-labelledby="event-result-title" aria-describedby="event-result-story">
+      <p className="eyebrow">{t('event.resultKicker')}</p>
       <span className="result-check" aria-hidden="true">✓</span>
-      <h2 id="event-result-title">{result.optionLabel}</h2>
-      <p className="result-context">{result.eventTitle}</p>
-      <p id="event-result-story" className="result-story">{result.story}</p>
-      <div className="event-effects" aria-label="選擇造成的影響">
-        <strong>造成的影響</strong>
+      <h2 id="event-result-title">{message(result.optionLabelRef, result.optionLabel)}</h2>
+      <p className="result-context">{message(result.eventTitleRef, result.eventTitle)}</p>
+      <p id="event-result-story" className="result-story">{message(result.storyRef, result.story)}</p>
+      <div className="event-effects" aria-label={t('event.resultEffectsLabel')}>
+        <strong>{t('event.resultEffectsTitle')}</strong>
         <div>{effectLabels.map((effect) => <span key={effect.label} className={effect.positive ? 'positive' : 'negative'}>{effect.label}</span>)}</div>
       </div>
-      <button type="button" className="primary-action" onClick={() => dispatch({ type: 'ACK_LIFE_RESULT' })}>接受結果，繼續</button>
+      <button type="button" autoFocus className="primary-action" onClick={() => dispatch({ type: 'ACK_LIFE_RESULT' })}>{t('event.resultContinue')}</button>
     </section>
   </div>
 }
 
+function reputationBandLabel(value: number, t: (id: TranslationKey, values?: Record<string, string | number>) => string): string {
+  return t(`reputation.${reputationBand(value).id}` as TranslationKey)
+}
+
+function useDialogFocusTrap(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    const focusableSelector = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+    const focusables = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+    focusables()[0]?.focus()
+    const keepFocusInside = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const items = focusables()
+      if (!items.length) return
+      const first = items[0]
+      const last = items.at(-1)!
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    dialog.addEventListener('keydown', keepFocusInside)
+    return () => {
+      dialog.removeEventListener('keydown', keepFocusInside)
+      if (previous?.isConnected) previous.focus()
+    }
+  }, [ref])
+}
+
 function signed(value: number) { return `${value > 0 ? '+' : ''}${value}` }
 function signedRegionalMoney(value: number, region: Region) { return `${value > 0 ? '+' : '-'}${formatRegionalMoney(Math.abs(value), region)}` }
+function clampUi(value: number) { return Math.max(0, Math.min(100, value)) }
 
 function ResetConfirmation({ resetting, error, onCancel, onConfirm }: { resetting: boolean; error?: string; onCancel: () => void; onConfirm: () => void }) {
   return <div className="reset-backdrop" onClick={() => { if (!resetting) onCancel() }}>
@@ -1870,11 +2470,158 @@ function weakestHealthEntry(fighter: FighterState): [HealthPart, number] {
 }
 
 function HistoryDetails({ game }: { game: GameState }) {
-  return <div className="timeline full">{[...game.fighter.history].reverse().map((entry) => <div key={entry.id}><span>{entry.year}<small>{entry.age} 歲</small></span><article><strong>{entry.title}</strong><p>{entry.summary}</p>{entry.people.filter(Boolean).length > 0 && <em>{entry.people.join('、')}</em>}</article></div>)}</div>
+  const { t, message } = useI18n()
+  return <div className="timeline full">{[...game.fighter.history].reverse().map((entry) => <div key={entry.id}><span>{entry.year}<small>{t('biography.ageValue', { age: entry.age })}</small></span><article><strong>{message(entry.titleRef, entry.title)}</strong><p>{message(entry.summaryRef, entry.summary)}</p>{entry.people.filter(Boolean).length > 0 && <em>{entry.people.join(t('biography.peopleSeparator'))}</em>}</article></div>)}</div>
 }
 
-function HallOfFame({ biographies, onDelete }: { biographies: Biography[]; onDelete: (id: string) => void }) {
-  return <section className="hall"><SectionTitle title="生涯殿堂" subtitle={biographies.length ? '退役拳手的生涯都保存在這裡。' : '完成第一段生涯後，傳記會保存在這裡。'} />{biographies.map((bio) => <article key={bio.id}><div><strong>{bio.name}</strong><span>{REGION_LABELS[bio.region]}{bio.hometown ? ` · ${bio.hometown}` : ''} · {bio.record} · {bio.retiredAt} 歲</span><p>{bio.title}</p></div><button onClick={() => onDelete(bio.id)}>刪除</button></article>)}</section>
+function BiographyHighlights({ biography, compact = false }: { biography: Biography; compact?: boolean }) {
+  const { t, message } = useI18n()
+  const curated = (biography as Biography & { curatedBeats?: Biography['curatedBeats'] }).curatedBeats
+  const beats = curated?.length ? curated : biography.turningPoints.slice(0, 4).map((entry) => ({ ...entry, kind: 'fight' as const }))
+  if (!beats.length) return null
+  return <section className={`biography-highlights ${compact ? 'compact' : ''}`} aria-label={t('biography.highlights')}>
+    {!compact && <SectionTitle title={t('biography.highlights')} subtitle={t('biography.highlightsHelp')} />}
+    <ol>{(compact ? beats.slice(0, 3) : beats).map((beat) => <li key={beat.id}><span>{beat.age}</span><div><strong>{message(beat.titleRef, beat.title)}</strong><p>{message(beat.summaryRef, beat.summary)}</p></div></li>)}</ol>
+  </section>
+}
+
+function motiveResolutionLabels(t: (id: TranslationKey, values?: Record<string, string | number>) => string) {
+  return {
+    provider: t('motivePath.provider'), presence: t('motivePath.presence'), defiant: t('motivePath.defiant'),
+    disciplined: t('motivePath.disciplined'), loyalist: t('motivePath.loyalist'), builder: t('motivePath.builder'),
+    spotlight: t('motivePath.spotlight'), craft: t('motivePath.craft'), conflicted: t('motivePath.conflicted'),
+    unresolved: t('motivePath.unresolved'), 'legacy-unknown': t('motivePath.legacy-unknown'),
+  } as const
+}
+
+function biographyNamedPerson(bio: Biography, id: string | undefined, kind: 'relationship' | 'rival', none: string): string {
+  if (!id) return none
+  const fromHistory = bio.turningPoints.find((entry) => kind === 'relationship'
+    ? entry.fact?.kind === 'relationship-choice' && entry.fact.relationshipId === id
+    : entry.fact?.kind === 'fight' && entry.fact.opponentId === id)?.people[0]
+  const fromBeat = bio.curatedBeats.find((beat) => kind === 'relationship' ? beat.kind === 'relationship' : beat.kind === 'rivalry')?.people[0]
+  return fromHistory ?? fromBeat ?? id
+}
+
+function unrealizedPathLabel(biography: Biography, labels: ReturnType<typeof motiveResolutionLabels>, t: (id: TranslationKey) => string): string {
+  const { outcome } = biography
+  if (outcome.unrealizedPath) return labels[outcome.unrealizedPath]
+  if (outcome.motiveResolution === 'conflicted') return t('biography.unrealizedConflicted')
+  return t('biography.unrealizedUnknown')
+}
+
+function BiographyOutcomeSummary({ biography }: { biography: Biography }) {
+  const { t, message } = useI18n()
+  const outcome = biography.outcome
+  const motiveLabels = motiveResolutionLabels(t)
+  const signatureMoves = outcome.signatureMoveIds.slice(0, 2).map((id) => {
+    const move = FIGHT_INTENTS.find((candidate) => candidate.id === id)
+    return localizedMoveName(id, move?.label ?? id, message)
+  })
+  const traits = outcome.traitIds.map((id) => {
+    const trait = traitDefinition(id)
+    return trait ? localizedTraitCopy(trait, message).name : t('combat.presentation.legacyText')
+  })
+  const titles = outcome.leagueTitles.map((league) => localizedLeagueLabel(league, t))
+  const reputationLabels: Record<string, string> = {
+    unknown: t('reputation.unknown'), 'local-prospect': t('reputation.local-prospect'),
+    'noted-contender': t('reputation.noted-contender'), 'headline-draw': t('reputation.headline-draw'),
+    'era-defining': t('reputation.era-defining'), 'legacy-unknown': t('biography.none'),
+  }
+  const financialLegacy = outcome.financialLegacy ?? biography.financialLegacy
+  return <section className="biography-outcome" aria-label={t('biography.outcomeTitle')}>
+    <SectionTitle title={t('biography.outcomeTitle')} subtitle={t('biography.outcomeHelp')} />
+    <dl>
+      <div><dt>{t('biography.motive')}</dt><dd>{motiveLabels[outcome.motiveResolution]}</dd></div>
+      <div><dt>{t('biography.unrealized')}</dt><dd>{unrealizedPathLabel(biography, motiveLabels, t)}</dd></div>
+      <div><dt>{t('biography.style')}</dt><dd>{outcome.styleBranches.length ? outcome.styleBranches.map((branch) => t(`branch.${branch}`)).join(' · ') : t('biography.none')}</dd></div>
+      <div><dt>{t('biography.signature')}</dt><dd>{signatureMoves.length ? signatureMoves.join(' · ') : t('biography.noSignature')}</dd></div>
+      <div><dt>{t('biography.traits')}</dt><dd>{traits.length ? traits.join(' · ') : t('biography.none')}</dd></div>
+      <div><dt>{t('biography.titles')}</dt><dd>{titles.length ? titles.join(' · ') : t('biography.noTitles')}</dd></div>
+      <div><dt>{t('biography.relationship')}</dt><dd>{biographyNamedPerson(biography, outcome.definingRelationshipId, 'relationship', t('biography.none'))}</dd></div>
+      <div><dt>{t('biography.rival')}</dt><dd>{biographyNamedPerson(biography, outcome.definingRivalId, 'rival', t('biography.none'))}</dd></div>
+      <div><dt>{t('biography.reputation')}</dt><dd>{reputationLabels[outcome.reputationBandId] ?? outcome.reputationBandId}</dd></div>
+      <div><dt>{t('biography.financial')}</dt><dd>{financialLegacy ? message(biography.financialLegacyRef, financialLegacy) : t('biography.none')}</dd></div>
+      <div><dt>{t('biography.retirement')}</dt><dd>{message(outcome.retirementCauseRef, outcome.retirementCause)}</dd></div>
+    </dl>
+  </section>
+}
+
+function BiographyComparison({ biographies }: { biographies: Biography[] }) {
+  const { t, message } = useI18n()
+  const [first, second] = biographies
+  const controlled = Boolean(first && second
+    && first.seed === second.seed
+    && first.rulesVersion === second.rulesVersion
+    && first.contentVersion === second.contentVersion
+    && exactSetupMatches(first.setup, second.setup))
+  const motiveLabels = motiveResolutionLabels(t)
+  const reputationLabels = {
+    unknown: t('reputation.unknown'), 'local-prospect': t('reputation.local-prospect'),
+    'noted-contender': t('reputation.noted-contender'), 'headline-draw': t('reputation.headline-draw'),
+    'era-defining': t('reputation.era-defining'), 'legacy-unknown': t('biography.none'),
+  } as const
+  return <section className="biography-comparison" aria-label={t('biography.comparison')}>
+    <header><span>{t('biography.comparisonKicker')}</span><h3>{t('biography.comparison')}</h3></header>
+    <p className={`comparison-validity ${controlled ? 'controlled' : 'warning'}`} role="status"><strong>{controlled ? t('biography.controlled') : t('biography.uncontrolled')}</strong><span>{controlled ? t('biography.controlledBody') : t('biography.uncontrolledBody')}</span></p>
+    <div>{biographies.map((bio) => {
+      const strongest = [...BRANCHES].sort((a, b) => bio.finalSkills[b] - bio.finalSkills[a]).slice(0, 2)
+      const outcome = (bio as Biography & { outcome?: Biography['outcome'] }).outcome
+      const signatureMoves = outcome?.signatureMoveIds?.map((id) => {
+        const move = FIGHT_INTENTS.find((candidate) => candidate.id === id)
+        return localizedMoveName(id, move?.label ?? id, message)
+      }).slice(0, 2)
+      const traits = outcome?.traitIds.map((id) => {
+        const trait = traitDefinition(id)
+        return trait ? localizedTraitCopy(trait, message).name : t('combat.presentation.legacyText')
+      })
+      return <article key={bio.id}><h4>{bio.name}</h4><span>{localizedBiographyRecord(bio, t)}</span><dl>
+        <div><dt>{t('biography.record')}</dt><dd>{localizedBiographyRecord(bio, t)}</dd></div>
+        <div><dt>{t('biography.style')}</dt><dd>{strongest.map((branch) => `${t(`branch.${branch}`)} Lv.${bio.finalSkills[branch]}`).join(' · ')}</dd></div>
+        <div><dt>{t('biography.skills')}</dt><dd>{BRANCHES.map((branch) => `${t(`branchShort.${branch}`)} ${bio.finalSkills[branch]}`).join(' · ')}</dd></div>
+        <div><dt>{t('biography.signature')}</dt><dd>{signatureMoves?.length ? signatureMoves.join(' · ') : t('biography.noSignature')}</dd></div>
+        <div><dt>{t('biography.titles')}</dt><dd>{bio.leagueTitles?.length ? bio.leagueTitles.map((league) => localizedLeagueLabel(league, t)).join(' · ') : t('biography.noTitles')}</dd></div>
+        <div><dt>{t('biography.retiredAt')}</dt><dd>{t('biography.ageValue', { age: bio.retiredAt })}</dd></div>
+        <div><dt>{t('biography.retirement')}</dt><dd>{outcome ? message(outcome.retirementCauseRef, outcome.retirementCause) : t('biography.none')}</dd></div>
+        <div><dt>{t('biography.motive')}</dt><dd>{outcome ? motiveLabels[outcome.motiveResolution] : t('biography.none')}</dd></div>
+        <div><dt>{t('biography.unrealized')}</dt><dd>{outcome ? unrealizedPathLabel(bio, motiveLabels, t) : t('biography.none')}</dd></div>
+        <div><dt>{t('biography.relationship')}</dt><dd>{biographyNamedPerson(bio, outcome?.definingRelationshipId, 'relationship', t('biography.none'))}</dd></div>
+        <div><dt>{t('biography.rival')}</dt><dd>{biographyNamedPerson(bio, outcome?.definingRivalId, 'rival', t('biography.none'))}</dd></div>
+        <div><dt>{t('biography.reputation')}</dt><dd>{outcome ? reputationLabels[outcome.reputationBandId as keyof typeof reputationLabels] ?? outcome.reputationBandId : t('biography.none')}</dd></div>
+        <div><dt>{t('biography.traits')}</dt><dd>{traits?.length ? traits.join(' · ') : t('biography.none')}</dd></div>
+        <div><dt>{t('biography.beats')}</dt><dd>{bio.curatedBeats.length ? bio.curatedBeats.map((beat) => message(beat.titleRef, beat.title)).join(' · ') : t('biography.none')}</dd></div>
+      </dl></article>
+    })}</div>
+  </section>
+}
+
+function exactSetupMatches(first: CareerSetupSnapshot, second: CareerSetupSnapshot): boolean {
+  if (first.kind !== 'exact' || second.kind !== 'exact') return false
+  return first.nameInput === second.nameInput
+    && (first.latinNameInput ?? '') === (second.latinNameInput ?? '')
+    && first.region === second.region
+    && first.motive === second.motive
+    && first.startingExperience === second.startingExperience
+    && first.combatMode === second.combatMode
+}
+
+function HallOfFame({ biographies, onDelete, onReplay }: { biographies: Biography[]; onDelete: (id: string) => void; onReplay: (biography: Biography) => void }) {
+  const { t, message } = useI18n()
+  const [comparisonIds, setComparisonIds] = useState<string[]>([])
+  const toggleComparison = (id: string) => setComparisonIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current.slice(-1), id])
+  const comparison = comparisonIds.map((id) => biographies.find((bio) => bio.id === id)).filter((bio): bio is Biography => Boolean(bio))
+  return <section className="hall"><SectionTitle title={t('biography.hallTitle')} subtitle={biographies.length ? t('biography.hallPopulated') : t('biography.hallEmpty')} />
+    {biographies.map((bio) => {
+      const selected = comparisonIds.includes(bio.id)
+      return <article key={bio.id} className={selected ? 'selected-for-comparison' : ''}>
+        <div className="hall-biography-copy"><strong>{bio.name}</strong><span>{t(`region.${bio.region}.label`)}{bio.hometown ? ` · ${bio.hometown}` : ''} · {localizedBiographyRecord(bio, t)} · {t('biography.ageValue', { age: bio.retiredAt })}</span><p>{message(bio.titleRef, bio.title)}</p></div>
+        <div className="hall-biography-actions"><button type="button" aria-pressed={selected} onClick={() => toggleComparison(bio.id)}>{selected ? t('biography.comparing') : t('biography.compare')}</button><button type="button" title={bio.setup.kind === 'legacy-partial' ? t('biography.legacyReplayReview') : undefined} onClick={() => onReplay(bio)}>{t('biography.replay')}</button><button type="button" className="delete-biography" onClick={() => onDelete(bio.id)}>{t('biography.delete')}</button></div>
+        <details><summary>{t('biography.viewHighlights')}</summary><BiographyHighlights biography={bio} compact /></details>
+      </article>
+    })}
+    {comparison.length === 1 && <p className="comparison-prompt" role="status">{t('biography.chooseSecond')}</p>}
+    {comparison.length === 2 && <BiographyComparison biographies={comparison} />}
+  </section>
 }
 
 function CageMark() {

@@ -54,3 +54,11 @@ export function randomSeed(): string {
   crypto.getRandomValues(bytes)
   return [...bytes].map((value) => value.toString(36).padStart(6, '0')).join('').slice(0, 10).toUpperCase()
 }
+
+/** Metadata identity only. This must never share or advance a gameplay RNG stream. */
+export function randomCareerId(): string {
+  if (typeof crypto.randomUUID === 'function') return `career-${crypto.randomUUID()}`
+  const bytes = new Uint32Array(4)
+  crypto.getRandomValues(bytes)
+  return `career-${[...bytes].map((value) => value.toString(36)).join('-')}`
+}

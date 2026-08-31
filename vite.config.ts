@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => ({
       manifest: false,
       includeAssets: ['cage-mark.svg'],
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,woff2,webmanifest}']
+        globPatterns: ['**/*.{js,css,html,svg,webp,woff2,webmanifest}']
       }
     })
   ],
@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => ({
   },
   test: {
     environment: 'jsdom',
-    setupFiles: ['./src/test-setup.ts']
+    setupFiles: ['./src/test-setup.ts'],
+    include: ['tests/**/*.test.{ts,tsx}']
   }
 }))

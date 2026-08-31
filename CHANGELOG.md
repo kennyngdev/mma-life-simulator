@@ -6,6 +6,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- Added authored emergency actions for all 19 combat positions, guaranteed background identity moves, semantic move threats and counters, and one localized exchange-factor ledger shared by odds, resolution, coaching, UI, and narration.
+- Added body-specific long-term health tiers, symmetric contextual trait execution, prepared-move focus, post-loss rebuild lessons, and truthful post-fight career-change summaries.
+- Added accessible challenge preflight, pointer and keyboard controls, one optional edge challenge per camp, and full reward ceilings for relaxed and reduced-motion play.
+- Added two interactive beats and optional career opportunities for every motive, explicit relationship tests and follow-ups, semantic career facts, and bounded rival adaptation memory.
+- Added curated evidence-based retirement biographies, cryptographic career IDs, archive-safe same-seed replay groups, and controlled-comparison validation across setup and content/rules versions.
+- Added reproducible opponent aging, draws, non-ranking record bouts, deterministic retirements and in-place successors, plus up to three prioritized annual world-news items.
+- Added Playwright desktop and 320 px browser coverage as a required GitHub Pages deployment check.
+- Added an explicit five-player causal-retelling gate that must pass before the v0.5.0 build can be deployed to production.
+
+### Changed
+
+- Reworked Grassroots into a fixed three-opponent trial: only defeating all three advances to Amateur, defeated opponents disappear from offers, and the screen shows persistent checklist progress.
+- Removed the repeated generic coach speech from every offer cycle; each contract now relies on its localized, opponent-specific risk, strength, and weakness verdict.
+- Rebalanced competitive rating to reward the two strongest skills, Fight IQ, and learned defensive coverage, keeping defensively literate specialists viable without enabling an untrained one-discipline champion.
+- Replaced the mandatory post-camp event with contextual priority scheduling and removed automatic fight-result trust gains; coach, family, and training-partner trust now affect technique, recovery, and film study through remembered shared decisions.
+- Removed promoter trust and limited reputation to qualitative public-legacy, motive, sponsorship, biography, and replay effects without combat, ranking, title, or base-purse power.
+- Rebased stage purses to `1,000 / 4,000 / 12,000 / 30,000 / 75,000 / 100,000`, made title bonus one stage base, and applied regional multipliers consistently without fight-count purse inflation.
+- Updated new opponent generation with plausible age/record distributions and exact Hong Kong, Taiwan, and Mainland identity mixes while preserving player-caused rank order.
+- Upgraded saves to schema 16, rules 0.26.0, content 1.7.0, and biographies to schema 2 while preserving active saves, offers, histories, and already-started fights under their saved combat rules.
+
+### Fixed
+
+- Restored visible color commentary after each exchange in both manual and coach-guided combat instead of hiding it inside collapsed detail or omitting it from the coach feed.
+- Kept coach-guided combat strictly one-click-per-exchange with no autoplay or double dispatch, stateful progress labels, preserved reading position, and a sticky Continue action.
+- Returned manual combat to the cage graphic after every resolved move so the visual outcome is visible before the next decision.
+- Converted every arena, position, and action raster from multi-megabyte PNGs to visually equivalent WebP files and added them to the PWA cache, cutting their combined payload by roughly 81%.
+- Normalized action-sprite geometry to its native aspect ratio and reduced its cage footprint while preserving the established floor line.
+- Added a truthful triangle-armbar-from-bottom action sprite for clean triangle and guard-armbar attempts, and gave both attacking and defending submission minigames 15% more completion time.
+- Fixed 320 px combat scrolling, safe-area action placement, manual exchange anchors, collapsible prior narration, creation radio semantics, event projections, and changed-value-only result reporting.
+- Moved touched player-facing surfaces to explicit Traditional Chinese and English message IDs while retaining the browser-tab PWA prompt and standalone-mode suppression.
+
 ## [0.4.2] - 2026-08-31
 
 ### Fixed

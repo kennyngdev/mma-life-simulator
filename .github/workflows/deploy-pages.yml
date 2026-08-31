@@ -31,6 +31,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run unit and simulation tests
+        run: npm test
+
+      - name: Run browser tests
+        run: npm run test:e2e
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 

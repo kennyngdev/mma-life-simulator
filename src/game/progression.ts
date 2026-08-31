@@ -2,8 +2,13 @@ import { FIGHT_INTENTS } from './fight-content'
 import type {
   Branch,
   CareerEvidence,
+  ExchangeFactor,
+  ExchangeFactorSide,
   FighterState,
+  FightDamagePart,
   FightMoveDefinition,
+  FightOutcome,
+  Initiative,
   OwnedTrait,
   Position,
   RngStreams,
@@ -15,6 +20,11 @@ import type {
 import { draw, drawInt, pick } from './rng'
 
 export const BRANCHES: Branch[] = ['boxing', 'kicking', 'clinch', 'wrestling', 'ground']
+const DEFENSIVE_GROUND_POSITIONS = new Set<Position>(['bottom', 'mount-defense', 'back-defense', 'front-headlock-defense'])
+const DEFENSIVE_GRAPPLING_POSITIONS = new Set<Position>([
+  'cage-defense', 'thai-clinch-defense', 'body-lock-defense', 'front-headlock-defense',
+  'bottom', 'mount-defense', 'back-defense',
+])
 export const SKILL_XP_THRESHOLDS = [0, 100, 300, 600, 1_000, 1_500] as const
 export const SKILL_RATINGS = [10, 30, 50, 68, 84, 96] as const
 export const SKILL_STRENGTH_LABELS = ['未受訓', '初學', '中階', '熟練', '進階', '大師'] as const
@@ -60,10 +70,14 @@ export function aptitudeLabel(aptitude: number): string {
   return '正常成長'
 }
 
-// Safety comes from `availableMoves`' position-specific fallback, not from a
-// hidden universal moveset.  Otherwise a Normie could use real techniques
-// they had never learned and their small opening toolkit would be cosmetic.
-export const UNIVERSAL_MOVE_IDS = new Set<string>()
+// Universal access is restricted to deliberately weak, visibly authored
+// emergency actions. Ordinary techniques are never promoted into hidden
+// fallbacks merely because a save has an incomplete moveset.
+export const UNIVERSAL_MOVE_IDS = new Set(FIGHT_INTENTS.filter((move) => move.emergency).map((move) => move.id))
+
+export function isEmergencyMove(move: Pick<FightMoveDefinition, 'emergency'>): boolean {
+  return move.emergency === true
+}
 
 /** The complete level-one toolkit awarded when a beginner first reaches 100 XP in a branch. */
 export const FOUNDATION_MOVE_IDS: Record<Branch, readonly [string, string, string]> = {
@@ -83,8 +97,29 @@ export const NORMIE_DEFAULT_MOVE_IDS: Record<Branch, readonly [string, string]> 
   ground: ['safe-bottom', 'wall-walk'],
 }
 
+/** Each seeded martial-arts background must visibly own its defining action. */
+export const BACKGROUND_IDENTITY_MOVE_IDS = {
+  boxing: 'jab-cross',
+  sanda: 'catch-kick-sweep',
+  'muay-thai': 'clinch-short-knee',
+  wrestling: 'shot-entry',
+  judo: 'clinch-throw',
+  bjj: 'guard-kimura',
+} as const
+
+export type BackgroundIdentityId = keyof typeof BACKGROUND_IDENTITY_MOVE_IDS
+
+export function backgroundIdentityMoveId(backgroundId: string): string | undefined {
+  return BACKGROUND_IDENTITY_MOVE_IDS[backgroundId as BackgroundIdentityId]
+}
+
+export function requiredBackgroundIdentityMoves(backgroundId: string): string[] {
+  const moveId = backgroundIdentityMoveId(backgroundId)
+  return moveId ? [moveId] : []
+}
+
 export function minimumMoveLevel(move: FightMoveDefinition): SkillLevel {
-  if (UNIVERSAL_MOVE_IDS.has(move.id)) return 0
+  if (isEmergencyMove(move)) return 0
   if (move.minimumLevel !== undefined) return move.minimumLevel
   if (move.submission || move.effects.finishPressure >= 18 || move.effects.control >= 15) return 5
   if (move.effects.finishPressure >= 14 || move.effects.control >= 12 || move.effects.headDamage >= 15) return 4
@@ -93,8 +128,13 @@ export function minimumMoveLevel(move: FightMoveDefinition): SkillLevel {
   return 1
 }
 
+const TRAINABLE_MOVES_BY_BRANCH = Object.fromEntries(BRANCHES.map((branch) => [
+  branch,
+  FIGHT_INTENTS.filter((move) => move.branch === branch && !isEmergencyMove(move)),
+])) as Record<Branch, FightMoveDefinition[]>
+
 export function movesForBranch(branch: Branch, level: SkillLevel): FightMoveDefinition[] {
-  return FIGHT_INTENTS.filter((move) => move.branch === branch && minimumMoveLevel(move) <= level && !UNIVERSAL_MOVE_IDS.has(move.id))
+  return TRAINABLE_MOVES_BY_BRANCH[branch].filter((move) => minimumMoveLevel(move) <= level)
 }
 
 export function startingMoves(branch: Branch, level: SkillLevel, count: number): string[] {
@@ -114,13 +154,45 @@ export function startingMoves(branch: Branch, level: SkillLevel, count: number):
 export function availableMoves(fighter: Pick<FighterState, 'learnedMoves'>, position: Position): FightMoveDefinition[] {
   const known = new Set(fighter.learnedMoves)
   const legal = FIGHT_INTENTS.filter((move) => move.positions.includes(position))
-  const available = legal.filter((move) => UNIVERSAL_MOVE_IDS.has(move.id) || known.has(move.id))
+  const available = legal.filter((move) => !isEmergencyMove(move) && known.has(move.id))
   if (available.length >= 2) return available
   const emergency = legal
-    .filter((move) => move.defensive || move.category === 'transition')
+    .filter(isEmergencyMove)
     .sort((a, b) => a.effects.staminaCost - b.effects.staminaCost || a.id.localeCompare(b.id))
-    .slice(0, 2)
+    .slice(0, 2 - available.length)
   return [...new Map([...available, ...emergency].map((move) => [move.id, move])).values()]
+}
+
+export interface DefensiveLiteracyRatingInput {
+  technique: Record<Branch, number>
+  mind: number
+  skills: Record<Branch, SkillProgress>
+  learnedMoves: readonly string[]
+}
+
+/**
+ * Branch coverage stays partly tied to execution skill, while learned defense
+ * and transition answers prove that the fighter can survive MMA's other
+ * phases. Emergency actions never satisfy either literacy credit.
+ */
+export function defensiveCoverageForBranch(input: DefensiveLiteracyRatingInput, branch: Branch): number {
+  const branchMoves = TRAINABLE_MOVES_BY_BRANCH[branch]
+  const known = new Set(input.learnedMoves)
+  const trained = skillLevel(input.skills[branch]?.xp ?? 0) >= 1
+  const hasDefense = trained && branchMoves.some((move) => move.category === 'defense' && known.has(move.id))
+  const hasTransition = trained && branchMoves.some((move) => move.category === 'transition' && known.has(move.id))
+  return input.technique[branch] * 0.4 + (hasDefense ? 30 : 0) + (hasTransition ? 30 : 0)
+}
+
+export function averageDefensiveCoverage(input: DefensiveLiteracyRatingInput): number {
+  return BRANCHES.reduce((sum, branch) => sum + defensiveCoverageForBranch(input, branch), 0) / BRANCHES.length
+}
+
+/** Canonical competitive rating with move-proven defensive literacy. */
+export function competitiveRatingWithDefensiveLiteracy(input: DefensiveLiteracyRatingInput): number {
+  const [strongest, second] = BRANCHES.map((branch) => input.technique[branch]).sort((a, b) => b - a)
+  const rating = strongest * 0.45 + second * 0.2 + input.mind * 0.2 + averageDefensiveCoverage(input) * 0.15
+  return Math.max(0, Math.min(100, Math.round(rating)))
 }
 
 export function makeSkillProgress(aptitudes: Partial<Record<Branch, number>> = {}): Record<Branch, SkillProgress> {
@@ -195,6 +267,218 @@ export function traitModifier(traits: OwnedTrait[], modifier: TraitModifier): nu
     return sum + (trait?.modifier === modifier ? trait.amount : 0)
   }, 0)
   return Math.max(-50, Math.min(50, total))
+}
+
+export type TraitEvaluationSide = Exclude<ExchangeFactorSide, 'both'>
+export type TraitEvaluationPhase = 'exchange' | 'round-recovery'
+
+export interface TraitEvaluationContext {
+  /** The trait owner's side; all initiative and outcome checks are relative to it. */
+  side: TraitEvaluationSide
+  phase: TraitEvaluationPhase
+  round: number
+  position?: Position
+  move?: Pick<FightMoveDefinition,
+    'id' | 'branch' | 'category' | 'defensive' | 'submission' | 'strikeKind' | 'commitment' | 'effects' | 'threatTags' | 'counterTags'
+  >
+  /** The opposing action, used for defensive traits such as Iron Chin. */
+  incomingMove?: Pick<FightMoveDefinition, 'effects' | 'strikeKind' | 'threatTags'>
+  incomingTarget?: FightDamagePart
+  /** Outcome from the trait owner's perspective. */
+  outcome?: FightOutcome
+  initiative?: Initiative
+  openingRoundLost?: boolean
+  critical?: boolean
+  exploitsOpening?: boolean
+  /** Raw trait IDs already consumed for this side in the current round. */
+  activatedTraitIds?: readonly string[]
+}
+
+function traitFactor(
+  traitId: string,
+  effectId: string,
+  target: ExchangeFactor['target'],
+  side: TraitEvaluationSide,
+  magnitude: number,
+  unit: ExchangeFactor['unit'],
+  zhHant: string,
+  en: string,
+  threatTags?: FightMoveDefinition['threatTags'],
+): ExchangeFactor {
+  return {
+    id: `trait:${traitId}:${effectId}:${side}`,
+    target,
+    source: 'trait',
+    side,
+    magnitude,
+    unit,
+    reasonId: `trait.${traitId}.${effectId}`,
+    localizedReason: { 'zh-Hant': zhHant, en },
+    label: traitDefinition(traitId)?.name,
+    threatTags,
+  }
+}
+
+function ownsTrait(traits: readonly OwnedTrait[], traitId: string): boolean {
+  return traits.some((owned) => owned.id === traitId)
+}
+
+function isDefensiveAction(move: TraitEvaluationContext['move']): boolean {
+  return Boolean(move && (move.category === 'defense' || move.defensive))
+}
+
+/**
+ * Resolve only the trait factors whose authored conditions are true in this
+ * context. The function is pure and side-symmetric: opponent evaluation uses
+ * the same rules with `side: 'opponent'` and a side-relative outcome.
+ * Growth-only traits remain handled by `traitModifier` because they never
+ * alter an exchange or round recovery.
+ */
+export function contextualTraitFactors(
+  traits: readonly OwnedTrait[],
+  context: TraitEvaluationContext,
+): ExchangeFactor[] {
+  const factors: ExchangeFactor[] = []
+  const { move, side } = context
+  const moveThreats = move?.threatTags
+  const opponentSide: TraitEvaluationSide = side === 'player' ? 'opponent' : 'player'
+  const opponentHasInitiative = context.initiative === opponentSide
+  const selfHasInitiative = context.initiative === side
+  const defensive = isDefensiveAction(move)
+  const defensiveGround = Boolean(context.position && DEFENSIVE_GROUND_POSITIONS.has(context.position))
+  const add = (
+    traitId: string,
+    effectId: string,
+    target: ExchangeFactor['target'],
+    magnitude: number,
+    unit: ExchangeFactor['unit'],
+    zhHant: string,
+    en: string,
+  ) => factors.push(traitFactor(traitId, effectId, target, side, magnitude, unit, zhHant, en, moveThreats))
+
+  if (context.phase === 'round-recovery') {
+    if (ownsTrait(traits, 'steady-breath')) add('steady-breath', 'round-recovery', 'recovery', 8, 'percent', '穩定呼吸：回合恢復 +8%', 'Steady Breath: +8% round recovery')
+    if (ownsTrait(traits, 'decision-craft')) add('decision-craft', 'round-recovery', 'recovery', 10, 'percent', '判定工匠：回合恢復 +10%', 'Decision Craft: +10% round recovery')
+    return factors
+  }
+
+  if (!move) return factors
+
+  if (ownsTrait(traits, 'long-frame')) {
+    if (context.position === 'range') add('long-frame', 'range', 'chance', 8, 'points', '長臂架勢：遠距成功率 +8', 'Long Frame: +8 chance at range')
+    if (context.position === 'pocket' && move.branch === 'boxing') add('long-frame', 'pocket-tradeoff', 'chance', -5, 'points', '長臂架勢：近身拳擊成功率 -5', 'Long Frame: -5 chance for pocket boxing')
+  }
+  if (ownsTrait(traits, 'compact-frame')) {
+    if (context.position === 'pocket') add('compact-frame', 'pocket', 'chance', 8, 'points', '緊湊骨架：近身成功率 +8', 'Compact Frame: +8 chance in the pocket')
+    if (context.position === 'range') add('compact-frame', 'range-tradeoff', 'chance', -5, 'points', '緊湊骨架：遠距成功率 -5', 'Compact Frame: -5 chance at range')
+  }
+
+  if (ownsTrait(traits, 'heavy-hands') && move.strikeKind === 'punch' && move.category === 'offense') {
+    add('heavy-hands', 'punch-damage', 'damage', 15, 'percent', '重手：拳擊傷害 +15%', 'Heavy Hands: +15% punch damage')
+    add('heavy-hands', 'punch-stamina-tradeoff', 'stamina', 5, 'percent', '重手：拳擊體力消耗 +5%', 'Heavy Hands: +5% punch stamina cost')
+  }
+  if (ownsTrait(traits, 'iron-chin') && context.incomingTarget === 'head' && (context.incomingMove?.effects.finishPressure ?? 0) > 0) {
+    // Exchange-factor `side` always names the actor whose value changes. Iron
+    // Chin belongs to `side`, but it modifies the opposing actor's outgoing
+    // finish pressure; tagging the owner here would also weaken their offense.
+    factors.push(traitFactor(
+      'iron-chin', 'head-finish-defense', 'finish-pressure', opponentSide, -15, 'percent',
+      '鐵下巴：承受的頭部終結壓力 -15%', 'Iron Chin: -15% incoming head finish pressure', context.incomingMove?.threatTags,
+    ))
+  }
+  if (ownsTrait(traits, 'deep-tank') && context.round >= 2) {
+    add('deep-tank', 'late-round-stamina', 'stamina', -15, 'percent', '深水體能：第二回合起體力消耗 -15%', 'Deep Tank: -15% stamina cost from round two')
+  }
+  if (ownsTrait(traits, 'scrambler') && move.category === 'transition'
+    && (context.position === 'scramble' || Boolean(context.position && DEFENSIVE_GRAPPLING_POSITIONS.has(context.position)))) {
+    add('scrambler', 'defensive-transition', 'chance', 15, 'points', '混戰本能：混戰或防守位置轉位成功率 +15', 'Scrambler: +15 chance on scramble or defensive transitions')
+  }
+  if (ownsTrait(traits, 'counter-fighter')) {
+    if (opponentHasInitiative && (defensive || move.counterTags.length > 0)) {
+      add('counter-fighter', 'counter-window', 'chance', 25, 'points', '迎擊獵人：對手主動時防守或反擊 +25', 'Counter Fighter: +25 chance when answering opponent initiative')
+    }
+    if (selfHasInitiative && move.category === 'offense') {
+      add('counter-fighter', 'pursuit-tradeoff', 'chance', -10, 'points', '迎擊獵人：主動追擊成功率 -10', 'Counter Fighter: -10 chance while actively pursuing')
+    }
+  }
+  if (ownsTrait(traits, 'submission-sense') && move.submission) {
+    if (context.exploitsOpening) add('submission-sense', 'opening-finish', 'finish-pressure', 25, 'percent', '關節直覺：利用破綻時降服壓力 +25%', 'Submission Sense: +25% submission pressure when exploiting an opening')
+    if (context.outcome === 'contested' || context.outcome === 'countered') {
+      add('submission-sense', 'failed-stamina-tradeoff', 'stamina', 25, 'percent', '關節直覺：失敗降服額外消耗 25% 基礎體力（至少 2）', 'Submission Sense: failed submission costs 25% extra base stamina (minimum 2)')
+    }
+  }
+  const oneShotAvailable = ownsTrait(traits, 'one-shot-power')
+    && move.commitment === 'committed'
+    && !context.activatedTraitIds?.includes('one-shot-power')
+  if (oneShotAvailable) {
+    add('one-shot-power', 'first-committed-finish', 'finish-pressure', 35, 'percent', '一擊天賦：本回合第一次全力重擊終結壓力 +35%', 'One-Shot Power: +35% finish pressure on the first committed strike this round')
+    if (context.outcome === 'countered') add('one-shot-power', 'whiff-stamina-tradeoff', 'stamina', 20, 'percent', '一擊天賦：揮空時體力消耗 +20%', 'One-Shot Power: +20% stamina cost on a whiff')
+  }
+  if (ownsTrait(traits, 'born-survivor') && context.critical && defensive) {
+    add('born-survivor', 'critical-defense', 'chance', 35, 'points', '絕境生還：危急狀態防守成功率 +35', 'Born Survivor: +35 defensive chance while critical')
+  }
+
+  if (ownsTrait(traits, 'power-puncher') && move.strikeKind === 'punch' && move.category === 'offense') {
+    add('power-puncher', 'punch-damage', 'damage', 20, 'percent', '重拳終結者：拳擊傷害 +20%', 'Power Puncher: +20% punch damage')
+    add('power-puncher', 'punch-finish', 'finish-pressure', 20, 'percent', '重拳終結者：拳擊終結壓力 +20%', 'Power Puncher: +20% punch finish pressure')
+  }
+  if (ownsTrait(traits, 'high-kick-artist') && move.strikeKind === 'kick' && move.category === 'offense') {
+    add('high-kick-artist', 'kick-damage', 'damage', 20, 'percent', '高踢獵手：踢擊傷害 +20%', 'High-Kick Artist: +20% kick damage')
+    add('high-kick-artist', 'kick-finish', 'finish-pressure', 20, 'percent', '高踢獵手：踢擊終結壓力 +20%', 'High-Kick Artist: +20% kick finish pressure')
+  }
+  if (ownsTrait(traits, 'submission-hunter') && move.submission) {
+    add('submission-hunter', 'submission-finish', 'finish-pressure', 20, 'percent', '降服獵人：降服壓力 +20%', 'Submission Hunter: +20% submission pressure')
+  }
+  if (ownsTrait(traits, 'escape-artist') && defensiveGround && (defensive || move.category === 'transition')) {
+    add('escape-artist', 'ground-escape', 'chance', 15, 'points', '脫困專家：不利地面防守與轉位 +15', 'Escape Artist: +15 chance on defensive ground actions')
+  }
+  if (ownsTrait(traits, 'comeback-fighter') && context.openingRoundLost && context.round > 1) {
+    add('comeback-fighter', 'after-lost-opening', 'chance', 20, 'points', '逆轉鬥士：首回合落後後成功率 +20', 'Comeback Fighter: +20 chance after losing round one')
+  }
+  if (ownsTrait(traits, 'iron-will') && context.critical && defensive) {
+    add('iron-will', 'critical-defense', 'chance', 20, 'points', '鋼鐵意志：危急狀態防守 +20', 'Iron Will: +20 defensive chance while critical')
+  }
+  if (ownsTrait(traits, 'cage-general') && context.position
+    && ['cage', 'cage-control', 'cage-defense'].includes(context.position) && move.effects.control > 0) {
+    add('cage-general', 'cage-control', 'control', 15, 'percent', '籠邊統治者：籠邊控制效果 +15%', 'Cage General: +15% cage-control effect')
+  }
+  if (ownsTrait(traits, 'chain-wrestler') && move.category === 'transition') {
+    add('chain-wrestler', 'transition', 'chance', 15, 'points', '連鎖摔手：轉位成功率 +15', 'Chain Wrestler: +15 transition chance')
+  }
+  if (ownsTrait(traits, 'knockdown-instinct') && move.commitment === 'committed') {
+    add('knockdown-instinct', 'committed-finish', 'finish-pressure', 12, 'percent', '擊倒嗅覺：高承諾動作終結壓力 +12%', 'Knockdown Instinct: +12% committed-move finish pressure')
+  }
+  if (ownsTrait(traits, 'finishing-rhythm') && move.commitment === 'committed') {
+    add('finishing-rhythm', 'committed-finish', 'finish-pressure', 10, 'percent', '終結節奏：高承諾動作終結壓力 +10%', 'Finishing Rhythm: +10% committed-move finish pressure')
+  }
+  if (ownsTrait(traits, 'winning-routine')) {
+    add('winning-routine', 'stamina-efficiency', 'stamina', -8, 'percent', '勝者日常：動作體力消耗 -8%', 'Winning Routine: -8% action stamina cost')
+  }
+  if (ownsTrait(traits, 'deep-water-survivor') && context.critical && defensive) {
+    add('deep-water-survivor', 'critical-defense', 'chance', 10, 'points', '深水生還者：危急狀態防守 +10', 'Deep-Water Survivor: +10 defensive chance while critical')
+  }
+
+  return factors
+}
+
+/** IDs a caller should record after committing the evaluated exchange. */
+export function roundTraitActivationsForFactors(factors: readonly ExchangeFactor[]): string[] {
+  return factors.some((factor) => factor.reasonId === 'trait.one-shot-power.first-committed-finish') ? ['one-shot-power'] : []
+}
+
+/**
+ * Convert percentage trait factors into stamina points. Submission Sense is
+ * the sole authored minimum: its failed-attempt surcharge is never below two.
+ */
+export function traitStaminaDelta(baseCost: number, factors: readonly ExchangeFactor[]): number {
+  return factors
+    .filter((factor) => factor.source === 'trait' && factor.target === 'stamina')
+    .reduce((sum, factor) => {
+      if (factor.reasonId === 'trait.submission-sense.failed-stamina-tradeoff') {
+        return sum + Math.max(2, Math.round(baseCost * factor.magnitude / 100))
+      }
+      return sum + baseCost * factor.magnitude / 100
+    }, 0)
 }
 
 export function earnedTraitProgress(evidence: CareerEvidence, owned: OwnedTrait[]) {
