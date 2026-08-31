@@ -206,10 +206,12 @@ export default function App() {
   useLayoutEffect(() => {
     const container = gameScroll.current
     if (!container || !game) return
-    const sameCriticalScreen = previousPhase.current === 'critical' && game.phase === 'critical'
+    const samePhase = previousPhase.current === game.phase
     previousPhase.current = game.phase
 
-    if (sameCriticalScreen) {
+    if (samePhase && game.phase === 'training-reward') return
+
+    if (samePhase && game.phase === 'critical') {
       if (game.combatMode === 'manual') {
         const anchor = container.querySelector<HTMLElement>('[data-combat-arena-anchor]')
         if (anchor) {

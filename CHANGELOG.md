@@ -6,9 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-01
+
 ### Fixed
 
 - Allowed the deterministic full-career and large balance simulations enough time to complete on slower CI runners without weakening their assertions.
+- Kept the move-learning list stationary when selecting a card, preventing an iOS tap on a lower move from being retargeted to another choice after an automatic scroll reset.
 
 ## [0.5.0] - 2026-08-31
 

@@ -854,6 +854,31 @@ describe('生涯重置', () => {
     })
   })
 
+  it('選擇較下方的招式時不重設捲動位置或誤選其他招式', async () => {
+    const game = createNewRun(input)
+    game.phase = 'training-reward'
+    game.trainingMoveBranch = 'wrestling'
+    game.trainingMoveChoices = ['shot-entry', 'level-change', 'body-lock-whizzer', 'collar-tie-club']
+    game.trainingMoveSelections = []
+    game.trainingMoveRequired = 1
+    game.fighter.learnedMoves = game.fighter.learnedMoves.filter((moveId) => !game.trainingMoveChoices!.includes(moveId))
+    storage.loadGame.mockResolvedValue({ game })
+
+    render(<App />)
+
+    const fourthMove = await screen.findByRole('button', { name: /領帶拍頭肩撞/ })
+    const otherMove = screen.getByRole('button', { name: /抱摔切入/ })
+    const gameScroll = document.querySelector<HTMLElement>('.game-scroll')!
+    gameScroll.scrollTop = 600
+
+    fireEvent.click(fourthMove)
+
+    expect(gameScroll.scrollTop).toBe(600)
+    expect(fourthMove).toHaveAttribute('aria-pressed', 'true')
+    expect(otherMove).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('status')).toHaveTextContent('已選 1／1 招')
+  })
+
   it('沒有新特質或進度時跳過實戰成果畫面', async () => {
     const game = createNewRun(input)
     game.phase = 'growth'
